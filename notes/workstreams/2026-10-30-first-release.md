@@ -3,7 +3,7 @@
 **Utility:** retains authorized release scope, checkpoints and recovery information.  
 **Usage:** read before resuming; publishing is authorized only to the private sowapps/agent-relay repository for v1.0.0-rc.1.
 
-**State:** active.  
+**State:** completed and remotely verified.  
 **Objective:** prepare reusable version/package/publication tooling; test the Windows x64 archive independently of the checkout/private SDK; initialize/review source control if absent; create private sowapps/agent-relay and publish tested prerelease v1.0.0-rc.1 with archive/checksums/source. Preserve live relay scope and existing configurations. No global software/install/startup change, no paid agent or WSL task.
 
 Authorization: Florent accepted private sowapps/agent-relay and v1.0.0-rc.1 and said « GO pour préparer le script, tester l’archive et publier la release. Enchaîne et documente. » Creation, source push/tag and release upload are included. Only missing authentication/organization authority requires human action.
@@ -33,3 +33,11 @@ Next: finish internal capture/inspect and record exact-archive visual result; en
 ## Ready for source commit and publication
 
 Exact archive online internal rendering passed. Initial render completed after the short-lived visual test host expired, so it correctly showed unavailable; not treated as healthy proof. Retried with the owned host alive for the whole capture, terminated in finally: render-online shows both test projects and green relay; general image visually inspected. visual-verification.json matches the exact ZIP SHA. No desktop access is needed; external ComputerUse approval expired and no capture from that tool is claimed. Application runtime/MCP independence and actual controls from the archive were tested separately. All test hosts stopped; production scope unchanged.
+
+## Completion10:06Europe/Paris
+
+Published https://github.com/Sowapps/agent-relay/releases/tag/v1.0.0-rc.1 in the confirmed private repository. Source commit/tag317269bd286fb0499f1b2dfb5b0671b25d040ef2. Audited318staged source files: no local data, credentials, IDE/MCP configuration, SDK/cache/bin/obj; no token/private-key pattern. Git whitespace check accepts intentional Markdown breaks and preexisting terminal blank lines without changing qualified package source. Source/tag pushed without force; release is published prerelease, not draft, with ZIP and SHA256SUMS.txt.
+
+Retried download from GitHub into remote-verification and confirmed byte SHA256 equals qualified ZIP6ee55d778cdcd5acf78d36dc0193d33c8622061bcb553fa9ffa9355d4ebb1fdf;51965779bytes (about52MB decimal),128154686expandedbytes. publication-verification.json records actual asset/privacy/tag checks. No installation/global config/WSL/model. Existing live user relay not replaced. No human action needed for GitHub; earlier external ComputerUse app permission was not used and no desktop-control permission is required for the internal renderer.
+
+Scoped manual objective complete. Approximately94minutes wall clock (07:32:56→09:06UTC), shared quota45→45percent as displayed/rounded account-wide; no precise per-task token counter available because historical blocked goal occupies the API slot, no reset used. This duration includes the external capture authorization timeout and independent packaging diagnostics; it is not CPU/test duration. Report is an observation awaiting operator validation. A following documentation-only commit records the publication; immutable release tag stays on317269b. No next workstream inferred.

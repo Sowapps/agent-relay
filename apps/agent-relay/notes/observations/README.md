@@ -5,6 +5,8 @@
 
 ## Reports
 
+- [First private release qualification](2026-10-30-first-release.md): autonomous RC1 archive, scoped MCP, internal visual checks and verified private GitHub assets.
+
 - [Documentation deployment and MCP reads](2026-10-30-docs-deployment.md): existing-scope update, four public resources through the configured launcher, preserved records and old-facade boundary.
 
 - [Bootstrap documentation qualification](2026-10-30-bootstrap-docs.md): no-context preparation/project/MCP/UI guide, reviewable additive example and isolated verification.
