@@ -1,5 +1,7 @@
 # Agent Relay
 
+[Français — démarrer avec Agent Relay](README.fr.md)
+
 **Utility:** connects agents working across Windows and Linux, with shared project activity and history.  
 **Usage:** start with your usual agent; follow exchanges and investigate problems in the Windows application.
 
