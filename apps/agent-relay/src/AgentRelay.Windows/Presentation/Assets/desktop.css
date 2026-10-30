@@ -1,0 +1,33 @@
+/* Native window chrome is owned by C#. The reviewed app-shell fills its client area. */
+html,body{width:100%;height:100%;overflow:hidden}
+.app-window{position:fixed;inset:0;width:100vw;height:100vh;min-width:0;min-height:0;max-width:none;border:0;border-radius:0;box-shadow:none;resize:none}
+.app-shell{height:100%}
+.app-nav{overflow-y:auto;scrollbar-width:thin}
+.nav-bottom{flex-shrink:0}
+.detail-body{overscroll-behavior:contain}
+.detail-panel{overscroll-behavior:contain}
+.detail-head h2{overflow-wrap:anywhere}
+.app-modal-backdrop{position:fixed;inset:0;background:#15294445;z-index:40;display:grid;place-items:center;padding:24px}
+.app-modal-card{background:white;border-radius:14px;box-shadow:var(--shadow);width:440px;max-width:100%;padding:24px}
+.app-modal-card h2{margin-bottom:16px}
+.app-modal-card input{width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;margin:8px 0 18px}
+.app-modal-card .actions{display:flex;justify-content:flex-end;gap:8px}
+.modal-description{font-size:12px;color:var(--muted);margin-bottom:12px}
+.desktop-advanced{margin-top:18px}
+.desktop-advanced .btn{margin:8px 8px 0 0}
+
+.attention-box>div:first-of-type{flex:1;min-width:0}
+.attention-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.attention-actions .btn{margin-left:0}
+.attention-actions .attention-dismiss{color:var(--ink);flex:0 0 32px}
+.attention-actions .attention-dismiss:hover{background:var(--warning-soft)}
+
+/* Every interactive surface has a perceptible hover without layout movement. */
+button:not(:disabled):hover,a[href]:hover,summary:hover,select:not(:disabled):hover{filter:brightness(.93);box-shadow:inset 0 0 0 1px #315eff66}
+.segmented button:not(:disabled):hover,.tabs button:not(:disabled):hover,.nav-button:not(:disabled):hover{background:#dce7ff;color:#163caa;box-shadow:inset 0 0 0 1px #96b1f5}
+.segmented button.active:hover,.tabs button.active:hover,.nav-button.active:hover{background:#c8daff;color:#12348f}
+.history-count{line-height:1.6}.history-controls{margin-bottom:14px}
+.conversation-context{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:14px 0}.conversation-context code{font-size:11px;overflow-wrap:anywhere}
+.conversation-thread{display:flex;flex-direction:column;gap:14px}.conversation-entry{background:#fff;border:1px solid var(--border);border-radius:10px;padding:16px;max-width:95%;align-self:flex-start;min-width:0;width:90%}.conversation-entry.outgoing{background:#eff4ff;align-self:flex-end;border-color:#d0defa}.conversation-entry header{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}.conversation-entry time,.conversation-entry small{font-size:11px;color:#67768d}.conversation-entry small{display:block;margin:6px 0}.conversation-entry p{white-space:pre-wrap;overflow-wrap:anywhere;margin:12px 0;line-height:1.7}.conversation-entry .btn{margin-top:8px}.conversation-entry .badge{margin-bottom:3px}#toast .btn{margin-left:12px;color:white;border-color:#b6c8ee}#toast{max-width:calc(100% - 32px)}
+.session-card .actions{display:flex;gap:8px;flex-wrap:wrap}.session-card>div:first-of-type{min-width:0;flex:1}.session-card h3{overflow-wrap:anywhere}
+@media(max-width:980px){.session-card{flex-wrap:wrap}.conversation-entry{width:100%;max-width:100%}}

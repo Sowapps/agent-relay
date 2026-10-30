@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "platform": "win-x64",
+  "packages": [
+    {
+      "id": "dotnet",
+      "version": "10.0.403",
+      "archive": "dotnet-sdk-10.0.403-win-x64.zip",
+      "url": "https://builds.dotnet.microsoft.com/dotnet/Sdk/10.0.403/dotnet-sdk-10.0.403-win-x64.zip",
+      "algorithm": "SHA512",
+      "hash": "7a114c318fa7f1d9822991b534b2814d0e78386ceda816b371f5141acefe741d87ccb606ede06cadac8f9ac5070e32b708a67bbd1619ff5e5a7858a27874ef48",
+      "entrypoint": "dotnet.exe",
+      "provenance": "https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json"
+    },
+    {
+      "id": "netcoredbg",
+      "version": "3.2.0-1092",
+      "archive": "netcoredbg-3.2.0-1092-win64.zip",
+      "url": "https://github.com/Samsung/netcoredbg/releases/download/3.2.0-1092/netcoredbg-win64.zip",
+      "algorithm": "SHA256",
+      "hash": "3c410a45fa502415203a94fcb88654af65bf8e3dac158a5527a722e7a6b9274a",
+      "entrypoint": "netcoredbg/netcoredbg.exe",
+      "provenance": "https://api.github.com/repos/Samsung/netcoredbg/releases/tags/3.2.0-1092"
+    }
+  ]
+}

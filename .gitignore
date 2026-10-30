@@ -1,0 +1,9 @@
+__pycache__/
+local/
+**/bin/
+**/obj/
+.codex/
+.idea/
+.vs/
+*.user
+*.suo

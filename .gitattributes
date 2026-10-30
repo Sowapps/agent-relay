@@ -1,0 +1,5 @@
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.md whitespace=-blank-at-eol
+*.png binary
+*.ico binary

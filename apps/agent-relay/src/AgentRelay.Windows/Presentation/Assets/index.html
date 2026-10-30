@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
+  <title>Agent Relay</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="presentation.css">
+  <link rel="stylesheet" href="desktop.css">
+</head>
+<body>
+  <section class="app-window" aria-label="Agent Relay">
+    <div class="app-shell">
+      <aside class="app-nav" id="app-nav" aria-label="Navigation de l’application"></aside>
+      <main class="app-main">
+        <header class="app-topbar" id="app-topbar"></header>
+        <div class="app-scroll" id="app-content" tabindex="-1"><div class="empty"><h3>Chargement du suivi…</h3><p>Connexion au relais local.</p></div></div>
+        <div id="detail-layer"></div>
+      </main>
+    </div>
+  </section>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <div id="app-modal"></div>
+  <script src="components.js"></script>
+  <script src="model.js"></script>
+  <script src="views.js"></script>
+  <script src="renderer.js"></script>
+  <script src="controller.js"></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>false</SelfContained>
+    <ApplicationIcon>Assets/agent-relay.ico</ApplicationIcon>
+  </PropertyGroup>
+  <ItemGroup><ProjectReference Include="../AgentRelay.Infrastructure/AgentRelay.Infrastructure.csproj" /></ItemGroup>
+  <ItemGroup><EmbeddedResource Include="Assets/agent-relay.ico" /></ItemGroup>
+  <ItemGroup><EmbeddedResource Include="Assets/agent-relay-logo.png" /></ItemGroup>
+  <ItemGroup>
+    <Content Include="../../wsl/*.py" Link="wsl/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../tools/provision-wsl.py" Link="tools/provision-wsl.py" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Web.WebView2" />
+    <Content Include="../../doc/using/**/*" Link="documentation/%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Presentation/Assets/*" Link="presentation/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>

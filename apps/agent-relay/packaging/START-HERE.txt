@@ -1,0 +1,18 @@
+Agent Relay — Windows x64 portable prerelease
+
+Utility: Start the relay and find installation, agent and human guides.
+Usage: Extract the entire ZIP to a writable, persistent folder. Keep app/, tools/ and these files together.
+
+1. Run Initialize-Relay.cmd once (no administrator required).
+2. Double-click Start-AgentRelay.cmd. Data stays in this package's data/ folder.
+3. Read app/documentation/portable-release.md for project creation, scoped MCP and interface paths.
+
+The .NET runtime is included; no .NET SDK, .NET global installation or Python is needed for Windows monitoring/direct MCP. WebView2 Runtime is required for the graphical interface. No prerequisite is installed automatically.
+
+WSL/native agent preparation additionally needs Windows python.exe, the selected WSL distribution/user, Linux Python3/tmux, installed supported native client and its account login. Native operations are never part of first-launch checks.
+
+Closing the window hides it. Use the tray to reopen; Quitter exits. Keep the host running for MCP. A distinct data directory is a distinct relay instance.
+
+This prerelease is unsigned. No automatic startup or global settings are configured. Move/copy an installation only while its host is stopped; rerun Initialize-Relay.cmd and update the MCP client fragment after moving it.
+
+Upgrades: extract a new version into another directory, quit the old host, back up the selected data and use explicit --data-dir/app/AgentRelay.Windows.exe initialize --data-dir to retain that scope. Do not run two versions on the same data. Keep the old archive and backup until verification. Never copy credentials/history into a Git repository or release asset.

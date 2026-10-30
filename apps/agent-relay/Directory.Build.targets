@@ -1,0 +1,6 @@
+<Project>
+  <!-- The SDK includes both UI bindings; this application uses WinForms only. -->
+  <Target Name="RemoveUnusedWebViewWpfBinding" BeforeTargets="ResolveAssemblyReferences" Condition="'$(UseWindowsForms)' == 'true' And '$(UseWPF)' != 'true'">
+    <ItemGroup><Reference Remove="@(Reference)" Condition="'%(Reference.Filename)' == 'Microsoft.Web.WebView2.Wpf'" /></ItemGroup>
+  </Target>
+</Project>

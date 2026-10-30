@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="src/AgentRelay.Core/AgentRelay.Core.csproj" />
+  <Project Path="src/AgentRelay.Infrastructure/AgentRelay.Infrastructure.csproj" />
+  <Project Path="src/AgentRelay.Windows/AgentRelay.Windows.csproj" />
+  <Project Path="tests/AgentRelay.Tests/AgentRelay.Tests.csproj" />
+</Solution>
