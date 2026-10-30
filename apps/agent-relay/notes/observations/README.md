@@ -5,6 +5,8 @@
 
 ## Reports
 
+- [Stable v1.0.0 delivery verification](2026-10-30-stable-publication.md): operator validation, stable/latest private release and downloaded archive/checksum match.
+
 - [Stable v1.0.0 local archive qualification](2026-10-30-stable-local-preparation.md): final-version archive, minor metadata corrections and isolated checks; awaiting review, not published.
 
 - [Local RC2 documentation package](2026-10-30-rc2-local-preparation.md): updated archive/README/MCP guides, exact extracted checks and internal rendering; not committed or published.
