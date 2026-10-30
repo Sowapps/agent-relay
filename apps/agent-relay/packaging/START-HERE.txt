@@ -1,18 +1,21 @@
-Agent Relay — Windows x64 portable prerelease
+Agent Relay — get started with your usual agent
 
-Utility: Start the relay and find installation, agent and human guides.
-Usage: Extract the entire ZIP to a writable, persistent folder. Keep app/, tools/ and these files together.
+Utility: Connect agents through the Model Context Protocol (MCP) across Windows and Windows Subsystem for Linux (WSL), and monitor project activity.
+Usage: Ask your usual agent for help; preserve your rules and approve the intended preparation scope first.
 
-1. Run Initialize-Relay.cmd once (no administrator required).
-2. Double-click Start-AgentRelay.cmd. Data stays in this package's data/ folder.
-3. Read app/documentation/portable-release.md for project creation, scoped MCP and interface paths.
+RECOMMENDED FIRST MESSAGE
 
-The .NET runtime is included; no .NET SDK, .NET global installation or Python is needed for Windows monitoring/direct MCP. WebView2 Runtime is required for the graphical interface. No prerequisite is installed automatically.
+Help me set up Agent Relay from the private GitHub repository Sowapps/agent-relay: https://github.com/Sowapps/agent-relay. I already have this agent client; Agent Relay and its prerequisites may be absent. Read the getting-started guide, check your local tools, repository access and existing prerequisites, and propose the changes and locations briefly. Respect my instructions, agent organization and approval rules; clarify ambiguous scope before acting. Once I authorize the scope, retrieve/check/extract the appropriate release, prepare the application, connect this client through MCP and help create the first project using the existing folders I identify. Verify the connection and an agreed small exchange, then show me where to monitor its progress. Ask only for missing choices, permissions or account authentication you cannot handle; guide any step your tools cannot perform.
 
-WSL/native agent preparation additionally needs Windows python.exe, the selected WSL distribution/user, Linux Python3/tmux, installed supported native client and its account login. Native operations are never part of first-launch checks.
+Starting from zero assumes an existing assisting agent client and private repository access; it concerns the relay and its prerequisites. If this archive is already extracted, tell your agent its location and that step is already done. Read app/documentation/getting-started.md for project/path concepts and app/documentation/portable-release.md for the authorized technical route. For another project, describe its purpose and existing folders; ask the agent to discover and preserve the existing relay configuration before proposing additions.
 
-Closing the window hides it. Use the tray to reopen; Quitter exits. Keep the host running for MCP. A distinct data directory is a distinct relay instance.
+IF YOU START IT YOURSELF
 
-This prerelease is unsigned. No automatic startup or global settings are configured. Move/copy an installation only while its host is stopped; rerun Initialize-Relay.cmd and update the MCP client fragment after moving it.
+1. Extract the complete ZIP to a persistent writable installation folder.
+2. Run Initialize-Relay.cmd once, then Start-AgentRelay.cmd.
+3. The default relay configuration/history stays in data/. Your actual Windows/Linux project workspaces are separate existing folders, not this installation or data directory.
+4. A relay project connects participants, their workspaces and permissions. Select it in the application to monitor tasks, messages, results and sessions. Your requesting agent's Windows client connects through MCP; the relay delegates to supported native agent clients in WSL. The current application interface is in French.
 
-Upgrades: extract a new version into another directory, quit the old host, back up the selected data and use explicit --data-dir/app/AgentRelay.Windows.exe initialize --data-dir to retain that scope. Do not run two versions on the same data. Keep the old archive and backup until verification. Never copy credentials/history into a Git repository or release asset.
+The .NET runtime is included for Windows startup/direct MCP. The portable guide covers WebView2 and any Python/WSL/native-client prerequisites needed for your task. Nothing is installed globally or registered to start automatically. Current boundaries, practical handling and future options are in app/documentation/limits.md.
+
+Closing the window hides it; use the tray to reopen, and Quitter to exit. Keep the chosen relay running for MCP. A different data directory is another instance. To move or upgrade, stop the selected host, back up its data and keep the old version until verification. Ask your agent to retain the exact data scope and regenerate/review the MCP fragment if paths change. Never put credentials/history into a repository or release asset.

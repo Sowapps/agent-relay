@@ -5,6 +5,8 @@
 
 ## 1. Establish context and authority
 
+This is the source-checkout administration path. A normal user starting from nothing should first use the accompanied-start/portable route, not compile the application by default. Preserve their existing agent organization, workspace instructions and approval rules. Supply minimal relay-specific structure only when a required project/participant/workspace/permission choice is missing; do not introduce a mandatory planner/reviewer process. Clarify an ambiguous scope before execution and do not infer permission from prerequisites, availability or acceptance of a proposal.
+
 Read root AGENTS.md and the application README. Identify the checkout/installation directory, the chosen data directory, existing main/secondary workspaces, current host and intended agent role. Ask for missing product choices, such as which user project to connect; discover technical facts rather than asking the user to diagnose .NET. Obtain an explicit scope before installing, preparing WSL, editing configuration or replacing a host. A native agent account login is a human authentication action.
 
 | Available access | What this agent can do |

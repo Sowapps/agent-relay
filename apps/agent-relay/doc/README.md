@@ -5,6 +5,9 @@
 
 ## References
 
+- [Accompanied start](using/getting-started.md): user project/path concepts and the zero-install or existing-relay route.
+- [Limits and evolution options](using/limits.md): known boundaries and possible improvements, separated from delivered features.
+
 - [Bootstrap and administration](using/bootstrap.md): prepare/deploy, add a project, connect an agent and guide a human.
 
 - [Agent MCP quickstart](using/agent-quickstart.md): first entry for agents consuming the relay.

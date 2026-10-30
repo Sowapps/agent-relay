@@ -37,7 +37,7 @@ One relay operation runs per session. Independent sessions use the configurable 
 
 ## Protocol and retrieval
 
-The stdio facade identifies itself as agent-relay2.0 and implements JSON-RPC2.0 with protocol2025-11-25. Unsupported methods/arguments fail explicitly. Input is read in bounded chunks and checked against a1MiB UTF-8 frame budget; named pipes use the same byte ceiling. MCP schemas require explicit project/session/artifact identities and reject unknown fields. Large full details can be refused; filtered previews remain available.
+The stdio facade identifies itself as agent-relay with the packaged application SemVer and implements JSON-RPC2.0 with protocol2025-11-25. Unsupported methods/arguments fail explicitly. Input is read in bounded chunks and checked against a1MiB UTF-8 frame budget; named pipes use the same byte ceiling. MCP schemas require explicit project/session/artifact identities and reject unknown fields. Large full details can be refused; filtered previews remain available.
 
 ProjectJournal applies project/endpoint/session/task/type/state/date filters in SQL, with content/label search rather than accidental raw JSON matches. Pages have stable row cursors, count limits and a400KiB payload budget for Unicode expansion. Native inbox imports use per-session SQLite cursors, deduplication and rotating bounded session batches. One consumer does not mark messages globally read. Native WSL capability remains messages only; received text never becomes a Windows command.
 

@@ -5,6 +5,8 @@
 
 ## Reports
 
+- [Reader-focused README/start/limits review](2026-10-30-readme-and-starting-guides.md): local showcase, two prompts, project/path concepts and29boundary/evolution entries; no publication.
+
 - [First private release qualification](2026-10-30-first-release.md): autonomous RC1 archive, scoped MCP, internal visual checks and verified private GitHub assets.
 
 - [Documentation deployment and MCP reads](2026-10-30-docs-deployment.md): existing-scope update, four public resources through the configured launcher, preserved records and old-facade boundary.

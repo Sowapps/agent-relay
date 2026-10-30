@@ -1,9 +1,12 @@
 # Using Agent Relay
 
-**Utility:** locates the supported Windows and WSL MVP workflow.  
-**Usage:** start here to configure destinations, submit work and inspect retained results.
+**Utility:** locates accompanied setup, functional use and current boundaries.  
+**Usage:** begin with your usual agent; open the specific operational reference only when needed.
 
 ## Guide
+
+- [Start with your agent](getting-started.md): preserve your working style, understand projects/paths and get from zero to a verified first connection.
+- [Limits and evolution options](limits.md): current boundaries, practical handling and proposed improvements or deliberate priorities.
 
 - [Portable Windows release](portable-release.md): extracted archive, included runtime, scoped direct-executable MCP and upgrades.
 

@@ -1,7 +1,13 @@
 # Use a portable Windows release
 
-**Utility:** prepares and operates the downloaded Windows x64 archive without a source checkout or .NET SDK.  
-**Usage:** extract the full archive to a persistent writable folder, read START-HERE.txt and follow these steps with explicit authority.
+**Utility:** prepares the Windows archive and its Model Context Protocol (MCP) connection without a source checkout or .NET SDK.  
+**Usage:** use this operational reference with your agent after agreeing on preparation scope; extract the full archive to a persistent writable folder.
+
+## Start with your usual agent
+
+You need an existing agent client with authorized local tools, or one that guides your manual steps, and access to the private release. “Starting from zero” concerns Agent Relay and its prerequisites, not installation of the assisting client itself. Your agent can help retrieve the release, select locations, prepare prerequisites and create the first project. The [accompanied-start guide](getting-started.md) explains projects/paths before the commands below. Preserve existing instructions, team structure and approvals; propose only missing relay choices. A request for a proposal is not permission to install or configure.
+
+Keep the installation directory, data directory and authorized workspaces distinct. Use the existing approved locations; treat example paths as examples rather than defaults to create. For an existing installation, discover its actual data scope first and preserve its projects/history. The remaining sections are the technical route for the authorized agent/operator, not a demand that the user manage .NET personally.
 
 ## Prerequisites and first start
 
@@ -20,7 +26,9 @@ WebView2 is a separate system prerequisite. The prerelease is unsigned. No signa
 
 ## Add a project and scoped MCP connection
 
-For a native participant, use Réglages → Outils d’administration et de diagnostic → Console technique → Paramètres → Profils techniques, then Réglages → Outils d’administration et de diagnostic → Modifier les projets. Use existing authorized workspaces and exact discovered distribution/user/client information. Native setup additionally needs Windows python.exe, the selected WSL distribution/user, Linux Python3/tmux, native client executable and human account login. This is separate from starting the Windows relay. Do not blindly run prepare with inferred defaults.
+Here, the MCP client is the Windows application hosting your requesting agent. A native agent client is the supported executable running a delegated conversation inside Windows Subsystem for Linux (WSL); Agent Relay is the intervening Windows server/application.
+
+The current interface is in French. For a native participant, use Réglages → Outils d’administration et de diagnostic → Console technique → Paramètres → Profils techniques, then Réglages → Outils d’administration et de diagnostic → Modifier les projets. Use existing authorized workspaces and exact discovered distribution/user/client information. Native setup additionally needs Windows python.exe, the selected WSL distribution/user, Linux Python3/tmux, native client executable and human account login. This is separate from starting the Windows relay. Do not blindly run prepare with inferred defaults.
 
 For authorized scripted administration, tools/new-project-request.ps1 (PowerShell7.2+) generates full additive configuration and connection requests. It creates no project/permission itself. Example from the extracted root; supply existing authorized folders:
 
@@ -39,7 +47,7 @@ $context = Get-Content (Join-Path $requests 'example-context.json') -Raw | Conve
 
 LocalOnly is discovery/history preparation, not a native agent simulation. For a real native profile, use an explicit existing ProfileId and absolute Linux peer workspace instead of LocalOnly, as described in bootstrap.md. Never infer profile/provider from role or grant all capabilities to make a test pass. The administrative CLI requires separate local authority, and refuses unsafe changes while busy.
 
-Alternatively prepare a connection from Console technique → select intended project/principal → Paramètres → Préparer la connexion MCP de ce projet, then rerun Initialize-Relay.cmd. The script exports the nonsecret UUID reference; protected credentials remain in data/. It never edits a client's settings.
+Alternatively prepare a connection from Console technique → select intended project/principal → Paramètres → Préparer la connexion MCP de ce projet, then rerun Initialize-Relay.cmd. The initializer exports the nonsecret UUID reference; protected credentials remain in data/. It never edits a client's settings.
 
 ## Connect and verify MCP
 
