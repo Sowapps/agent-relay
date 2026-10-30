@@ -7,12 +7,18 @@ p=argparse.ArgumentParser(description=__doc__)
 for name in ['payload','output','cache','sdk']:p.add_argument('--'+name,type=Path,required=True)
 p.add_argument('--version',required=True);a=p.parse_args()
 payload=a.payload.resolve();notices=payload/'third-party';notices.mkdir()
+app=Path(__file__).resolve().parents[1]
+root=app.parents[1]
+# Keep one user README source; adapt only its links for the extracted layout.
+readme=(root/'README.md').read_text(encoding='utf-8-sig')
+readme=readme.replace('](apps/agent-relay/doc/using/','](app/documentation/')
+readme=readme.replace('](apps/agent-relay/doc/developing/','](https://github.com/Sowapps/agent-relay/blob/main/apps/agent-relay/doc/developing/')
+(payload/'README.md').write_text(readme,encoding='utf-8',newline='\n')
 for name in ['LICENSE.txt','ThirdPartyNotices.txt']:
  source=a.sdk/name
  if source.exists():shutil.copy2(source,notices/('dotnet-'+name))
 dependencies=[]
 # License materials from exactly the versions in the dependency locks/runtime assets.
-app=Path(__file__).resolve().parents[1]
 versions={}
 for lock in (app/'src').glob('*/packages.lock.json'):
  for packages in json.loads(lock.read_text())['dependencies'].values():
@@ -32,9 +38,8 @@ assert (payload/'app/coreclr.dll').is_file(),'Self-contained runtime missing'
 assert (payload/'app/AgentRelay.Windows.exe').is_file()
 files={file.relative_to(payload).as_posix():hashlib.sha256(file.read_bytes()).hexdigest() for file in sorted(payload.rglob('*')) if file.is_file()}
 assert not any(any(part in {'data','connections','presentation-cache','.codex','.git','bin','obj'} for part in Path(name).parts) for name in files)
-root=app.parents[1]
 inputs=[file for folder in ['src','packaging','wsl','doc/using'] for file in (app/folder).rglob('*') if file.is_file() and not {'bin','obj','__pycache__'}.intersection(file.relative_to(app).parts)]
-inputs += list(app.glob('*.props')) + [app/'NuGet.Config'] + [app/'tools'/name for name in ['release.ps1','package-release.py','verify-release.py','provision-wsl.py']]
+inputs += list(app.glob('*.props')) + [root/'README.md',app/'NuGet.Config'] + [app/'tools'/name for name in ['release.ps1','package-release.py','verify-release.py','provision-wsl.py']]
 source_inputs={file.relative_to(root).as_posix():hashlib.sha256(file.read_bytes()).hexdigest() for file in sorted(inputs)}
 manifest={'version':a.version,'platform':'win-x64','selfContained':True,'sourceInputs':source_inputs,'files':files}
 (payload/'release-manifest.json').write_text(json.dumps(manifest,indent=2),encoding='utf-8')

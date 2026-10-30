@@ -5,6 +5,8 @@
 
 ## Records
 
+- [RC2 local documentation refresh](2026-10-30-rc2-local-preparation.md): local-only version/archive refresh and qualification, no application behavior change or publication.
+
 - [Reader-focused README and starting guides](2026-10-30-readme-and-starting-guides.md): local-only showcase, accompanied starts, user project/path concepts and limits with future options.
 
 - [First private release](2026-10-30-first-release.md): authorized v1.0.0-rc.1 packaging, extracted archive qualification and private GitHub publication.

@@ -1,7 +1,13 @@
-Agent Relay's first Windows x64 portable prerelease provides project-scoped MCP coordination, named native sessions, retained messages/results, file operations and a monitoring/debugging interface.
+# Agent Relay v1.0.0-rc.2
 
-Download the ZIP and SHA256SUMS.txt, verify the checksum, extract everything to a persistent writable directory and read START-HERE.txt. The .NET runtime is included. WebView2 Runtime is required for the UI; native WSL use additionally requires the documented Python/WSL/tmux/client prerequisites and account login. Nothing is installed globally or configured to start automatically.
+Documentation refresh; application behavior is unchanged from v1.0.0-rc.1.
 
-Five public MCP resources cover portable installation, source bootstrap, agent usage, tool arguments and the additive project request example. MCP rights are bound to explicit projects/participants/workspaces. Native connector support currently covers Codex and Claude in WSL; other providers/environments require implemented adapters.
+- A clearer user README presents supported Windows/WSL use cases, client/agent/relay roles and existing-client remote access, with two self-contained prompts naming the private repository.
+- Accompanied setup explains relay projects, installation/data/workspace paths, approvals and the existing agent-client/private-access prerequisites.
+- The limits guide collects29boundaries with practical handling and possible future improvements or deliberate tradeoffs.
+- Startup text, agent guides and MCP-served documentation are aligned. The current graphical interface is explicitly identified as French.
+- The archive now includes the current README with links adapted to the extracted layout, alongside the current starting/limits guides. No new MCP tools, resources, adapters, permissions or dependency versions are introduced.
 
-Qualification covers the extracted executable, independent local data, additive administration, scoped MCP/documentation reads, retained local history and actual graphical rendering. It does not repeat paid native-agent tests or install prerequisites on a clean Windows machine. The prerelease is unsigned; session history shows retained relay exchanges rather than a complete imported native transcript. Close hides the window; Quitter exits.
+The Windows x64 ZIP includes .NET. WebView2 remains required for the graphical interface; native WSL work additionally needs the documented Python/WSL/tmux/client prerequisites and account login. The prerelease is unsigned. Nothing is installed globally or registered to start automatically.
+
+Local qualification checks the exact extracted archive, isolated startup, scoped MCP and updated resource contents, project preservation and restart. It does not install prerequisites on a clean machine or repeat paid native-agent tests. This preparation does not authorize publication; the archive and checksum are presented for review first.
