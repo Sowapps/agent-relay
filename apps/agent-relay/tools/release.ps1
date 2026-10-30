@@ -79,6 +79,8 @@ try{
     & git push origin main ('refs/tags/'+$tag);if($LASTEXITCODE -ne 0){throw 'Source/tag push failed.'}
     & gh release view $tag --repo $Repository --json url 2>$null
     if($LASTEXITCODE -eq 0){throw 'Release already exists; never overwrite published assets silently.'}
-    & gh release create $tag $archive (Join-Path $Directory 'SHA256SUMS.txt') --repo $Repository --verify-tag --prerelease --title ('Agent Relay '+$tag) --notes-file (Join-Path $app 'packaging/release-notes.md')
+    $releaseArguments=@('release','create',$tag,$archive,(Join-Path $Directory 'SHA256SUMS.txt'),'--repo',$Repository,'--verify-tag','--title',('Agent Relay '+$tag),'--notes-file',(Join-Path $app 'packaging/release-notes.md'))
+    if($version.Contains('-')){$releaseArguments+='--prerelease'}else{$releaseArguments+='--latest'}
+    & gh @releaseArguments
     if($LASTEXITCODE -ne 0){throw 'Release creation failed; inspect remote state before retrying.'}
 }finally{Pop-Location}

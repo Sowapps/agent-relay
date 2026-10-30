@@ -22,7 +22,7 @@ From the extracted root, or by double-clicking the launchers:
 
 Keep the host running. Default package data lives in data/, separate from app/ and user project workspaces. No project, credential, native session, startup registration or global MCP setting is created by initialization. Double-click Start-AgentRelay.cmd for the same scope; directly double-clicking app/AgentRelay.Windows.exe instead uses its separate default LocalAppData scope. Always choose the launcher or explicit --data-dir.
 
-WebView2 is a separate system prerequisite. The prerelease is unsigned. No signature or clean-machine prerequisite installation is claimed by the package smoke checks. .NET runtime security updates require rebuilding/releasing the package, rather than assuming a global .NET update patches its included runtime. Microsoft documents this deployment model at https://learn.microsoft.com/en-us/dotnet/core/deploying/ .
+WebView2 is a separate system prerequisite. The package is unsigned. No signature or clean-machine prerequisite installation is claimed by the package smoke checks. .NET runtime security updates require rebuilding/releasing the package, rather than assuming a global .NET update patches its included runtime. Microsoft documents this deployment model at https://learn.microsoft.com/en-us/dotnet/core/deploying/ .
 
 ## Add a project and scoped MCP connection
 

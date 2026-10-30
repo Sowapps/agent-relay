@@ -5,6 +5,10 @@
 
 ## Records
 
+- [Stable v1.0.0 publication](2026-10-30-stable-publication.md): explicit validation, qualified archive/source commit/tag and stable private release delivery.
+
+- [Stable v1.0.0 local preparation](2026-10-30-stable-local-preparation.md): final-version package and local qualification; user review before any delivery.
+
 - [RC2 local documentation refresh](2026-10-30-rc2-local-preparation.md): local-only version/archive refresh and qualification, no application behavior change or publication.
 
 - [Reader-focused README and starting guides](2026-10-30-readme-and-starting-guides.md): local-only showcase, accompanied starts, user project/path concepts and limits with future options.
