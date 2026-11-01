@@ -24,6 +24,12 @@ internal static class Program
     private static async Task<int> RunClientAsync(LaunchOptions options)
     {
         if (options.Mode == "startup") { StartupRegistration.Launch(options.DataDirectory, options.LifetimeMilliseconds); return 0; }
+        if (options.Mode is "startup-enable" or "startup-disable" or "startup-status")
+        {
+            var preference = new WindowsStartupPreference(options.DataDirectory);
+            var state = options.Mode == "startup-status" ? preference.Read() : preference.Set(options.Mode == "startup-enable");
+            Console.WriteLine(RelayJson.Serialize(state)); return 0;
+        }
         if (options.Mode == "initialize") { await PortableConfiguration.InitializeAsync(options.DataDirectory, options.ConnectionId); return 0; }
         if (options.Mode == "mcp") { await McpFacade.RunAsync(options.DataDirectory, options.ConnectionId); return 0; }
         if (options.Mode == "admin")

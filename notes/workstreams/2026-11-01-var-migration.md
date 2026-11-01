@@ -1,0 +1,51 @@
+# Application runtime var migration
+
+**Utility:** preserves the authorized implementation/migration scope, checkpoints and rollback.  
+**Usage:** resume these five audited lots; no commit, push or publication is authorized.
+
+## Authorization and objective
+
+Florent answered « GO » after the completed five-lot audit/plan and explanation that MCP paths/connections must be updated as part of migration. Implement the audited correction and migrate the selected three-project scope while preserving identities, grants, journals and startup intent. local/ remains developer-owned; explicit test/export roots there remain allowed. Do not move user project workspaces, global agent credentials or unrelated qualification scopes. No model call, publication or arbitrary process/session interruption.
+
+Start15:04UTC /16:04Europe/Paris. Goal inspected/creation attempted; historical blocked unfinished objective occupies the API slot. This record tracks the authorized objective without reusing its counters. Existing hover and publication-note edits remain as-is.
+
+## Preflight
+
+Selected data: local/apps/agent-relay/v1-qualification; destination var/apps/agent-relay/v1-qualification relative to the operating installation root. Read-only journal preflight:0 pending/running operations,3 retained created native sessions with legacy /srv roots and internal sibling Windows staging. WSL reports no running distribution, so no existing native process is being interrupted by preflight. Startup was enabled at the audit. Add var ignore rule before creating runtime state.
+
+## Design decisions/checkpoint
+
+Native layout descriptor supplies installation root independently of cwd or versioned binary nesting; explicit --data-dir remains exact. Staged self-contained deployed binaries and operational metadata live in var, while SDK/build/release/fixture outputs remain local. New native private roots and transfer staging remain on the Linux filesystem; atomic publication is refused across filesystems rather than using hidden workspace partials. Migration uses one explicit dry-run/apply command and only owned roots, consistent SQLite backup, targeted reference/client/startup changes, identity validation and rollback. Stale clients need supported reconnect; no unrelated Codex/Claude chats may be killed.
+
+Current checkpoint: path contract implemented; full C# integration/process smoke passed at local/apps/agent-relay/tests/b24d4d18ced84d65bdaf72cf7727079f. Self-contained candidate prepared at var/apps/agent-relay/prepared-migration/mcp-runtime.json. Selected live scope and MCP configurations remain unchanged. Read-only WSL preflight passed (four private roots, no live native session), report local/apps/agent-relay/audits/runtime-paths-20261101/migration-preflight.json. The old shared profile predates provision-owner.json; its exact configured /srv/agent-relay-mvp-* name, UID, private client/install layout and known helper qualify the narrowly bounded exception. New copy gets the marker.
+
+The proposed pipe alias was rejected after source inspection: old facades reread their old connection DB/secret for every call, so aliases alone cannot remove local storage. No compatibility alias listener is shipped. Client configs are migrated and fresh MCP connections qualified; existing open facades need a client reload after cutover. No chats are killed. Retired old data is blocked by a migrated-to.json marker and a directory at the old SQLite filename, preventing even older binaries from recreating a writable split store.
+
+tools/migrate-storage.py implements dry-run/apply, idle/identity/ownership checks, consistent SQLite copy, raw historical-payload hashes, scoped config merge, native copy/commit/rollback, startup-intent migration and failed-candidate retention. Maintenance gate blocks new work until cutover commits. tools/test-storage.py PASSED real local-only project/credential migration with active-work refusal, injected rollback and native default startup under SDK-free environment at local/apps/agent-relay/qualification/storage-08cf031f340d43e1b321e474b9297aac/result.json. tools/test-native-storage.py PASSED at local/apps/agent-relay/qualification/storage-native/result.json: owned WSL copy/commit/rollback, auth symlink preservation, partial recovery, actual upload/hash/publication, cross-filesystem refusal before target-directory creation; all uniquely marked native fixtures cleaned. The test exposed and fixed ownership of staging parents created during partial migration. No model calls.
+
+Current docs/path examples and package verifier now describe/check root-relative var defaults. Shared document links/indexes/PowerShell checks pass; full shared verification still running (session27220). Remaining: final candidate rebuild after documentation/helper refinements, current C# suite/checks, reviewed dry-run and actual migration, fresh live MCP/native no-model proof. No commit/publication.
+
+## Completion
+
+Authorized scope completed at16:03UTC /17:03Europe/Paris, approximately59minutes after15:04UTC. The historical API objective remains blocked with unchanged counters145775tokens/901seconds; these are not this workstream's consumption, and the occupied goal slot prevented a new tracked objective. No reliable separate token counter is available. No WSL model/native-client prompt was sent.
+
+Live migration succeeded in var/apps/agent-relay/migrations/cd11b30f8b9e4e5099589dd98fdb179f. The three project/grant records and protected Windows credential bytes are unchanged; historical work/inbox/transfer/connection/cursor/event/exchange payload hashes were verified before admission. Four owned native roots were copied, active generated paths updated, then originals retired into the transaction's native var backup. Native data-file hashes and global credential symlink targets were checked against those retained originals. Declared project workspaces, including Personal Assistant and developer qualification workspaces, were not moved or edited. Developer reports/exports remain local by explicit choice; operational state no longer depends on that tree. Old data has the retirement marker/SQLite-directory guard.
+
+The final native runtime is var/apps/agent-relay/run/69A28B251D8FFAD8156EA3D13400C70CBA86F1265C04DC8131DD555798D8A065/AgentRelay.Windows.exe. Canonical ownership is data/ui-host.json, with a report mirror in var/apps/agent-relay/deployment/v1-qualification/host.json; this avoids dependence on old developer report directories for later standard deployment. Final live ownerPID36108 was exactly verified. Workspace and user agent_relay tables were merged to that runtime/data scope, keeping connection037b2a42-3825-4537-bf7c-08913e3951a4 and all unrelated settings. Final registration backups are under var/apps/agent-relay/migrations/final-client-registration. Startup remains enabled, has no reported error and its retained bootstrap was executed against the already running host: the owner was preserved and the current pointer was followed.
+
+Fresh real stdio MCP reads passed for all three nonadministrative retained connections, each exposing exactly its existing project.24tools/5resources and final bootstrap commands were checked. Report local/apps/agent-relay/audits/runtime-paths-20261101/live-verification.json. Native retention: native-live-verification.json. Startup: startup-final.json. Existing open Codex MCP facades still require the client's ordinary reload/restart; they were not terminated and their stale configured path is deliberately not forwarded. This is a client reload, not a Windows reboot or new account login.
+
+Final verification:
+
+- Full C# build/integration/Windows-process suite PASS,0warnings/errors: local/apps/agent-relay/tests/680f459967f14548b2315853e6a4395a. Includes actual Windows volume API qualification, private partial cleanup and retired-store refusal.
+- Windows isolated migration/active-work refusal/injected rollback/idempotence/no-local native default PASS: local/apps/agent-relay/qualification/storage-9e7a2febbe734c0481c2fa4d2600a066/result.json.
+- Native isolated migration/partial recovery/symlink preservation/private upload publication/cross-filesystem refusal PASS: local/apps/agent-relay/qualification/storage-native/result.json. Marked native test roots removed.
+- Standard native publication injected rollback and malformed-preparation refusal PASS: local/apps/agent-relay/tests/deployment-30a65338d16e4608828db87003983d09/result.json. Its owned host was stopped.
+- Final documented bootstrap with three fictitious projects, scope refusal, own-control render and5MCP resources PASS: local/apps/agent-relay/qualification/var-storage-bootstrap-final/result.json. Its own host was stopped; no WSL/model call.
+- Live own-control render PASS and general view visually inspected: local/apps/agent-relay/qualification/var-storage-live/render. No desktop capture/control.
+- Local intermediate candidate archive layout/hash/extraction/restart/default-no-local/SDK-free MCP qualification PASS: local/apps/agent-relay/releases/var-storage-2fdd4621e85a4da2b7c4339908ad87e5/verification.json. This is an explicitly local layout qualification, not a new published v1.0.1. Final bootstrap wording was subsequently verified through the rebuilt live MCP; any future distributable must be packaged from its final reviewed source.
+- Shared verification PASS,42Python files parse, git diff whitespace check PASS. Operational var is ignored and excluded from package payloads.
+
+Current documentation is indexed at apps/agent-relay/doc/developing/runtime-storage.md; start/bootstrap/portable/transfer/limits guides and FR/EN README paths are aligned. Future option for cross-filesystem transfer is an explicit validated application-owned var staging root per destination filesystem; atomic publication and private staging take priority over silently scattering partials into workspaces. No second physical Windows volume or workload throughput guarantee is claimed.
+
+No commit, push, tag or release publication. Earlier hover edits and publication bookkeeping remain preserved. Retain migration backups until operator review. No implementation work remains in this authorized storage lot; only the client-side reload of already open Codex connections is outstanding for those conversations.

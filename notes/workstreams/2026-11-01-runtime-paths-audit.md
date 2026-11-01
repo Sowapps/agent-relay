@@ -1,0 +1,118 @@
+# Runtime storage audit and correction plan
+
+**Utility:** retains the authorized read-only audit, path ownership findings and proposed migration.  
+**Usage:** audit/plan only; no source correction, configuration change, process control or file migration is authorized.
+
+## Scope and accounting
+
+Florent: « GO pour l’audit complet et le plan de correction. Sans modifier le code ni déplacer les fichiers pour le moment. » Application-internal mutable state belongs under var/, not development-owned local/. Explicit development/test/export destinations may use local/ without making it an application dependency. Preserve the agreed relative shape `<application-root>/var/apps/agent-relay/<scope>/...`; do not silently substitute `apps/agent-relay/var/relay.sqlite`.
+
+Read app root as the installation's operating root, distinct from a project workspace, source subdirectory and process current directory. Map the existing checkout operating root and portable distribution root explicitly in the plan, without guessing a new source-tree prefix. Record unsettled details as proposals, not target specifications.
+
+Start approximately14:29UTC /15:29Europe/Paris. Goal inspection/creation attempted; an unrelated historical blocked goal still occupies the API slot (145775tokens/901seconds). Track this scoped objective manually; do not alter that goal or reuse its counters. Output is limited to audit artifacts/notes and their index. Existing source, runtime paths, credentials, MCP settings, startup entries and agent processes must remain unchanged.
+
+## Initial findings/checkpoint
+
+App launch defaults, portable scripts, runtime launcher allowlists, staging/deployment paths, path-derived pipe/startup identities, WebView/acknowledgement files, generated Windows session workspaces and transfer partials need distinct handling. Development SDK/cache/test/export outputs are not automatically violations. WSL private session roots are independently hardcoded under /srv and their client-managed authentication references must not be moved by a string replacement. Complete file inventory, installed-scope metadata, rollback and acceptance matrix before presenting the plan.
+
+## Audited boundary and observed installation
+
+Static inventory scanned245 tracked files (source, tools, packaging, development rules, guides, tests/experiments/history where applicable), locating135 local-path matches,44 runtime-storage matches and82 native-storage matches. Matches were classified by owner; these are not135 defects. Manual reads covered all active Windows path creation, bootstrap/storage/credential/transfer code, launcher and deployment allowlists, native provisioning/bridge/files/clients, packaging defaults/exclusions, explicit output tools and user guides. Root READMEs, ignore rules and current target location boundaries were reviewed separately. Local artifacts: local/apps/agent-relay/audits/runtime-paths-20261101/inventory.json and search.txt. No toolchain build, app launch, MCP operation, SQLite write/read connection, WSL start or native-agent call was used.
+
+The active Windows scope is local/apps/agent-relay/v1-qualification, currently containing3 configured projects. Its files mix operational state with older developer-requested qualification/export artifacts. Project workspaces include the real Windows control-plane and Personal Assistant WSL workspace; they are not application storage and must remain in place. Two declared Codex MCP entries were read, without dumping unrelated configuration: the project entry invokes the checkout Python launcher; the shared entry invokes a versioned executable below local/apps/agent-relay/run. Both select the active data scope. Windows startup registration is enabled; its value was read only. The bare-executable legacy LocalAppData/AgentRelay directory does not currently exist on this machine.
+
+Other discovered top-level scopes (data, deployment-qualification, evening-sessions, evening-transfer, mvp-qualification) are historical/qualification material; do not migrate them automatically just because their names contain data. Do not merge them into the active3-project scope. No running process or private Windows credential was opened/unprotected, stopped or altered. WSL filesystem/live session contents were not inspected: their path behavior is established from code and configured roots; live UID/ACL/mount/activity inventory belongs to the future authorized migration preflight.
+
+## Ownership rules and proposed layout
+
+Keep the exact agreed relative structure, without another source-directory prefix:
+
+```text
+<application-root>/
+  var/apps/agent-relay/
+    <scope>/
+      relay.sqlite, relay-config.json, relay-projects.json
+      connections/, presentation-cache/, attention-reviews.json
+      prepared/, startup-launcher/, operational logs and exports
+      staging/, internal session work areas
+    run/<immutable-version>/...
+    deployment/<transaction>/...   (operational owner, logs and rollback)
+  local/...                       (operator/developer-owned, optional)
+```
+
+For the active checkout, propose treating C:/EspaceRestreint/Workspaces/Git/agent-relay as the operating installation root already used by its launch tools. Its proposed state path is therefore C:/EspaceRestreint/Workspaces/Git/agent-relay/var/apps/agent-relay/v1-qualification/relay.sqlite. Do not use C:/EspaceRestreint/Workspaces/Git/agent-relay/apps/agent-relay/var/relay.sqlite. In an extracted distribution, the operating root is the extraction folder containing the launchers; the executable's nested app/ directory and the caller's working directory are not alternative roots.
+
+Retain existing leaf filenames/internal subtrees where possible rather than combining a location correction with an unrelated storage redesign. The tree above groups ownership; it does not require renaming every log into new categories. A stable installation descriptor/explicit launcher context must define the root for packaged and versioned-staged executables. Resolve their default storage once through one path owner, not separate parent-count guesses in C#, Python, PowerShell and CMD. A different current directory must not select another database. No silent fallback to local/, LocalAppData or a project workspace when var/ is unavailable; report a usable path/permission error and permit an explicit configured writable state root.
+
+An explicit --data-dir remains an exact caller-selected data directory; do not append var/apps/... to it again or silently reinterpret an existing connection. This preserves deliberately isolated tests under local/ and permits an authorized one-off export there. Ordinary startup/deployment defaults must not target local/ or require its existence. Separate export OutputDirectory from the actual runtime data scope; a fragment exported to local/ still points to var/ data. SDKs, NuGet/download caches, source builds, mockups, proof fixtures, developer qualification logs/release ZIPs and explicit reports remain development-owned local/ outputs. A published payload must be runnable without that development tree or its private SDK/Python launcher.
+
+## Correction inventory
+
+| Area and source owner | Current finding | Required correction |
+| --- | --- | --- |
+| LaunchOptions.cs | Bare executable defaults to user LocalAppData; startup derives scope from its bootstrap parent. | One installation/state-root resolver; same normal scope for launcher/direct/MCP/startup, explicit directory overrides preserved. |
+| packaging/Start-AgentRelay.cmd and Initialize-Relay.cmd | Both default to extraction-root/data. | Consistent var/apps/agent-relay/default scope, root resolved from launcher location. Update START-HERE and both starting READMEs' examples. |
+| tools/AppCommands.psm1 | Source run defaults to local/.../data and stages runtime in local/.../run. | Normal runtime/data under var; leave SDK/cache and explicitly selected development/test fixtures under local. |
+| export-mcp.ps1, publish-local.ps1 | Implicit local data/runtime/publishing/operational reports; export also prepares runtime and may edit project config. | Separate runtime preparation from requested output export; var defaults for actual application state/runtime/operational deployment data. Keep client edits explicit and scoped. |
+| mcp-entry.py, launch-installed.py | Hardcoded runtime acceptance under local/.../run, source-checkout/Python/private-dotnet dependencies. | Validate the declared installation's var runtime and owner metadata. Normal deployed native launch must not depend on development local/; development launch remains explicitly a development action. |
+| deployment.py and RuntimeStaging.psm1 callers | Publisher restricts all data/prepared/reports and binaries to local; operational logs/snapshots/host metadata also go there. | Parameterize distinct runtime/state/operational-report roots and explicit development outputs; retain ownership/hash/idle/rollback guards. RuntimeStaging itself already takes a root parameter. Do not replace restrictive checks with arbitrary-path acceptance. |
+| RelayDatabase, settings stores, ConnectionStore | Relative to selected data directory; database/WAL/SHM, configuration and protected credentials. | Move the selected root coherently; generally no per-file rename is needed. Preserve UUIDs, credential bytes, permissions and journal. |
+| Program, ProjectWindow, AttentionReviews, RelayWebView | diagnostics.log, startup logs, acknowledgement file, presentation-cache all follow selected data; browser cache is mutable. | Keep all inside var-selected scope, including crash/browser subdirectories. Rebuild disposable cache if needed; preserve durable alert-review state. External installed WebView runtime is not app-owned cache. |
+| StartupRegistration.cs | Registry name hashes full data path; command names retained bootstrap under that path. | Migrate the enabled setting as a transaction: prepare new bootstrap/entry, verify it, retire only the old scope's entry. Preserve on/off intent, avoid duplicate entries and retain rollback. Never reuse a bootstrap that still derives the old parent scope. |
+| RelayLocation.cs and active host ownership | Pipe name hashes Windows SID plus full data path; lock lives in data. | New path means new pipe/lock identity. Quiesce/rebind all affected clients and prevent two writable copies; metadata PID is not transferable. |
+| SessionService.cs | Implicit WindowsWorkspace is a sibling dataDirectory+'-workspaces'; persisted absolute paths can retain old location. | Put relay-created technical session staging under declared var scope; preserve actual user workspaces. Migrate only proven app-owned references, retain session IDs/native bindings. |
+| FileTransferService.cs and wsl/transfer_files.py | Partial bytes are .relay-transfer-ID.part beside the requested final destination; receipts/locks/journal live in internal stores. | Separate explicit delivered user artifact from internal transfer staging. Internal partial/lock/receipt paths belong to private var roots on the relevant host; update inspect/cleanup/recovery accordingly. Preserve explicit final paths and overwrite permissions. |
+| FileTransferService protected path checks | Protects current data and current executable directory, not necessarily sibling runtime/backups under a new common var root. | Protect all declared app-owned mutable/credential/runtime roots from project transfers; do not globally forbid developer local/ or an explicitly authorized user output. |
+| WslProvisioner, provision-wsl.py, RelaySettings validation, ProfileEditor, relay_files.root_path | Provision/validation assumes /srv/agent-relay-* private roots with session config/data below them. | Define a Linux-host installation/private var root; keep native filesystem, UID/permissions/ownership markers and instruction-inheritance isolation. Update validators, bridge/provisioning and session references together, with an explicit legacy migration path. Do not point all WSL state into a Windows-mounted var directory. |
+| native_clients.py and message_server/relay_bridge/relay_files | Relay-owned config, messages.sqlite, dispatch/recovery/auth caches, conversation references, tmux socket and launch files follow native private root. | Map owned mutable files into host var; preserve native conversation IDs. Do not relocate or copy the user's global Codex/Claude authentication stores, or follow their credential symlinks while collecting state. |
+| sync-session-adapters.py, acceptance/cleanup tools | Some operational maintenance is local-only; fixture cleanup also intentionally asserts local test roots. | Correct operational root acceptance, retain narrower local fixture-cleanup guards. Never widen test cleanup so it can delete live var state. |
+| package-release.py, verify-release.py, release/test scripts, .gitignore | Runtime data is excluded by legacy names but var/ is not ignored/explicitly excluded; release/QA outputs are correctly developer local. | Ignore var before creating it. Deny runtime var/credentials/logs/backups from ZIP inputs and source staging. Extend package/no-development-tree checks; keep release artifacts and explicit QA output in local. |
+| documentation/targets/glossary/agent bootstrap | Describes data/, LocalAppData and source local paths. | Update current guides, launch examples, setup/root terminology, maintenance and bootstrap/MCP resources together. Leave dated history as history; label legacy migration explicitly. |
+
+Occurrences such as ~/.local/bin/claude, EndpointDiagnostics host inspection, Windows LocalApplicationData enum names and operator-supplied project paths are not blanket search-and-replace targets. They are external client locations or old/default behavior to classify, not application ownership of development local/.
+
+## Transfer decision that must precede implementation
+
+Simply moving partial bytes from the destination directory to var can cross a Windows volume/Linux mount and lose the existing atomic publication property. Do not silently trade integrity for path compliance or retain a hidden workspace partial as an undocumented exception. Plan a host-side private staging/publishing port: stage under the declared host var and qualify same-filesystem no-replace/replace publication, durable receipt and recovery. Detect cross-filesystem cases before side effects; initially refuse unsupported atomic publication with an explicit reason. A future configured private var staging location on the destination filesystem or a separately designed durable publishing protocol can extend support. No broad new filesystem rights, command capability or automatic replay is implied.
+
+The final artifact remains in the explicitly authorized user workspace (including local/ if the operator expressly requested it). Its saved result/history paths remain historical facts. Only internal temporary files, locks, caches, pending records and receipts must be reorganized; do not move delivered user files into var or rewrite old result text to pretend they were created elsewhere.
+
+## Ordered implementation lots — proposed, not started
+
+1. **Path contract and protection.** Add the shared path/layout resolver, stable installation root metadata, explicit directory/output semantics, var ignore/package exclusions and protected internal roots. Preserve deployment-format compatibility and return useful permission errors. Add tests with no local/ directory and another working directory. Do this before generating any new runtime state under var.
+2. **Windows launch and maintenance routes.** Adapt native/default/portable/CMD/source-run/MCP export, retained startup bootstrap, pipe/owner metadata and publisher/rollback root validation. Stage self-contained native binaries under var so normal operation no longer needs local SDK/Python/source helpers. Keep developer build/QA/output paths explicitly developer-owned. Test defaults, explicit local export and two isolated instances without moving real data.
+3. **Sessions, WSL and transfers.** Map generated internal work areas and owned remote state to their declared private var roots; update all paired validators/provisioning/recovery together. Preserve external workspaces/auth references and session/conversation IDs. Implement the qualified transfer staging/publication contract above. Quiescent live native inventory/permissions/mount checks require the subsequent execution GO; audit has not started WSL.
+4. **One reviewable migration command.** Produce a dry-run manifest naming old/new roots, exact owned files/references, sensitive backups, identity/permission checks, affected clients/startup entries, space needs, live-work refusal and rollback. Never merge qualification scopes or move entire mixed local trees. Upon the separate migration GO, migrate the active3-project instance with the transaction below. Retain old data as a non-running rollback source, not an implicit fallback or permanent alias into local.
+5. **Independent qualification and delivery preparation.** Update human/agent docs and MCP resources; prove operation from a standalone extracted installation with no development local tree. Verify migration, package contents, permissions/history, transfer receipts, startup and reconnect from an actual fresh MCP client without a model call. Present a measured result and next version proposal; commit/publish remains a separate authority.
+
+## Proposed migration transaction
+
+- Inventory only explicitly selected installation/data roots, owned runtime files and generated staging; classify the active mixed folder's runtime versus manual proof/export files. Preserve or quarantine unknown files for review; never delete them by omission. Identify all declared clients and inspect only their Agent Relay connection entries.
+- Detect active work/transfers and native sessions; refuse moving live state rather than stop arbitrary processes or replay work. Record/disable only the old scope's Windows startup while moving so a login cannot restart the old host. Do not boot WSL for a read-only Windows audit; migration preflight must state which host/session work it will touch.
+- Take a consistent SQLite backup/checkpoint while quiescent, preserve WAL state correctly, save configuration/credential/alert-review/native-binding files and a rollback manifest with hashes. Do not just copy relay.sqlite while its WAL is live; do not migrate lock/PID files as live ownership.
+- Copy and validate into the new var scope; do not delete or run the old copy. Rebuild disposable caches where appropriate. Preserve project/participant/workspace/session/request UUIDs, connection credential files and hashes, permissions, inbox cursors, idempotence/recovery state and transfer receipts. DPAPI protection has no application-path entropy in this implementation; retain the same Windows account/machine and verify a scoped connection rather than rotate/create credentials.
+- Rewrite only active, proven app-owned absolute references (runtime pointer, owned session staging, bootstrap metadata and selected MCP command/data arguments). Preserve user project paths, arbitrary explicit output locations and historical result paths. A blanket string replacement in database JSON could corrupt scopes/idempotence and is not an acceptable migration.
+- Start/health-check the selected new host alone. Update only the two known MCP entries and any separately inventoried authorized clients, preserving connection IDs and all unrelated client settings. Existing loaded facades keep old arguments; use a supported reconnect/clear guide, never kill unrelated Codex/Claude conversations. Complete this before claiming other projects have migrated.
+- Restore the saved startup on/off intent using the new scope's entry/bootstrap, verify its derived data path, then retire only the old entry. Check the pipe/host/credential binding now uses var and that login or a stale launcher cannot revive a second writable old instance. If native state moves, preserve/authenticate each owner and conversation reference separately.
+- On any unconfirmed credential, project/grant, journal, client/host or startup step, stop the newly owned host and restore saved pointers/configuration/registration plus the quiescent source. Do not overwrite a concurrently changed client config; do not force a rollback over newly submitted work. Report an uncertain outcome instead of replaying operations. Cleanup old state only after acceptance, with exact ownership checks.
+
+## Acceptance matrix
+
+| Check | Required result |
+| --- | --- |
+| Fresh writable installation, local absent, unrelated current directory | All owned mutable files under declared var; no local creation or source checkout/SDK requirement. |
+| Direct executable vs launchers vs MCP vs Windows startup | Same explicitly selected scope; no user-profile shadow database or duplicate tray/pipe owner. |
+| Explicit export/test destination under local | Works as a caller choice; runtime data still uses the selected real scope, no extra default local dependency. |
+| Unwritable/missing var or long startup path | Clear failure/preparation path; no silent local/LocalAppData/project fallback. |
+| Existing active3-project migration | Same IDs, grants, protected credential bytes, history/alert reviews/cursors/native conversation mappings; user workspaces unchanged. |
+| Interrupted migration, live work, changed client config, disk/permission failure | Refusal/owned rollback, no mixed writes, new blank scope, credential reset or automatic replay. |
+| File transfer same/cross filesystem, failure, retry inspection | Qualified publication only; private var staging/receipts; correct final target and replacement policy; unsupported boundary rejected before effects. |
+| Transfer to app-owned var/runtime/backups | Refused even if a broad project workspace covers the installation root. |
+| Native roots/credential references and existing sessions | UID/marker/symlink/instruction checks retained; no global auth copies or arbitrary session interruption. |
+| Package/source inventory | No actual var state, data, logs, credentials or rollback files shipped/committed; both READMEs and MCP docs match the new layout. |
+
+## Audit limits and end condition
+
+Static code and declared Windows installation/configuration coverage is complete for this audit. It does not claim a rehearsal of migration, a live Linux mount/UID inventory, credential decryption, or a cross-filesystem transfer measurement. Those checks belong to isolated qualification and explicitly authorized execution, not this read-only plan. Source/configuration/process/registry paths remain unchanged; only audit notes and developer-owned audit artifacts were written. Final source hashes and selected configuration/runtime reference comparisons close this workstream before any implementation GO.
+
+Completion approximately14:44UTC /15:44Europe/Paris, about15minutes. Final verification.json confirms163 tracked source/tool/packaging files byte-unchanged from the audit baseline, both configured MCP command/argument entries unchanged, inspected runtime pointer fields and project counts/workspace locations unchanged, no app/WSL process launch, no credential decryption, no migration and unchanged Git HEAD. The exact selected Windows startup entry was read again and matched its initial value. Whitespace checks passed. Existing source/UI modifications from earlier workstreams were retained as-is; they were not part of this audit's writes. Separate goal token consumption remains unavailable because creation was refused; no reset used. Audit/plan objective complete, implementation not authorized yet.

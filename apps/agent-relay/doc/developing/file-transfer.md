@@ -8,8 +8,10 @@
 The Windows MCP tool submits durable work through the pipe host. FileTransferService resolves a named session and invokes fixed Python helpers through wsl.exe --exec for Linux inspection/finalization. File bytes are streamed by C# FileStream through `\\wsl.localhost\<distribution>\...`, not encoded into MCP messages.
 The UNC path is a Windows filesystem access mechanism. WSL's p9rdr.sys redirector connects to its Plan9 filesystem server; WSL2 uses an internal Hyper-V socket. Agent Relay does not create that socket, mount a drive or serve SMB. See the [WSL architecture reference](https://wsl.dev/technical-documentation/plan9/).
 
-The explicit copy buffer is1MiB; managed/OS buffering is additional. Upload writes a Linux sibling temporary file, calculates a streaming hash and asks the Linux helper to verify size/SHA-256 before publication. Download hashes the Linux source first, copies into a Windows temporary file and verifies bytes/hash before moving it to the requested path.
+The explicit copy buffer is1MiB; managed/OS buffering is additional. Upload writes a private Linux var staging file, calculates a streaming hash and asks the Linux helper to verify size/SHA-256 before publication. Download hashes the Linux source first, copies into a private Windows var staging file and verifies bytes/hash before moving it to the requested path.
 Linux publication uses a hard link when replacement is forbidden and os.replace when explicitly allowed, followed by directory synchronization and a durable Linux receipt. The Windows service stores the confirmed transfer receipt in SQLite before returning success. If publication precedes receipt persistence and the host stops, completion can remain unknown; it is never automatically recopied.
+
+Partial files live in the selected Windows data scope's staging/transfers or the native session's private data/staging/transfers. They are not siblings of the requested final file. Staging and final destination must share a filesystem/volume for atomic publication; different filesystems are refused before copying. See [runtime storage](runtime-storage.md) for ownership and migration.
 
 ## Limits and costs
 
@@ -20,7 +22,7 @@ Linux publication uses a hard link when replacement is forbidden and os.replace 
 | Time |180seconds default, configurable30..3600 through transfers.waitSeconds; helper hashing shares this deadline | Size alone does not guarantee acceptance; this removes the independent20second hashing cap |
 | Memory |1MiB explicit streaming buffer | No whole-file payload allocation; do not describe this as total process memory usage |
 | Integrity | Linux performs an additional full read for SHA-256 | Verification has measurable disk/CPU cost |
-| Disk | Full destination temporary file; existing target retained until publication | Require free space for the temporary alongside an existing destination |
+| Disk | Full private staging file on the destination filesystem; existing target retained until publication | Require free space for the staging file and retained destination; cross-filesystem atomic publication is refused |
 | Many files | Per-file operation, helper startup, metadata access, flush/hash/receipt | High fixed cost; no batching or whole-directory manifest |
 | Parallelism | One relay operation per session, shared with messages | Concurrent sessions are possible, not multiple copies within one session |
 | Feedback | Durable byte/total/phase progress, at most twice per second, plus cancel_operation | No measured rate/ETA promise; cancellation is not rollback |

@@ -1,4 +1,5 @@
 """Durable, run-owned relay files. Never resolves credential symlink contents."""
+import re
 import json
 import os
 from pathlib import Path
@@ -6,10 +7,19 @@ import uuid
 import sqlite3
 
 
+def valid_root(value):
+    text = str(value)
+    return bool(re.fullmatch(r'/srv/agent-relay/var/apps/agent-relay/(sessions/[0-9a-f]{32}|profiles/[a-zA-Z0-9-]+)', text) or re.fullmatch(r'/srv/agent-relay-[a-zA-Z0-9-]+', text))
+
+
+def session_root(value):
+    return str(value).startswith('/srv/agent-relay/var/apps/agent-relay/sessions/') or Path(value).name.startswith('agent-relay-session-')
+
+
 def root_path(value):
     root = Path(value)
-    if root.parent != Path('/srv') or not root.name.startswith('agent-relay-') or root.is_symlink():
-        raise ValueError('Expected a dedicated /srv/agent-relay-* root')
+    if not valid_root(root) or root.is_symlink():
+        raise ValueError('Expected a dedicated relay var root or an explicit legacy root')
     if root.resolve() != root or root.stat().st_uid != os.getuid():
         raise PermissionError('Relay root must belong to the current Linux user')
     return root

@@ -17,11 +17,14 @@ This organization follows the operator's multi-application requirement (evidence
 | `local/apps/<id>/` | Ignored application experiment data |
 | `local/toolchains/` | Ignored tool configuration and qualification reports |
 | `local/migrations/` | Reversible snapshots and file maps |
+| `var/apps/<id>/` | Application-owned runtime state, caches, logs, staging and operational migration snapshots |
 
 Use lowercase kebab-case application identifiers. Register each application and its driver explicitly. Mutating commands require application selection.
 Keep SDK pins inside each application. Future applications may use another language without inheriting Agent Relay's .NET requirements.
 Create shared packages only after concrete reuse exists.
 Generated .NET `bin/` and `obj/` directories and local data are ignored. Local snapshots are temporary rollback aids, not a substitute for version control.
+
+local/ belongs to developers/operators and is never an application prerequisite. Explicit exports/tests there are allowed. Runtime var/ is relative to the operating installation/workspace root, not nested inside apps/<id>/. Configured user workspaces remain separate and are never moved by an internal-storage migration.
 
 ## Agent Relay
 

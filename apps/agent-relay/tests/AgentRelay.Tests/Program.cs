@@ -2,6 +2,8 @@ using AgentRelay.Core;
 using AgentRelay.Infrastructure;
 using System.IO.Pipes;
 
+if (args.Length == 3 && args[0] == "monitor-dates") { await UiRenderScenarios.Dates(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); Console.WriteLine("NATIVE_DATES=PASS"); return; }
+
 if (args.Length == 3 && args[0] == "monitor-startup") { await UiRenderScenarios.Startup(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); Console.WriteLine("NATIVE_STARTUP=PASS"); return; }
 
 if (args.Length == 2 && args[0] == "monitor-fixture") { await MonitorScenarios.Seed(Path.GetFullPath(args[1])); return; }
@@ -11,6 +13,8 @@ if (args.Length == 4 && args[0] == "monitor-conformance") { await UiRenderScenar
 if (args.Length == 3 && args[0] == "monitor-review") { await UiRenderScenarios.Review(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); Console.WriteLine("NATIVE_REVIEW=PASS"); return; }
 if (args.Length == 3 && args[0] == "monitor-usability") { await UiRenderScenarios.Usability(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); Console.WriteLine("NATIVE_USABILITY=PASS"); return; }
 var data = Path.GetFullPath(args.Single());
+DateDisplayScenarios.Run();
+StorageScenarios.Run(Path.Combine(data, "storage"));
 MonitorScenarios.Run();
 AttentionReviewScenarios.Run(Path.Combine(data,"attention-reviews"));
 var errors = new List<Exception>();

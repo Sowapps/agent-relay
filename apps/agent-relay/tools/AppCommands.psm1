@@ -10,7 +10,7 @@ function New-AppCommandContext {
     [pscustomobject]@{
         RepositoryRoot = $RepositoryRoot; Application = $application; Status = $status
         CacheRoot = (Join-Path $RepositoryRoot 'local/toolchains/cache')
-        DataDirectory = (Join-Path $RepositoryRoot 'local/apps/agent-relay/data')
+        DataDirectory = (Join-Path $RepositoryRoot 'var/apps/agent-relay/default')
     }
 }
 
@@ -73,7 +73,7 @@ function Start-App {
     param($Context, [switch] $Offline)
     Build-App $Context -Offline:$Offline
     $assembly = Get-AppAssembly $Context $Context.Application.Manifest.RunProject
-    $assembly = Get-StagedApplication $assembly (Join-Path $Context.RepositoryRoot 'local/apps/agent-relay/run')
+    $assembly = Get-StagedApplication $assembly (Join-Path $Context.RepositoryRoot 'var/apps/agent-relay/run') $Context.RepositoryRoot
     $start = [Diagnostics.ProcessStartInfo]::new($Context.Status.DotnetPath)
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true

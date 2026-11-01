@@ -1,4 +1,5 @@
 """Scoped V1 acceptance in explicit persistent owned resources; paid phases are once-only."""
+from runtime_layout import runtime_command
 import argparse
 from contextlib import ExitStack
 from datetime import datetime, timezone
@@ -21,7 +22,7 @@ data = args.data.resolve()
 assert data.is_relative_to(root / 'local/apps/agent-relay')
 data.mkdir(parents=True, exist_ok=True)
 runtime = json.loads((data / 'mcp-runtime.json').read_text(encoding='utf-8-sig'))
-base = [runtime['dotnet'], runtime['assembly']]
+base = runtime_command(runtime)
 manifest = data / 'v1-acceptance.json'
 
 

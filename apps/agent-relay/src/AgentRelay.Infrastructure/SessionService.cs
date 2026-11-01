@@ -47,9 +47,9 @@ public sealed class SessionService
                 ?? throw new RelayException("not_found", "The configured profile does not exist.");
             if (definition is not null) template = template with { AllowLocalWork = definition.AllowLocalWork, Workspace = definition.Workspace.Location };
             if (template.Client == "command") throw new RelayException("capability_denied", "Native sessions require a Codex or Claude profile.");
-            record ??= new(id, name.Trim(), profileId, template, "/srv/agent-relay-session-" + id.ToString("N"), "preparing", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
-                WindowsWorkspace: Path.Combine(Path.GetFullPath(dataDirectory) + "-workspaces", id.ToString("N")));
-            record = record with { WindowsWorkspace = record.WindowsWorkspace ?? Path.Combine(Path.GetFullPath(dataDirectory) + "-workspaces", id.ToString("N")), Definition = definition ?? record.Definition };
+            record ??= new(id, name.Trim(), profileId, template, RuntimePaths.NativeSession(id), "preparing", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+                WindowsWorkspace: RuntimePaths.SessionWorkspace(dataDirectory, id));
+            record = record with { WindowsWorkspace = record.WindowsWorkspace ?? RuntimePaths.SessionWorkspace(dataDirectory, id), Definition = definition ?? record.Definition };
             Directory.CreateDirectory(record.WindowsWorkspace!);
             await store.SaveAsync(id, record, token);
             try

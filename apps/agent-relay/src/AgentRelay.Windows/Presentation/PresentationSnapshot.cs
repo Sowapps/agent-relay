@@ -13,7 +13,7 @@ internal static class PresentationSnapshot
     private static string Key(string prefix, string value) => prefix + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)))[..16].ToLowerInvariant();
     private static string TaskKey(Guid projectId, Guid taskId) => projectId.ToString("D") + ":" + taskId.ToString("D");
     private static string State(string state) => state == "awaiting_approval" ? "attention" : state;
-    private static string Stamp(DateTimeOffset at) => at.ToLocalTime().ToString("yyyy-MM-ddTHH:mm:sszzz");
+    private static string Stamp(DateTimeOffset at) => at.ToLocalTime().ToString("yyyy-MM-ddTHH:mm:sszzz", System.Globalization.CultureInfo.InvariantCulture);
     private static string Initial(string name) => string.Concat(name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(part => part[..1])).ToUpperInvariant();
     private static readonly string[] Colors = ["blue", "purple", "green"];
 
@@ -52,7 +52,7 @@ internal static class PresentationSnapshot
         {
             schemaVersion = 1,
             revision = observations.Sum(item => item.Revision),
-            referenceDate = observedAt.ToLocalTime().ToString("yyyy-MM-dd"),
+            referenceDate = observedAt.ToLocalTime().ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
             observedAt = Stamp(observedAt),
             relay = online ? "ready" : "offline",
             relayError = error,
@@ -119,7 +119,7 @@ internal static class PresentationSnapshot
                     senderId = message.SenderEndpointId?.ToString("D"), recipientId = message.RecipientEndpointId?.ToString("D"),
                     kind = message.InReplyTo is null ? "independent" : "reply", operation = linked is null ? null : message.InReplyTo?.ToString("D"),
                     taskId = linked is null ? null : TaskKey(linked.ProjectId, linked.Id), message.Text,
-                    stamp = Stamp(message.ReceivedAt), time = message.ReceivedAt.ToLocalTime().ToString("HH:mm"), unread = false,
+                    stamp = Stamp(message.ReceivedAt), time = DisplayDateTime.Time(message.ReceivedAt), unread = false,
                     technical = message
                 };
             }).ToArray()
@@ -136,7 +136,7 @@ internal static class PresentationSnapshot
             taskId = TaskKey(scope.ProjectId, operation.Request.TaskId ?? operation.Request.Id),
             participantId = scope.RecipientId.ToString("D"), initiatorId = scope.SenderId.ToString("D"),
             operation.Request.Kind, title = MonitorComponents.OperationTitle(operation),
-            state = State(operation.State), stamp = Stamp(operation.CreatedAt), time = operation.CreatedAt.ToLocalTime().ToString("HH:mm"),
+            state = State(operation.State), stamp = Stamp(operation.CreatedAt), time = DisplayDateTime.Time(operation.CreatedAt),
             updatedAt = Stamp(operation.UpdatedAt), request = operation.Request.Text,
             result = operation.Error is not null ? UserMessages.Error(operation.ErrorCode) : operation.Result?.Output ?? "En attente de confirmation…",
             workspace = operation.Result?.Details?.GetValueOrDefault("workspace") ?? operation.Metadata?.Context ?? configuration.Workspaces.FirstOrDefault(item => item.Id == scope.WorkspaceId)?.Location,

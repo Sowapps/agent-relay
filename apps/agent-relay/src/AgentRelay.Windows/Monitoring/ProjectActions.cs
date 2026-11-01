@@ -87,7 +87,7 @@ internal sealed partial class ProjectWindow
                 case "operation-events":
                     var eventWork = Operations.FirstOrDefault(item => item.Request.Id == id) ?? throw new RelayException("not_found","Operation unavailable");
                     var events = (await client.RequestAsync(new("project",ProjectAction:new("observe_events",Query:new(eventWork.Request.Scope!.ProjectId,TaskId:eventWork.Request.TaskId,Limit:50))),lifetime.Token)).Project!.Events!;
-                    var entries = events.Items.Where(item=>item.RequestId==id).Select(item=>item.OccurredAt.ToLocalTime().ToString("dd/MM HH:mm:ss")+" · "+item.State+" · "+item.ErrorCode);
+                    var entries = events.Items.Where(item=>item.RequestId==id).Select(item=>DisplayDateTime.Format(item.OccurredAt, seconds: true)+" · "+item.State+" · "+item.ErrorCode);
                     Presentation.Send(new { type="operation-diagnostic", id=id.ToString("D"), text=string.Join("\n",entries)+(events.HasMore ? "\nPage partielle ; historique complet accessible via MCP." : "") }); break;
                 case "inspect-partial":
                     var transfer = Operations.FirstOrDefault(item=>item.Request.Id==id && item.Request.Kind=="transfer") ?? throw new RelayException("not_found","Transfer unavailable");

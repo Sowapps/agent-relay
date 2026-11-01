@@ -9,14 +9,16 @@ import uuid
 from relay_mcp import RelayMcp
 
 parser=argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--dotnet',required=True,type=Path)
-parser.add_argument('--assembly',required=True,type=Path)
+parser.add_argument('--dotnet',type=Path)
+parser.add_argument('--assembly',type=Path)
+parser.add_argument('--executable',type=Path)
 parser.add_argument('--output',required=True,type=Path)
 args=parser.parse_args()
 root=Path(__file__).resolve().parents[3]
 output=args.output.resolve();output.mkdir(parents=True,exist_ok=True)
 with (output/'facade.stderr.log').open('w',encoding='utf-8') as errors:
-    client=RelayMcp({'dotnet':str(args.dotnet.resolve()),'assembly':str(args.assembly.resolve())},output/'facade-data',root,errors)
+    runtime={'executable':str(args.executable.resolve())} if args.executable else {'dotnet':str(args.dotnet.resolve()),'assembly':str(args.assembly.resolve())}
+    client=RelayMcp(runtime,output/'facade-data',root,errors)
     try:
         resources=client.call('resources/list')['resources']
         guides={resource['uri']:client.call('resources/read',{'uri':resource['uri']})['contents'][0]['text'] for resource in resources}

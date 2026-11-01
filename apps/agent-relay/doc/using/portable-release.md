@@ -20,7 +20,7 @@ From the extracted root, or by double-clicking the launchers:
 ./Start-AgentRelay.cmd
 ```
 
-Keep the host running. Default package data lives in data/, separate from app/ and user project workspaces. No project, credential, native session, startup registration or global MCP setting is created by initialization. Double-click Start-AgentRelay.cmd for the same scope; directly double-clicking app/AgentRelay.Windows.exe instead uses its separate default LocalAppData scope. Always choose the launcher or explicit --data-dir.
+Keep the host running. Default package data lives in var/apps/agent-relay/default/, separate from app/ and user project workspaces. No project, credential, native session, startup registration or global MCP setting is created by initialization. Double-click Start-AgentRelay.cmd for the same scope; directly double-clicking app/AgentRelay.Windows.exe uses that same scope. app/installation.json declares the installation root, so the current directory does not change storage. An explicit --data-dir selects exactly that location and is never silently rewritten.
 
 WebView2 is a separate system prerequisite. The package is unsigned. No signature or clean-machine prerequisite installation is claimed by the package smoke checks. .NET runtime security updates require rebuilding/releasing the package, rather than assuming a global .NET update patches its included runtime. Microsoft documents this deployment model at https://learn.microsoft.com/en-us/dotnet/core/deploying/ .
 
@@ -33,7 +33,7 @@ The current interface is in French. For a native participant, use Réglages → 
 For authorized scripted administration, tools/new-project-request.ps1 (PowerShell7.2+) generates full additive configuration and connection requests. It creates no project/permission itself. Example from the extracted root; supply existing authorized folders:
 
 ```powershell
-$data = Join-Path (Get-Location) 'data'
+$data = Join-Path (Get-Location) 'var/apps/agent-relay/default'
 $requests = Join-Path (Get-Location) 'requests-first'
 ./tools/new-project-request.ps1 -DataDirectory $data -Name 'My project' -MainWorkspace 'C:\existing\main' -PeerWorkspace 'C:\existing\peer' -OutputDirectory $requests -LocalOnly
 # Review configure-project.request.json: preserve every earlier project/grant.
@@ -47,11 +47,11 @@ $context = Get-Content (Join-Path $requests 'example-context.json') -Raw | Conve
 
 LocalOnly is discovery/history preparation, not a native agent simulation. For a real native profile, use an explicit existing ProfileId and absolute Linux peer workspace instead of LocalOnly, as described in bootstrap.md. Never infer profile/provider from role or grant all capabilities to make a test pass. The administrative CLI requires separate local authority, and refuses unsafe changes while busy.
 
-Alternatively prepare a connection from Console technique → select intended project/principal → Paramètres → Préparer la connexion MCP de ce projet, then rerun Initialize-Relay.cmd. The initializer exports the nonsecret UUID reference; protected credentials remain in data/. It never edits a client's settings.
+Alternatively prepare a connection from Console technique → select intended project/principal → Paramètres → Préparer la connexion MCP de ce projet, then rerun Initialize-Relay.cmd. The initializer exports the nonsecret UUID reference; protected credentials remain in var/apps/agent-relay/default/. It never edits a client's settings.
 
 ## Connect and verify MCP
 
-Merge data/mcp.windows.json or data/mcp.codex.toml into the caller's supported MCP configuration after review. This package uses app/AgentRelay.Windows.exe directly with mcp, explicit --data-dir and --connection-id; it does not use the checkout's Python launcher, runtime pointer format or SDK. Start/reload through that client's supported lifecycle, never an invented restart control. Regenerate fragments after changing identity or moving the package. Existing connections do not silently change identity.
+Merge var/apps/agent-relay/default/mcp.windows.json or var/apps/agent-relay/default/mcp.codex.toml into the caller's supported MCP configuration after review. This package uses app/AgentRelay.Windows.exe directly with mcp, explicit --data-dir and --connection-id; it does not use the checkout's Python launcher, runtime pointer format or SDK. Start/reload through that client's supported lifecycle, never an invented restart control. Regenerate fragments after changing identity or moving the package. Existing connections do not silently change identity.
 
 Read resources/list and the public quickstart/tools/bootstrap/portable-release/request-example resources. Call list_projects and confirm the expected UUID and explicit rights. For LocalOnly, empty list_results/list_sessions with the selected project_id is valid. Native open/send/inspect work requires its actual task authorization; read agent-quickstart.md before it. Opening a connection alone is not a model call.
 
@@ -61,4 +61,4 @@ The window is a monitoring/debugging interface. Agents primarily configure and o
 
 The window close button hides the application; tray Ouvrir reopens and Quitter exits. Separate data scopes have separate tray instances. Réglages → Général → Démarrage avec Windows enables/disables optional startup at Windows sign-in. It is off by default, starts only the relay quietly in the notification area and does not launch an agent/task. Registration applies only to the current Windows user and explicit data scope. Windows may independently block the registered launch in its startup settings. Disabling does not quit the running relay; Quitter does not disable future startup.
 
-Upgrades are deliberate: quit, back up data, extract another version, initialize it with the same explicit data directory and retain rollback material. The retained data/startup-launcher bootstrap follows data/mcp-runtime.json, so successful initialization selects the new runtime without a second Run entry. Keep the old runtime until verification/rollback is finished. Disable startup before moving installation/data paths, then initialize and enable again at the new location. Keep startup-launcher while startup is enabled. Its runtime files use hard links only from immutable staged payloads; other installations/filesystems use copies (roughly the bundled runtime size). It makes no network request or prerequisite installation. Startup failures are recorded in data/startup.log. Do not copy a running SQLite database as an upgrade strategy or run two hosts on one data scope.
+Upgrades are deliberate: quit, back up data, extract another version, initialize it with the same explicit data directory and retain rollback material. The retained var/apps/agent-relay/default/startup-launcher bootstrap follows var/apps/agent-relay/default/mcp-runtime.json, so successful initialization selects the new runtime without a second Run entry. Keep the old runtime until verification/rollback is finished. Disable startup before moving installation/data paths, then initialize and enable again at the new location. Keep startup-launcher while startup is enabled. Its runtime files use hard links only from immutable staged payloads; other installations/filesystems use copies (roughly the bundled runtime size). It makes no network request or prerequisite installation. Startup failures are recorded in var/apps/agent-relay/default/startup.log. Do not copy a running SQLite database as an upgrade strategy or run two hosts on one data scope.

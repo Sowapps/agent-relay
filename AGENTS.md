@@ -15,6 +15,9 @@ Information, prerequisites, availability and acceptance of a proposal are not pe
 A GO applies only to its stated scope. Do not expand a POC into MVP development or apply configurations globally.
 (evidence `2026-10-28-work-starts-only-after-explicit-go`)
 
+Within an authorized workstream, use a dedicated `codex/<scope>` branch and commit/push completed changes without a separate permission request. For validation, merge it into the integration branch (currently `main`), push the merged state and deploy authorized changes that are not yet deployed. Preserve existing data and follow the normal checks; never force-push over unrelated work. This standing delivery authorization does not start a new workstream or authorize tags/releases.
+(evidence `2026-11-01-dedicated-branch-delivery`)
+
 ## Goals and reporting
 
 Start an authorized workstream with a tracked objective. Use its consumption and timing data in the result. Keep user-facing plans and reports short; keep technical detail in the appropriate files.

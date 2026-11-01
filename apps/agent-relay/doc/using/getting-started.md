@@ -13,9 +13,9 @@ When a required relay choice is missing, propose only the minimum needed: which 
 
 ## What to give your agent
 
-Describe what you want to accomplish, the repository/release address and any existing installation. Starting from zero means Agent Relay and its prerequisites may be absent: you still need an existing agent client and access to the private repository. The client needs authorized local tools to perform setup, or must guide your manual steps. Identify existing project folders, if known, and whether an agent already works in WSL. State the permitted changes or ask for a preparation proposal first. The agent should inspect available tools/access before claiming it can download, configure a client or control the application.
+Describe what you want to accomplish, the repository/release address and any existing installation. Starting from zero means Agent Relay and its prerequisites may be absent: you still need an existing agent client and access to the repository. The client needs authorized local tools to perform setup, or must guide your manual steps. Identify existing project folders, if known, and whether an agent already works in WSL. State the permitted changes or ask for a preparation proposal first. The agent should inspect available tools/access before claiming it can download, configure a client or control the application.
 
-An agent with only a scoped relay MCP connection can operate within its grants. Preparing an installation or adding a project requires separately authorized local administration. If it lacks filesystem/shell or application access, it should give exact steps rather than pretend it performed them. Private GitHub access, native client login and approval prompts may require the account holder; never send credentials in a conversation.
+An agent with only a scoped relay MCP connection can operate within its grants. Preparing an installation or adding a project requires separately authorized local administration. If it lacks filesystem/shell or application access, it should give exact steps rather than pretend it performed them. Native client login and approval prompts may require the account holder; never send credentials in a conversation.
 
 ## Understand your project and its paths
 
@@ -28,7 +28,7 @@ The project has an identity separate from its display name, folders and sessions
 | Location | What belongs there | Example only |
 | --- | --- | --- |
 | Installation directory / Dossier d'installation | The extracted application and launchers | `C:\Tools\AgentRelay` |
-| Data directory / Dossier de données | Relay configuration, protected connection credentials and retained history | `C:\Tools\AgentRelay\data` for the portable launcher's default scope |
+| Data directory / Dossier de données | Relay configuration, protected connection credentials and retained history | `C:\Tools\AgentRelay\var\apps\agent-relay\default` for the portable launcher's default scope |
 | Windows Workspace / Espace de travail | Existing files an authorized participant may read or change | `C:\Work\website` |
 | Linux Workspace / Espace de travail | Existing working folder in the selected WSL distribution | `/home/me/work/website` |
 
@@ -42,7 +42,7 @@ Ask the agent for a concise proposal first. It identifies the approved release/a
 
 After the corresponding authorization:
 
-1. Retrieve the Windows x64 release and checksum from the approved private repository; verify and extract the whole archive to the selected persistent folder.
+1. Retrieve the Windows x64 release and checksum from the approved repository; verify and extract the whole archive to the selected persistent folder.
 2. Read START-HERE.txt and the [portable guide](portable-release.md). Verify prerequisites rather than installing implicitly. Windows monitoring/direct MCP includes .NET; graphical runtime and native WSL prerequisites are handled only if needed and authorized.
 3. Initialize the chosen data scope and start the relay. Keep that scope explicit throughout configuration and client registration.
 4. Associate a first real project with selected participants, existing workspaces and required permissions. Create its participant-scoped MCP connection through authorized administration.

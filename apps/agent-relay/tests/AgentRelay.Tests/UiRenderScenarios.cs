@@ -62,6 +62,15 @@ internal static partial class UiRenderScenarios
                     throw new Exception("Native review action was not durably acknowledged");
                 }
                 await view.CaptureAsync(Path.Combine(directory,"after-review.png"));
+                var toastShape=await view.EvaluateForVerificationAsync("(()=>{const toast=document.querySelector('#toast'),text=toast.querySelector('.toast-text'),button=toast.querySelector('button');if(!text||!button)return false;const box=toast.getBoundingClientRect(),a=text.getBoundingClientRect(),b=button.getBoundingClientRect();return text.textContent==='Marqué comme examiné.'&&button.textContent==='Voir dans l’historique'&&b.left>=a.right&&box.width<500&&box.height<70&&box.left>=16&&box.right<=innerWidth-16})()");
+                if(toastShape!="true")throw new Exception("Review toast is not a compact horizontal notification");
+                await view.EvaluateForVerificationAsync("document.querySelector('#toast').style.maxWidth='280px'");
+                var narrowToast=await view.EvaluateForVerificationAsync("(()=>{const toast=document.querySelector('#toast'),text=toast.querySelector('.toast-text').getBoundingClientRect(),button=toast.querySelector('button').getBoundingClientRect(),box=toast.getBoundingClientRect();return box.width<=280&&button.left>=text.right&&button.right<=box.right&&toast.scrollWidth<=toast.clientWidth})()");
+                if(narrowToast!="true")throw new Exception("Review toast overflows at constrained width");
+                await view.EvaluateForVerificationAsync("new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>resolve(true))))");
+                await view.CaptureAsync(Path.Combine(directory,"toast-constrained.png"));
+                await view.EvaluateForVerificationAsync("document.querySelector('#toast').style.maxWidth='';document.querySelector('#toast [data-action=history-operation]').click()");
+                if(await view.EvaluateForVerificationAsync("document.querySelector('#toast').hidden&&!!document.querySelector('.detail-panel')")!="true")throw new Exception("Toast history shortcut did not open operation details");
                 window.Controls.Remove(project);
             }
             using var reopened=new ProjectWindow(data){TopLevel=false,Dock=DockStyle.Fill};

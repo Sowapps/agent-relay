@@ -11,11 +11,11 @@ Tu conserves tes instructions, ton organisation et tes habitudes avec tes agents
 
 ## Partir de zéro : Agent Relay n'est pas installé
 
-Il te faut déjà un client agent et un accès au dépôt privé **Sowapps/agent-relay**. Pour préparer le relais, l'agent utilise ses outils locaux autorisés ou te guide manuellement. « Partir de zéro » concerne le relais et ses prérequis.
+Il te faut déjà un client agent et un accès au dépôt **Sowapps/agent-relay**. Pour préparer le relais, l'agent utilise ses outils locaux autorisés ou te guide manuellement. « Partir de zéro » concerne le relais et ses prérequis.
 
 Copie ce prompt dans ton client habituel :
 
-> Aide-moi à démarrer avec Agent Relay, dépôt privé Sowapps/agent-relay : https://github.com/Sowapps/agent-relay. J'ai déjà ce client agent ; le relais et ses prérequis peuvent être absents. Lis le README et le guide de démarrage, vérifie tes outils et accès, puis propose brièvement les changements et emplacements nécessaires. Conserve mes instructions, mon organisation et mes règles d'autorisation ; clarifie les ambiguïtés avant d'agir. Après mon GO, récupère, vérifie et extrais la release stable, prépare les prérequis manquants autorisés, lance l'application, connecte ce client par MCP et crée avec moi un premier projet relayé dans les dossiers existants que je désigne. Vérifie la connexion et un petit échange convenu, puis montre-moi où le suivre. Demande les choix, permissions ou authentifications manquants ; guide les étapes que tes outils ne permettent pas d'effectuer.
+> Aide-moi à démarrer avec Agent Relay, dépôt Sowapps/agent-relay : https://github.com/Sowapps/agent-relay. J'ai déjà ce client agent ; le relais et ses prérequis peuvent être absents. Lis le README et le guide de démarrage, vérifie tes outils et accès, puis propose brièvement les changements et emplacements nécessaires. Conserve mes instructions, mon organisation et mes règles d'autorisation ; clarifie les ambiguïtés avant d'agir. Après mon GO, récupère, vérifie et extrais la release stable, prépare les prérequis manquants autorisés, lance l'application, connecte ce client par MCP et crée avec moi un premier projet relayé dans les dossiers existants que je désigne. Vérifie la connexion et un petit échange convenu, puis montre-moi où le suivre. Demande les choix, permissions ou authentifications manquants ; guide les étapes que tes outils ne permettent pas d'effectuer.
 
 Les [releases Windows](https://github.com/Sowapps/agent-relay/releases) incluent .NET : aucun SDK à installer pour lancer l'application. Ton agent vérifiera les autres prérequis nécessaires, notamment WebView2 pour l'interface et ceux du travail dans WSL.
 
@@ -23,7 +23,7 @@ Les [releases Windows](https://github.com/Sowapps/agent-relay/releases) incluent
 
 Indique le but du travail et les dossiers existants à utiliser, puis copie ce prompt :
 
-> Aide-moi à utiliser Agent Relay pour ce travail : [objectif et dossiers existants]. Le relais est déjà installé. Consulte le dépôt privé Sowapps/agent-relay : https://github.com/Sowapps/agent-relay. Lis son README et son guide de démarrage. Identifie l'installation, ses données et la portée de la connexion MCP. Respecte mon organisation et les règles du projet. Propose uniquement les participants, espaces de travail, permissions et réglages manquants ; attends mon GO avant modification. Préserve les projets et l'historique existants. Vérifie le projet attendu avec list_projects, puis montre-moi où suivre son activité.
+> Aide-moi à utiliser Agent Relay pour ce travail : [objectif et dossiers existants]. Le relais est déjà installé. Consulte le dépôt Sowapps/agent-relay : https://github.com/Sowapps/agent-relay. Lis son README et son guide de démarrage. Identifie l'installation, ses données et la portée de la connexion MCP. Respecte mon organisation et les règles du projet. Propose uniquement les participants, espaces de travail, permissions et réglages manquants ; attends mon GO avant modification. Préserve les projets et l'historique existants. Vérifie le projet attendu avec list_projects, puis montre-moi où suivre son activité.
 
 ## Comprendre le projet et les chemins
 
@@ -34,7 +34,7 @@ Trois emplacements ont des usages distincts :
 | Emplacement | Ce qu'il contient |
 | --- | --- |
 | **Dossier d'installation / Installation directory** | L'application et ses lanceurs, dans un emplacement pérenne accessible en écriture. |
-| **Dossier de données / Data directory** | Configuration et historique ; par défaut, `data` dans l'installation portable lancée avec ses scripts. |
+| **Dossier de données / Data directory** | Configuration et historique ; par défaut, `var/apps/agent-relay/default` sous la racine de l'installation. |
 | **Espace de travail / Workspace** | Les fichiers du projet. Un chemin Windows et un chemin Linux peuvent désigner des copies différentes. |
 
 Si une installation existe, ton agent doit retrouver ses emplacements réels plutôt qu'en créer une seconde par défaut. Tes fichiers de travail ne vont pas dans les dossiers de l'application ou de ses données.

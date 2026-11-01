@@ -53,9 +53,9 @@ internal static class ProjectScenarios
         var mismatch = uncertain with { Request = operation with { Scope = scope with { ProjectId = projectB } } };
         if ((await adapter.ReconcileAsync(mismatch, CancellationToken.None)).State != "unknown") throw new Exception("Foreign receipt was accepted.");
         Console.WriteLine("PASS: scoped transfer recovery confirms a matching durable receipt without replay, refuses a foreign scope");
-        var localFiles = Path.Combine(data, "transfer-work"); Directory.CreateDirectory(localFiles);
+        var localFiles = data + "-transfer-work"; Directory.CreateDirectory(localFiles);
         var final = Path.Combine(localFiles, "target.bin"); await File.WriteAllTextAsync(final, "keep");
-        var partial = Path.Combine(localFiles, ".relay-transfer-" + operation.Id.ToString("D") + ".part"); await File.WriteAllTextAsync(partial, "partial");
+        var partial = RuntimePaths.TransferPartial(data, operation.Id); Directory.CreateDirectory(Path.GetDirectoryName(partial)!); await File.WriteAllTextAsync(partial, "partial");
         var bridge = new WslBridge(); var settings = new SettingsStore(data); var sessions = new SessionService(data, settings, new(settings, bridge), bridge);
         var fileAdapter = new FileTransferService(sessions, bridge, database);
         var placeholder = new WslProfile("unused", "Unused", "Unused", "unused", "/srv/agent-relay-unused", "codex", []);

@@ -29,17 +29,17 @@ Keep your existing instructions, roles, approvals and working habits. Agent Rela
 
 ## Start with your agent
 
-The private [Windows releases](https://github.com/Sowapps/agent-relay/releases) provide a portable archive with .NET included. You need an existing agent client with authorized local tools, or one that can guide your manual steps, plus access to the private repository. Your agent can then guide setup.
+The [Windows releases](https://github.com/Sowapps/agent-relay/releases) provide a portable archive with .NET included. You need an existing agent client with authorized local tools, or one that can guide your manual steps, plus access to the repository. Your agent can then guide setup.
 
 ### Starting from zero — Agent Relay not installed
 
 Copy this into your usual agent client:
 
-> Help me set up Agent Relay; I already have this agent client, but Agent Relay and its prerequisites may not be installed. Use its private GitHub repository Sowapps/agent-relay: https://github.com/Sowapps/agent-relay. Read its README and getting-started guide, check your local tools, repository access and existing prerequisites, and propose the changes and locations briefly. Respect my instructions and approval rules; clarify ambiguous scope before acting. Once I authorize the scope, retrieve and prepare the appropriate release, handle missing prerequisites, connect this client to the relay through MCP and help create a first project using the existing folders I identify. Verify the connection and an agreed small exchange, then show me where to monitor its progress. Ask only for missing choices, permissions or authentication you cannot handle; guide me through any step your tools cannot perform.
+> Help me set up Agent Relay; I already have this agent client, but Agent Relay and its prerequisites may not be installed. Use its GitHub repository Sowapps/agent-relay: https://github.com/Sowapps/agent-relay. Read its README and getting-started guide, check your local tools, repository access and existing prerequisites, and propose the changes and locations briefly. Respect my instructions and approval rules; clarify ambiguous scope before acting. Once I authorize the scope, retrieve and prepare the appropriate release, handle missing prerequisites, connect this client to the relay through MCP and help create a first project using the existing folders I identify. Verify the connection and an agreed small exchange, then show me where to monitor its progress. Ask only for missing choices, permissions or authentication you cannot handle; guide me through any step your tools cannot perform.
 
 ### Starting another project — relay already ready
 
-> Help me connect this work to my existing Agent Relay installation: [purpose and existing folders]. For Agent Relay's documentation, use its private GitHub repository Sowapps/agent-relay: https://github.com/Sowapps/agent-relay. Read its README and getting-started guide, check your access and discover my actual relay installation and connection scope. Keep my agent organization and rules. Propose only missing participants/workspaces/permissions, and follow my approval process before changes. Preserve existing projects, verify the chosen project through MCP and show me where to monitor its activity.
+> Help me connect this work to my existing Agent Relay installation: [purpose and existing folders]. For Agent Relay's documentation, use its GitHub repository Sowapps/agent-relay: https://github.com/Sowapps/agent-relay. Read its README and getting-started guide, check your access and discover my actual relay installation and connection scope. Keep my agent organization and rules. Propose only missing participants/workspaces/permissions, and follow my approval process before changes. Preserve existing projects, verify the chosen project through MCP and show me where to monitor its activity.
 
 The [getting-started guide](apps/agent-relay/doc/using/getting-started.md) explains what to provide, how to choose paths and what the agent should verify.
 
