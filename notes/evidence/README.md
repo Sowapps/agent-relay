@@ -5,6 +5,9 @@
 
 ## Records
 
+- [General and project settings separation](2026-11-01-project-settings-separation.md): full general project directory and dedicated project settings.
+- [Guarded project archive](2026-11-01-guarded-project-archive.md): two states, protected preflight/admission and retained history.
+
 - [Dedicated branch delivery](2026-11-01-dedicated-branch-delivery.md): autonomous scoped commit/push, integration merge and deployment of missing changes.
 
 - [V1 correction GO](2026-10-29-go-authorizes-v1-correction-plan.md): continuous implementation, tests and documentation of the scoped correction plan.

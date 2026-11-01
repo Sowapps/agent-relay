@@ -7,6 +7,11 @@ internal static class UserMessages
     public static string WorkState(string state) => state switch { "pending" => "En attente", "running" => "En cours", "completed" => "Terminé", "failed" => "Échec", "awaiting_approval" => "Autorisation attendue", _ => "À confirmer" };
     public static string Error(string? code) => code switch
     {
+        "project_archived" => "Ce projet est archivé. Son historique reste consultable ; réactivez-le avant une nouvelle opération.",
+        "archive_blocked" => "Le projet n’a pas été archivé : terminez ou vérifiez les opérations en cours et les résultats incertains, puis fermez ses sessions.",
+        "archive_unverified" => "Les vérifications d’archivage ne sont pas complètes. Aucun changement d’état n’a été effectué.",
+        "state_conflict" => "L’état du projet a changé. Actualisez la liste avant de choisir une nouvelle action.",
+        "project_lifecycle_required" => "Conservez les projets existants et utilisez les actions Archiver ou Réactiver pour changer leur état.",
         "unavailable" => "L’agent n’est pas encore prêt. Vérifiez son état avant de renvoyer le message.",
         "authentication_required" => "Cette connexion au relais n’est pas authentifiée ou a été révoquée. Vérifiez son association au projet.",
         "agent_authentication_required" => "Le compte utilisé par l’agent n’est pas authentifié dans cet environnement. Vérifiez l’état du compte avant une nouvelle demande.",

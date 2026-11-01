@@ -28,11 +28,12 @@ window.createRelayViews = (getData,getUI) => {
  function taskList(compact=false){
   const data=getData(),ui=getUI();
   const stamp=task=>M.timeline(data,task.id).at(-1)?.stamp||data.referenceDate;
-  const tasks=data.tasks.filter(t=>M.taskMatches(data,t,filterContext(ui))).sort((a,b)=>stamp(b).localeCompare(stamp(a)));
+  const eligible=data.tasks.filter(t=>ui.project?t.project===ui.project:project(data,t.project)?.state!=='archived');
+  const tasks=eligible.filter(t=>M.taskMatches(data,t,filterContext(ui))).sort((a,b)=>stamp(b).localeCompare(stamp(a)));
   return (compact?'':controls('tasks'))+`<div class="card">${tasks.slice(0,compact?3:ui.limit).map(task=>{
    const entries=M.timeline(data,task.id),operations=entries.filter(x=>x.eventType==='operation').length,messages=entries.length-operations;
    return `<button class="activity-row task-row" data-action="task" data-id="${task.id}" aria-label="Tâche : ${e(task.title)}"><span class="activity-symbol">${icon('layers')}</span><span><strong>${e(task.title)}</strong><small>${!ui.project?e(project(data,task.project).name)+' · ':''}${operations} opération${operations>1?'s':''} · ${messages} message${messages>1?'s':''}</small></span>${badge(M.taskState(data,task.id))}<time>${entries.length?dateLabel(data,entries.at(-1)):''}</time>${icon('arrow')}</button>`;
-  }).join('')||emptyHistory('tasks')}${compact?'':summary('tasks',data.tasks.filter(item=>!ui.project||item.project===ui.project).length,tasks.length,Math.min(tasks.length,ui.limit))+pagination('tasks',tasks.length)}</div>`;
+  }).join('')||emptyHistory('tasks')}${compact?'':summary('tasks',eligible.length,tasks.length,Math.min(tasks.length,ui.limit))+pagination('tasks',tasks.length)}</div>`;
  }
  function taskDetail(id){
   const data=getData(),ui=getUI(),task=data.tasks.find(t=>t.id===id);if(!task)return '';

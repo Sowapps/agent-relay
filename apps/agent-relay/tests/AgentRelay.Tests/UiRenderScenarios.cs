@@ -162,7 +162,7 @@ internal static partial class UiRenderScenarios
             if(safety!="true")throw new Exception("Untrusted message was not rendered literally");
             var empty=System.Text.Json.Nodes.JsonNode.Parse(fixture.Value.GetRawText())!;
             foreach(var key in new[]{"projects","participants","sessions","operations","tasks","messages","connections","connectors"})empty[key]=new System.Text.Json.Nodes.JsonArray();
-            var emptyState=await view.EvaluateForVerificationAsync("window.RelayUI.receive({type:'snapshot',data:"+empty.ToJsonString()+"});window.RelayUI.route({view:'settings'});document.querySelector('h1').textContent==='Configuration'");
+            var emptyState=await view.EvaluateForVerificationAsync("window.RelayUI.receive({type:'snapshot',data:"+empty.ToJsonString()+"});window.RelayUI.route({view:'settings'});document.querySelector('h1').textContent==='Réglages généraux'");
             if(emptyState!="true")throw new Exception("Empty configuration cannot render settings");
             empty["relay"]="offline";empty["relayError"]="Relais local injoignable · vérification";
             var offline=await view.EvaluateForVerificationAsync("window.RelayUI.receive({type:'snapshot',data:"+empty.ToJsonString()+"});window.RelayUI.route({view:'diagnostics'});document.querySelector('main').textContent.includes('Relais local injoignable')");

@@ -6,7 +6,7 @@ window.RelayModel = (() => {
  const session=(data,id)=>data.sessions.find(s=>s.id===id);
  const connector=(data,sessionId)=>data.connectors.find(c=>c.id===participant(data,session(data,sessionId)?.participantId)?.connectorId);
  const connection=(data,sessionId)=>data.connections.find(c=>c.id===participant(data,session(data,sessionId)?.participantId)?.connectionId);
- const can=(data,sessionId,capability)=>Boolean((session(data,sessionId)?.capabilities||connector(data,sessionId)?.capabilities||[]).includes(capability));
+ const can=(data,sessionId,capability)=>data.projects.find(p=>p.id===session(data,sessionId)?.project)?.state!=='archived'&&Boolean((session(data,sessionId)?.capabilities||connector(data,sessionId)?.capabilities||[]).includes(capability));
  const actor=(data,item)=>participant(data,item.participantId||item.senderId)?.name||'Participant inconnu';
  const sessionState=(data,s)=>s.state==='closed'?'closed':data.operations.some(o=>o.session===s.id&&o.state==='running')?'running':s.state||'unknown';
  const taskState=(data,id)=>{

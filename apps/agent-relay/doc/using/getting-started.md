@@ -64,3 +64,5 @@ The application interface is currently in French. Vue générale (Overview) show
 Use Sessions → Conversation for retained exchanges. Examiner opens details for a point to verify. Marking it examined removes that alert revision, not its historical result; it remains in the project's Activité. Filters and earlier pages can hide older records: choose Tout l'historique and clear filters before concluding a record is missing.
 
 Closing the window hides it; reopen from the tray. Quitter stops the relay. Keep it running for MCP. To move or upgrade, stop the selected host, back up its data and retain the old version until verification. Moving a package changes its absolute MCP launch paths: regenerate and review the fragment for that same data scope.
+
+Project-specific configuration is reached inside the project’s Réglages tab. General Réglages → Projets lists active and archived projects and their lifecycle actions; it never reuses a hidden last-project context. See [Projects and settings](projects.md) when opening or archiving an existing project.

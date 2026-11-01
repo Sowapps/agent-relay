@@ -226,7 +226,7 @@ def prepare(source, destination, runtime, plan):
 
 def qualify(runtime, data, root, reports, connection, expected):
     with (reports / 'mcp.stderr.log').open('a') as errors, RelayMcp(dict(runtime, connectionId=connection), data, root, errors) as client:
-        assert len(client.call('tools/list')['tools']) == 24
+        assert len(client.call('tools/list')['tools']) == 25
         guides = client.call('resources/list')['resources']; assert len(guides) == 5
         for guide in guides: assert client.call('resources/read', {'uri': guide['uri']})['contents'][0]['text']
         configuration = client.tool('list_projects')['configuration']
