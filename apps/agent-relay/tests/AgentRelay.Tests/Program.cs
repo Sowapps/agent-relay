@@ -2,6 +2,8 @@ using AgentRelay.Core;
 using AgentRelay.Infrastructure;
 using System.IO.Pipes;
 
+if (args.Length == 3 && args[0] == "monitor-startup") { await UiRenderScenarios.Startup(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); Console.WriteLine("NATIVE_STARTUP=PASS"); return; }
+
 if (args.Length == 2 && args[0] == "monitor-fixture") { await MonitorScenarios.Seed(Path.GetFullPath(args[1])); return; }
 if (args.Length == 1 && args[0] == "monitor-projection") { MonitorScenarios.Run(); return; }
 if (args.Length == 3 && args[0] == "monitor-render") { await UiRenderScenarios.Run(Path.GetFullPath(args[1]), Path.GetFullPath(args[2])); Console.WriteLine("MONITOR_RENDER=PASS"); return; }

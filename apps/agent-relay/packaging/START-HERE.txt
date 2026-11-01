@@ -11,11 +11,11 @@ Starting from zero assumes an existing assisting agent client and private reposi
 
 IF YOU START IT YOURSELF
 
-1. Extract the complete ZIP to a persistent writable installation folder.
+1. Extract the complete ZIP to a persistent writable installation folder. Start with README.fr.md for the French introduction or README.md for English.
 2. Run Initialize-Relay.cmd once, then Start-AgentRelay.cmd.
 3. The default relay configuration/history stays in data/. Your actual Windows/Linux project workspaces are separate existing folders, not this installation or data directory.
 4. A relay project connects participants, their workspaces and permissions. Select it in the application to monitor tasks, messages, results and sessions. Your requesting agent's Windows client connects through MCP; the relay delegates to supported native agent clients in WSL. The current application interface is in French.
 
-The .NET runtime is included for Windows startup/direct MCP. The portable guide covers WebView2 and any Python/WSL/native-client prerequisites needed for your task. Nothing is installed globally or registered to start automatically. Current boundaries, practical handling and future options are in app/documentation/limits.md.
+The .NET runtime is included for Windows startup/direct MCP. The portable guide covers WebView2 and any Python/WSL/native-client prerequisites needed for your task. Nothing is installed globally or registered to start automatically without your choice. Use Réglages → Général → Démarrage avec Windows to enable/disable optional sign-in startup for this data scope. It starts the relay quietly near the clock, without starting an agent/task. Current boundaries, practical handling and future options are in app/documentation/limits.md.
 
 Closing the window hides it; use the tray to reopen, and Quitter to exit. Keep the chosen relay running for MCP. A different data directory is another instance. To move or upgrade, stop the selected host, back up its data and keep the old version until verification. Ask your agent to retain the exact data scope and regenerate/review the MCP fragment if paths change. Never put credentials/history into a repository or release asset.

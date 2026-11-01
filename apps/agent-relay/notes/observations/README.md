@@ -5,6 +5,8 @@
 
 ## Reports
 
+- [Shared stable Codex connection](2026-10-30-shared-stable-connection.md): actual user entry/runtime upgrade, preserved scope/rights/history, native Codex discovery and remaining standard-command gap.
+
 - [Stable v1.0.0 delivery verification](2026-10-30-stable-publication.md): operator validation, stable/latest private release and downloaded archive/checksum match.
 
 - [Stable v1.0.0 local archive qualification](2026-10-30-stable-local-preparation.md): final-version archive, minor metadata corrections and isolated checks; awaiting review, not published.

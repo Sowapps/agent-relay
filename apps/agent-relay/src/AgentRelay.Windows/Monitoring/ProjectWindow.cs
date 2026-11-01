@@ -12,6 +12,7 @@ internal sealed partial class ProjectWindow : Form
     private readonly IMonitorSource source;
     private readonly RelayPipeClient client;
     private readonly AttentionReviews reviews;
+    private readonly IStartupPreference startupPreference;
     internal readonly RelayWebView Presentation = new();
     private readonly Dictionary<Guid, ProjectObservation> observations = [];
     private readonly Dictionary<Guid, ProjectObservation> threads = [];
@@ -22,15 +23,16 @@ internal sealed partial class ProjectWindow : Form
     private IReadOnlyList<EndpointDescriptor> descriptors = [];
     private readonly System.Windows.Forms.Timer refresh = new() { Interval = 6000 };
     private readonly CancellationTokenSource lifetime = new();
-    private bool loading, released;
+    private bool loading, released, settingStartup;
     private Task? initialization;
     private string? previousPresentation;
     private TechnicalConsoleWindow? console;
     public event EventHandler? QuitRequested;
 
-    public ProjectWindow(string data)
+    public ProjectWindow(string data, IStartupPreference? startupPreference = null)
     {
         this.data = Path.GetFullPath(data); source = new PipeMonitorSource(data); client = new(data); reviews = new(data);
+        this.startupPreference = startupPreference ?? new WindowsStartupPreference(this.data);
         UiTheme.Apply(this); Text = "Agent Relay"; ClientSize = new Size(1120,728);
         MinimumSize = new Size(816, 590); StartPosition = FormStartPosition.CenterScreen;
         Controls.Add(Presentation);
@@ -99,11 +101,11 @@ internal sealed partial class ProjectWindow : Form
     {
         if (released) return;
         var online=observingOnline;var error=observingError;
-        var startup = StartupRegistration.Enabled(data);
+        var startup = startupPreference.Read();
         var version = RelayJson.Serialize(configuration) + RelayJson.Serialize(descriptors) + observations.Values.Sum(item=>item.Revision) + RelayJson.Serialize(threads.Select(item=>new {item.Key,item.Value.Revision,item.Value.Loaded,item.Value.Error,item.Value.MoreOperations,item.Value.MoreMessages})) + online + error + startup + reviews.Revision + DateTime.Today;
         if (!force && version == previousPresentation) return;
         previousPresentation = version;
-        var snapshot = PresentationSnapshot.Build(configuration,descriptors,observations.Values.ToArray(),online,error,DateTimeOffset.Now,startup,reviews,threads);
+        var snapshot = PresentationSnapshot.Build(configuration,descriptors,observations.Values.ToArray(),online,error,DateTimeOffset.Now,startup.Enabled ?? false,reviews,threads,startup);
         Presentation.Send(new { type = "snapshot", data = snapshot });
     }
 

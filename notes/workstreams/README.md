@@ -5,6 +5,18 @@
 
 ## Records
 
+- [v1.0.1 publication](2026-11-01-v1.0.1-publication.md): delivery GO, archive recheck and repository visibility decision gate.
+
+- [v1.0.1 local archive preparation](2026-10-31-v1.0.1-local-preparation.md): exact ZIP, startup and documentation qualification before any delivery action.
+
+- [Windows startup implementation](2026-10-31-startup-implementation.md): approved General preference, isolated qualification and local deployment only.
+
+- [Windows startup design and prototype](2026-10-31-startup-design-prototype.md): settings switch, simulated recovery and implementation proposal only; no Windows startup change.
+
+- [Shared Codex connection to stable relay](2026-10-30-shared-stable-connection.md): authorized shared entry/current host upgrade, preserved scopes and no user-project file edits.
+
+- [French starting README](2026-10-30-french-starting-readme.md): local French entry, two standalone prompts and English README language link only.
+
 - [Stable v1.0.0 publication](2026-10-30-stable-publication.md): explicit validation, qualified archive/source commit/tag and stable private release delivery.
 
 - [Stable v1.0.0 local preparation](2026-10-30-stable-local-preparation.md): final-version package and local qualification; user review before any delivery.

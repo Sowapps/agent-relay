@@ -35,6 +35,17 @@ internal sealed partial class ProjectWindow
         {
             switch (action)
             {
+                case "startup-preference":
+                    if (settingStartup) break;
+                    if (!message.TryGetProperty("enabled", out var enabled) || enabled.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw new ArgumentException("Startup preference requires an explicit boolean.");
+                    StartupPreferenceState startup;
+                    settingStartup = true;
+                    try { startup = await Task.Run(() => startupPreference.Set(enabled.GetBoolean()), lifetime.Token); }
+                    catch (Exception failure) { startup = startupPreference.Read() with { Error = "Le réglage n’a pas pu être modifié. " + failure.Message }; }
+                    finally { settingStartup = false; }
+                    if (released) break;
+                    Presentation.Send(new { type = "startup-preference", data = startup });
+                    PublishSnapshot(true); break;
                 case "stop-session": activeSession=null; break;
                 case "load-session":
                     var threadSession=Sessions.FirstOrDefault(item=>item.Id==id) ?? throw new RelayException("not_found","Session unavailable");

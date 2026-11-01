@@ -1,7 +1,7 @@
 """Utility: qualify the exact extracted Windows archive without a checkout/runtime launcher.
 Usage: release.ps1 Verify. Owns only its new child host and persistent extraction/data directories; no WSL/model.
 """
-import argparse,hashlib,json,os,shutil,subprocess,time,zipfile
+import argparse,hashlib,json,os,re,shutil,subprocess,time,zipfile
 from pathlib import Path
 from stdio_rpc import StdioRpc
 class Mcp(StdioRpc):
@@ -17,6 +17,17 @@ with zipfile.ZipFile(archive) as z:
 manifest=json.loads((extracted/'release-manifest.json').read_text());assert manifest['version']==a.version
 for name,expected in manifest['files'].items():assert hashlib.sha256((extracted/name).read_bytes()).hexdigest()==expected,name
 assert set(manifest['files'])|{'release-manifest.json'}=={f.relative_to(extracted).as_posix() for f in extracted.rglob('*') if f.is_file()}
+assert (extracted/'README.fr.md').is_file(),'French starting README missing'
+documentation_links=0
+for guide in [extracted/'README.md',extracted/'README.fr.md',*(extracted/'app/documentation').rglob('*.md')]:
+ for target in re.findall(r'\]\(([^)]+)\)',guide.read_text(encoding='utf-8-sig')):
+  target=target.strip('<>')
+  if re.match(r'^[a-zA-Z][a-zA-Z0-9+.-]*:',target):continue
+  relative=target.split('#',1)[0]
+  if not relative:continue
+  resolved=(guide.parent/relative).resolve()
+  assert resolved.is_relative_to(extracted) and resolved.is_file(),f'Broken distribution link: {guide.name}: {target}'
+  documentation_links+=1
 exe=extracted/'app/AgentRelay.Windows.exe';data=extracted/'data';main=extracted/'workspaces/main';peer=extracted/'workspaces/peer';main.mkdir(parents=True);peer.mkdir(parents=True)
 env={key:value for key,value in os.environ.items() if not key.startswith(('DOTNET_','NUGET_'))}
 env.update({'DOTNET_ROOT':str(extracted/'no-sdk-installed'),'DOTNET_MULTILEVEL_LOOKUP':'0','PATH':str(Path(os.environ['SystemRoot'])/'System32')})
@@ -78,5 +89,5 @@ for phase in ['initial','restart']:
   finally:
    if host.poll() is None:host.terminate()
    host.wait(timeout=10)
-result={'passed':True,'archiveSha256':digest,'version':a.version,'extracted':str(extracted),'resources':resources,'tools':24,'selfContained':True,'runtimeIsolation':'No dotnet/NuGet variables, nonexistent DOTNET_ROOT, PATH restricted to Windows System32','projectPreservation':True,'scopedConnectionAndForeignProjectRefusal':True,'restartAndDuplicateOwner':True,'modelCalls':0,'wslCalls':0,'guiVerification':'Separate exact-archive native capture required before Publish'}
+result={'passed':True,'archiveSha256':digest,'version':a.version,'extracted':str(extracted),'resources':resources,'tools':24,'selfContained':True,'frenchReadme':True,'documentationLinks':documentation_links,'runtimeIsolation':'No dotnet/NuGet variables, nonexistent DOTNET_ROOT, PATH restricted to Windows System32','projectPreservation':True,'scopedConnectionAndForeignProjectRefusal':True,'restartAndDuplicateOwner':True,'modelCalls':0,'wslCalls':0,'guiVerification':'Separate exact-archive native capture required before Publish'}
 (directory/'verification.json').write_text(json.dumps(result,indent=2),encoding='utf-8');print(json.dumps(result))

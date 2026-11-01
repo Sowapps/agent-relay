@@ -1,4 +1,4 @@
-# Agent Relay v1.0.0
+# Agent Relay v1.0.1
 
 Windows x64 package for project-scoped agent collaboration between Windows and WSL, with a shared monitoring and diagnostic interface.
 
@@ -6,9 +6,10 @@ Windows x64 package for project-scoped agent collaboration between Windows and W
 - Receive replies and independent agent reports, run authorized direct commands without a model turn, inspect environments and transfer individual files between authorized workspaces.
 - Follow project activity, retained messages, session exchanges, results and errors in the Windows application. Its current interface is in French.
 - Start with your usual agent using self-contained prompts, explicit project/workspace/permission guidance and preserved user instructions and approvals.
-- Read the included README, starting guides and 29 documented boundaries with practical handling and possible evolution options. Five public MCP resources provide the existing operational documentation.
+- Enable or disable optional Windows sign-in startup in Réglages → Général. The relay starts quietly in the notification area without starting agents/tasks; the setting is off by default and errors remain readable/retryable.
+- Start in English or French with the included README.md / README.fr.md, current guides and documented boundaries. Five public MCP resources provide operational documentation.
 
-Application behavior is unchanged from the tested RC2 candidate. This final package updates the version and stable delivery wording; no new tools, adapters, permissions or dependency versions are introduced.
+This maintenance release adds the reviewed startup preference and its retained native launcher, updates the startup guides and includes the French starting README. Existing projects, permissions and MCP tools remain unchanged. Dependency versions are unchanged.
 
 The ZIP includes .NET. WebView2 is required for the graphical interface; native WSL work additionally needs the documented Python/WSL/tmux/client prerequisites and account login. The package is unsigned. No global installation, automatic startup or client settings changes occur implicitly.
 

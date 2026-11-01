@@ -18,7 +18,7 @@ internal static class PresentationSnapshot
     private static readonly string[] Colors = ["blue", "purple", "green"];
 
     public static JsonElement Build(ProjectConfiguration configuration, IReadOnlyList<EndpointDescriptor> descriptions,
-        IReadOnlyList<ProjectObservation> observations, bool online, string? error, DateTimeOffset observedAt, bool startupEnabled = false, AttentionReviews? reviews = null, IReadOnlyDictionary<Guid, ProjectObservation>? threads = null)
+        IReadOnlyList<ProjectObservation> observations, bool online, string? error, DateTimeOffset observedAt, bool startupEnabled = false, AttentionReviews? reviews = null, IReadOnlyDictionary<Guid, ProjectObservation>? threads = null, StartupPreferenceState? startup = null)
     {
         var operations = observations.SelectMany(item => item.Operations).OrderByDescending(item => item.CreatedAt).ToArray();
         var messages = observations.SelectMany(item => item.Messages).OrderByDescending(item => item.ReceivedAt).ToArray();
@@ -58,6 +58,7 @@ internal static class PresentationSnapshot
             relayError = error,
             instances = 1,
             startupEnabled,
+            startup = startup ?? new StartupPreferenceState(startupEnabled),
             hasMore = observations.Any(item => item.MoreOperations || item.MoreMessages || item.MoreSessions),
             more = new { operations = observations.Any(item=>item.MoreOperations), messages=observations.Any(item=>item.MoreMessages), sessions=observations.Any(item=>item.MoreSessions) },
             sessionHistory = threads?.ToDictionary(item=>item.Key.ToString("D"),item=>new { loaded=item.Value.Loaded, hasMore=item.Value.MoreOperations||item.Value.MoreMessages, error=item.Value.Error }),
