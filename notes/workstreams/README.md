@@ -76,3 +76,5 @@
 - [Usability and documentation lots1–4](2026-10-30-usability-and-docs.md): scoped GO, histories/session thread and agent/human documentation.
 
 - [Agent bootstrap documentation completion](2026-10-30-bootstrap-docs.md): no-context preparation/project/MCP/UI path and required headers.
+
+- [Deferred archive and list actions](2026-11-01-deferred-project-archive.md)

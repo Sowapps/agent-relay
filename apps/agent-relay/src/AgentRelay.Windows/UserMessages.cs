@@ -7,7 +7,8 @@ internal static class UserMessages
     public static string WorkState(string state) => state switch { "pending" => "En attente", "running" => "En cours", "completed" => "Terminé", "failed" => "Échec", "awaiting_approval" => "Autorisation attendue", _ => "À confirmer" };
     public static string Error(string? code) => code switch
     {
-        "project_archived" => "Ce projet est archivé. Son historique reste consultable ; réactivez-le avant une nouvelle opération.",
+        "project_draining" => "Archivage en cours : les nouveaux travaux sont suspendus. Le travail engagé peut se terminer.",
+            "project_archived" => "Ce projet est archivé. Son historique reste consultable ; réactivez-le avant une nouvelle opération.",
         "archive_blocked" => "Le projet n’a pas été archivé : terminez ou vérifiez les opérations en cours et les résultats incertains, puis fermez ses sessions.",
         "archive_unverified" => "Les vérifications d’archivage ne sont pas complètes. Aucun changement d’état n’a été effectué.",
         "state_conflict" => "L’état du projet a changé. Actualisez la liste avant de choisir une nouvelle action.",

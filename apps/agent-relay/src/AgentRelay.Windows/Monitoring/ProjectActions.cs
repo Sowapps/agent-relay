@@ -42,7 +42,7 @@ internal sealed partial class ProjectWindow
                         var reply = await client.RequestAsync(new("project", ProjectAction: new("set_project_state", ProjectId: projectId,
                             State: Value(message,"state"), ExpectedState: Value(message,"expectedState"))), lifetime.Token);
                         await Reload(true);
-                        Presentation.Send(new { type="project-state", project=projectId.ToString("D"), state=reply.Project!.Project!.State });
+                        Presentation.Send(new { type="project-state", project=projectId.ToString("D"), state=reply.Project!.Project!.State, archiveRequested=reply.Project.Project.ArchiveRequested, archiveCancelled=Value(message,"state")=="active" && Value(message,"expectedState")=="active" });
                     }
                     catch (Exception failure) when (!released)
                     {

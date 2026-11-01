@@ -12,6 +12,9 @@ For an agent consuming the relay (rather than changing its source), start with t
 ## Authorization
 
 Information, prerequisites, availability and acceptance of a proposal are not permission to start work. Present the concrete scope, ask for an explicit GO and wait before starting any workstream.
+Request GO directly, without a numbered question label. Numbered questions remain available for actual clarification.
+(evidence `2026-11-01-go-request-format`)
+
 A GO applies only to its stated scope. Do not expand a POC into MVP development or apply configurations globally.
 (evidence `2026-10-28-work-starts-only-after-explicit-go`)
 

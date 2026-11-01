@@ -18,7 +18,10 @@ public sealed class ProjectCoordinator : IAsyncDisposable
     private readonly ScopedSessions adapter;
     private readonly ProjectJournal observation;
 
-    public ProjectCoordinator(string dataDirectory)
+    private readonly CancellationTokenSource archiveStop = new();
+    private readonly Task archiveLoop;
+
+    public ProjectCoordinator(string dataDirectory, Action<Exception>? reportError = null)
     {
         Settings = new(dataDirectory); var database = new RelayDatabase(dataDirectory); store = new(database);
         observation = new(database);
@@ -28,6 +31,19 @@ public sealed class ProjectCoordinator : IAsyncDisposable
         Work = new(store, adapter, () => Settings.Load().Endpoints.Select(endpoint => new WorkCapability(endpoint.Id.ToString("D"), true, true, true)).ToArray(), technical.Load().MaximumConcurrency);
         activity = Work;
         Application = new(new(Settings), Work, adapter, new ProjectJournal(database), new EndpointDiagnostics(technical), adapter, adapter, Settings);
+        archiveLoop = Task.Run(async () =>
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+            try
+            {
+                while (await timer.WaitForNextTickAsync(archiveStop.Token))
+                {
+                    try { await Application.ReconcileArchivesAsync(archiveStop.Token); }
+                    catch (Exception error) when (!archiveStop.IsCancellationRequested) { reportError?.Invoke(error); }
+                }
+            }
+            catch (OperationCanceledException) when (archiveStop.IsCancellationRequested) { }
+        });
     }
 
     public async Task<ProjectReply> DispatchAsync(AuthenticatedConnection connection, ProjectAction action, CancellationToken token)
@@ -97,5 +113,10 @@ public sealed class ProjectCoordinator : IAsyncDisposable
     private ReadPage<SessionSnapshot> Convert(ReadPage<RelaySession> page) => new(page.Items.Where(item => item.Definition is not null)
         .Select(item => new SessionSnapshot(item.Id, item.Name, item.Definition!.Scope, item.State, Diagnostic: item.Diagnostic, WorkActive: Work.IsSessionActive(item.Id))).ToArray(), page.NextCursor, page.HasMore);
 
-    public ValueTask DisposeAsync() => Work.DisposeAsync();
+    public async ValueTask DisposeAsync()
+    {
+        archiveStop.Cancel();
+        try { await archiveLoop; }
+        finally { archiveStop.Dispose(); await Work.DisposeAsync(); }
+    }
 }
