@@ -2,6 +2,8 @@ using AgentRelay.Core;
 using AgentRelay.Infrastructure;
 using System.IO.Pipes;
 
+if (args.Length == 3 && args[0] == "monitor-window") { await UiRenderScenarios.WindowOpening(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); Console.WriteLine("NATIVE_WINDOW_OPENING=PASS"); return; }
+
 if (args.Length == 3 && args[0] == "monitor-project-settings") { await UiRenderScenarios.ProjectSettings(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); Console.WriteLine("NATIVE_PROJECT_SETTINGS=PASS"); return; }
 
 if (args.Length == 3 && args[0] == "monitor-dates") { await UiRenderScenarios.Dates(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); Console.WriteLine("NATIVE_DATES=PASS"); return; }

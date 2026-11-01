@@ -29,7 +29,7 @@ internal sealed class TrayContext : ApplicationContext
         if (options.Show) Open();
     }
 
-    private void Open() { window.Show(); window.WindowState = FormWindowState.Normal; window.Activate(); }
+    private void Open() => window.OpenFromTray();
     public void RequestOpen() { if (!window.IsDisposed && window.IsHandleCreated) window.BeginInvoke(new Action(Open)); }
     private void SessionEnding(object? sender, Microsoft.Win32.SessionEndingEventArgs args)
     { if (!window.IsDisposed && window.IsHandleCreated) window.BeginInvoke(new Action(ExitThread)); }

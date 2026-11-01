@@ -78,3 +78,5 @@
 - [Agent bootstrap documentation completion](2026-10-30-bootstrap-docs.md): no-context preparation/project/MCP/UI path and required headers.
 
 - [Deferred archive and list actions](2026-11-01-deferred-project-archive.md)
+
+- [Maximized opening and restoration](2026-11-01-maximized-window-opening.md)

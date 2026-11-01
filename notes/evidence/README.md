@@ -54,3 +54,5 @@ The dates identify the decision messages available in the conversation. The init
 
 - [GO request format](2026-11-01-go-request-format.md)
 - [Deferred project archival](2026-11-01-deferred-project-archive.md)
+
+- [Opening and restoration geometry](2026-11-01-window-opening-geometry.md)
