@@ -41,3 +41,5 @@ select:not(:disabled):hover{background-color:#f8faff}
 @media(max-width:980px){.session-card{flex-wrap:wrap}.conversation-entry{width:100%;max-width:100%}}
 
 .activity-row time{white-space:nowrap}
+
+.project-directory-row{display:flex;align-items:center;gap:18px;padding:18px 20px;border-bottom:1px solid var(--border)}.project-directory-row:last-child{border-bottom:0}.project-directory-row>div:first-child{flex:1;min-width:0}.project-directory-row strong{display:block;font-size:12px;overflow-wrap:anywhere}.project-directory-row .muted{display:block;margin-top:5px;font-size:11px}.project-directory-row .actions{display:flex;gap:8px;flex-wrap:wrap}.project-directory-row .badge{flex:none}@media(max-width:980px){.project-directory-row{flex-wrap:wrap}.project-directory-row>div:first-child{flex-basis:60%}}

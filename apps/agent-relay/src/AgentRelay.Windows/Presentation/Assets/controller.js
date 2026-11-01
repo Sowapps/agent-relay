@@ -4,7 +4,7 @@
  const $=selector=>document.querySelector(selector),C=window.RelayComponents;
  let data=null,toastTimer;
  const fullOperations=new Map();
- const ui={view:'general',project:null,lastProject:null,tab:'summary',filter:'all',period:'all',participant:'',kind:'',state:'',advanced:false,generalFeed:'tasks',taskLimit:15,query:'',messageFilter:'all',detail:null,settingScope:'common',limit:5,sessionId:null,conversationLimit:30};
+ const ui={view:'general',project:null,tab:'summary',filter:'all',period:'all',participant:'',kind:'',state:'',advanced:false,generalFeed:'tasks',taskLimit:15,query:'',messageFilter:'all',detail:null,settingScope:'general',projectChange:null,limit:5,sessionId:null,conversationLimit:30};
  const R=window.createRelayRenderer(()=>data,()=>ui);
  const host=(action,values={})=>{
   if(!window.chrome?.webview){if(action!=='ready')toast('Action native indisponible dans cet aperçu.');return;}
@@ -20,13 +20,13 @@
  }
  function render(){
   if(!data)return;
-  const content=$('#app-content'),key=[ui.view,ui.project,ui.tab,ui.generalFeed,ui.sessionId].join('|'),changed=content.dataset.view!==key;
+  const content=$('#app-content'),key=[ui.view,ui.project,ui.tab,ui.generalFeed,ui.sessionId,ui.view==='settings'?ui.settingScope:''].join('|'),changed=content.dataset.view!==key;
   const scroll=changed?0:content.scrollTop,focused=document.activeElement,focusId=focused?.id;
   const selection=focused instanceof HTMLInputElement?[focused.selectionStart,focused.selectionEnd]:null;
   const openDetails=[...document.querySelectorAll('details[open]')].map(el=>el.id).filter(Boolean);
   $('#app-nav').innerHTML=R.nav();
   const current=ui.view==='project'?data.projects.find(p=>p.id===ui.project)?.name:ui.view==='diagnostics'?'Diagnostic du relais':ui.view==='settings'?'Réglages':'Vue générale';
-  $('#app-topbar').innerHTML=`<div class="breadcrumb">${ui.view==='project'?'Projets':'Espace commun'} <span> / </span><strong>${C.escape(current||'Projet indisponible')}</strong></div><div class="topbar-meta">Suivi local <i class="dot ${C.escape(data.relay)}"></i></div>`;
+  $('#app-topbar').innerHTML=`<div class="breadcrumb">${ui.view==='project'?'Projets':'Général'} <span> / </span><strong>${C.escape(current||'Projet indisponible')}</strong></div><div class="topbar-meta">Suivi local <i class="dot ${C.escape(data.relay)}"></i></div>`;
   content.innerHTML=ui.view==='general'?R.general():ui.view==='project'?R.project():ui.view==='diagnostics'?R.diagnostics():R.settings();
   content.dataset.view=key;content.scrollTop=scroll;
   renderDetail();
@@ -38,7 +38,7 @@
  }
  function navigate(view,project=null,tab='summary'){
   if(ui.sessionId)host('stop-session');
-  if(project)ui.lastProject=project;
+  if(view==='settings')ui.settingScope='general';
   Object.assign(ui,{view,project,tab,filter:'all',period:'all',participant:'',kind:'',state:'',query:'',detail:null,limit:5,sessionId:null,advanced:false,messageFilter:'all'});render();
  }
  function detail(type,id){
@@ -76,7 +76,17 @@
   else if(action==='task-project')navigate('project',el.dataset.project);
   else if(action==='startup-toggle'||action==='startup-retry'){const state=data.startup||{enabled:data.startupEnabled};if(ui.startupPending||typeof state.enabled!=='boolean')return;ui.startupTarget=action==='startup-retry'?ui.startupTarget:!state.enabled;ui.startupPending=true;ui.startupError=null;render();host('startup-preference',{enabled:ui.startupTarget});}
   else if(action==='settings-scope'){ui.settingScope=value;render();}
-  else if(action==='project-settings'){ui.detail=null;ui.view='settings';ui.settingScope='project';render();}
+  else if(action==='project-settings'){const project=el.dataset.project||ui.project;if(project)navigate('project',project,'settings');}
+  else if(action==='manage-projects'){navigate('settings');ui.settingScope='projects';render();}
+  else if(action==='project-state'){
+   const project=data.projects.find(p=>p.id===el.dataset.project);if(!project||ui.projectChange)return;
+   const archived=project.state==='archived',state=archived?'active':'archived';
+   modal(archived?'Réactiver ce projet ?':'Archiver ce projet ?',`<p><strong>${C.escape(project.name)}</strong></p><p>${archived?'Le projet réapparaîtra dans la navigation. Aucun travail ni aucune session ne sera relancé.':'Le projet quittera la navigation ; son historique et ses permissions seront conservés. Les nouvelles opérations seront bloquées.'}</p>${archived?'':'<p>Terminez les opérations, vérifiez les résultats incertains et fermez les sessions. Le relais contrôlera ces conditions avant l’archivage ; aucune interruption automatique.</p>'}`,C.button(archived?'Réactiver':'Vérifier et archiver','confirm-project-state',`data-project="${C.escape(project.id)}" data-value="${state}" data-expected="${archived?'archived':'active'}"`,'primary'));
+  }
+  else if(action==='confirm-project-state'){
+   if(ui.projectChange)return;ui.projectChange={project:el.dataset.project,state:value,expectedState:el.dataset.expected};$('#app-modal').innerHTML='';render();host('project-state',ui.projectChange);
+  }
+  else if(action==='project-state-refresh'){$('#app-modal').innerHTML='';host('refresh');}
   else if(action==='mark-reviewed'){const operation=data.operations.find(item=>item.id===id);if(operation)host('mark-reviewed',{id,project:operation.project,reviewToken:operation.reviewToken});}
   else if(action==='copy')host('copy',{text:messageText(el.dataset.type,id)});
   else if(action==='show-evidence'){const evidence=$('#operation-evidence');if(evidence){evidence.open=true;evidence.scrollIntoView({block:'nearest'});}}
@@ -116,7 +126,11 @@
    if(ui.sessionId&&!next.sessions.some(session=>session.id===ui.sessionId))Object.assign(ui,{sessionId:null,tab:'sessions',detail:null});
    data=next;render();
   }else if(message.type==='startup-preference'){
-   ui.startupPending=false;ui.startupError=message.data?.error||null;data.startup=message.data;data.startupEnabled=message.data?.enabled===true;render();if(ui.view==='settings'&&ui.settingScope==='common')$('#startup-switch')?.focus({preventScroll:true});
+   ui.startupPending=false;ui.startupError=message.data?.error||null;data.startup=message.data;data.startupEnabled=message.data?.enabled===true;render();if(ui.view==='settings'&&ui.settingScope==='general')$('#startup-switch')?.focus({preventScroll:true});
+  }else if(message.type==='project-state'){
+   ui.projectChange=null;const project=data?.projects.find(p=>p.id===message.project);if(project&&message.state)project.state=message.state;render();
+   if(message.error)modal('Changement d’état non confirmé',`<p>${C.escape(message.error)}</p><p>Consultez l’état actuel avant de réessayer.</p>${message.diagnostic?`<details class="advanced"><summary>Détails techniques</summary><pre>${C.escape(message.diagnostic)}</pre></details>`:''}`,C.button('Actualiser','project-state-refresh','','primary'));
+   else toast(message.state==='archived'?'Projet archivé. Son historique reste accessible dans Réglages → Projets.':'Projet réactivé. Aucun travail n’a été relancé.');
   }else if(message.type==='operation'){
    const index=data?.operations.findIndex(o=>o.id===message.data?.id)??-1;
    if(index>=0){fullOperations.set(message.data.id,message.data);data.operations[index]=message.data;if(ui.detail?.type==='operation'&&ui.detail.id===message.data.id)renderDetail();}
@@ -128,6 +142,7 @@
   Object.assign(ui,{generalFeed:parameters.feed||'tasks',advanced:false,messageFilter:'all'});
   if(parameters.project)navigate('project',parameters.project,parameters.tab||'summary');else if(parameters.view)navigate(parameters.view);else navigate('general');
   if(parameters.feed){ui.generalFeed=parameters.feed;render();}
+  if(parameters.scope&&['general','projects'].includes(parameters.scope)){ui.settingScope=parameters.scope;render();}
   if(parameters.session){ui.sessionId=parameters.session;ui.tab='conversation';render();}
   if(parameters.detail)detail(parameters.detail,parameters.id);
  }};

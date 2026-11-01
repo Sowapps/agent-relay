@@ -4,9 +4,10 @@ namespace AgentRelay.Infrastructure;
 
 public sealed record ProjectAction(string Name, Guid? ProjectId = null, Guid? EndpointId = null, Guid? WorkspaceId = null,
     Guid? SessionId = null, Guid? RequestId = null, string? Text = null, string? DisplayName = null, string? CommandId = null,
-    string? Control = null, ReadQuery? Query = null, ArtifactTransfer? Transfer = null, Guid? TaskId = null, Guid? ActorId = null);
+    string? Control = null, ReadQuery? Query = null, ArtifactTransfer? Transfer = null, Guid? TaskId = null, Guid? ActorId = null,
+    string? State = null, string? ExpectedState = null);
 public sealed record ProjectReply(ProjectConfiguration? Configuration = null, SessionSnapshot? Session = null, WorkRecord? Operation = null,
-    ReadPage<SessionSnapshot>? Sessions = null, ReadPage<WorkRecord>? Operations = null, ReadPage<InboxMessage>? Messages = null, HostReport? Host = null, ReadPage<WorkEvent>? Events = null, TransferPartial? Partial = null);
+    ReadPage<SessionSnapshot>? Sessions = null, ReadPage<WorkRecord>? Operations = null, ReadPage<InboxMessage>? Messages = null, HostReport? Host = null, ReadPage<WorkEvent>? Events = null, TransferPartial? Partial = null, RelayProject? Project = null);
 
 public sealed class ProjectCoordinator : IAsyncDisposable
 {
@@ -26,12 +27,23 @@ public sealed class ProjectCoordinator : IAsyncDisposable
         adapter = new(dataDirectory, technical, Settings, store, id => activity?.IsSessionActive(id) ?? false);
         Work = new(store, adapter, () => Settings.Load().Endpoints.Select(endpoint => new WorkCapability(endpoint.Id.ToString("D"), true, true, true)).ToArray(), technical.Load().MaximumConcurrency);
         activity = Work;
-        Application = new(new(Settings), Work, adapter, new ProjectJournal(database), new EndpointDiagnostics(technical), adapter, adapter);
+        Application = new(new(Settings), Work, adapter, new ProjectJournal(database), new EndpointDiagnostics(technical), adapter, adapter, Settings);
     }
 
     public async Task<ProjectReply> DispatchAsync(AuthenticatedConnection connection, ProjectAction action, CancellationToken token)
     {
         var caller = connection.Caller;
+        if (!connection.Administrator && action.ActorId is { } suppliedActor && suppliedActor != caller.EndpointId)
+            throw new RelayException("capability_denied", "Caller identity cannot be supplied by an agent request.");
+        if (action.Name == "set_project_state")
+        {
+            if (action.ProjectId is not { } id || id == Guid.Empty || action.State is not ("active" or "archived") || action.ExpectedState is not ("active" or "archived"))
+                throw new RelayException("invalid_request", "Explicit project, state and expectedState (active/archived) are required.");
+            var enabled = action.State == "active"; var expected = action.ExpectedState == "active";
+            return new(Project: connection.Administrator
+                ? await Application.SetProjectStateAsAdministratorAsync(id, enabled, expected, token)
+                : await Application.SetProjectStateAsync(caller, id, enabled, expected, token));
+        }
         if (connection.Administrator)
         {
             if (action.Name == "configuration") return new(Configuration: Settings.Load());

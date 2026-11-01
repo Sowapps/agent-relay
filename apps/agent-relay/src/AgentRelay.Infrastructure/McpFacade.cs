@@ -18,6 +18,7 @@ public static class McpFacade
     private static readonly object[] Tools =
     [
         Tool("list_projects", "Discover only projects, participants, workspace contexts and explicit rights authorized for this bound connection.", new { }),
+        Tool("set_project_state", "Archive or reactivate an authorized project with explicit project.manage permission. Archival checks all work and sessions under an admission lock; no task/session is stopped automatically. Archived history stays readable.", new { project_id = Id(), state = Text(8), expected_state = Text(8) }, "project_id", "state", "expected_state"),
         Tool("inspect_host", "Read authorized endpoint user/platform/tool versions and selected service presence. No model, secret dump or configuration change.", new { project_id = Id(), endpoint_id = Id() }, "project_id", "endpoint_id"),
         Tool("list_profiles", "Compatibility discovery alias for authorized project contexts; no unscoped global profiles are returned.", new { }),
         Tool("execute_command", "Submit an explicitly authorized direct endpoint command in the selected project workspace; no model and no shell string.", new { project_id = Id(), endpoint_id = Id(), workspace_id = Id(), command_id = Text(), request_id = Id() }, "project_id", "endpoint_id", "workspace_id", "command_id"),
@@ -147,6 +148,7 @@ public static class McpFacade
             var action = name switch
             {
                 "list_projects" or "list_profiles" => new ProjectAction("configuration"),
+                "set_project_state" => new("set_project_state", Identifier("project_id"), State: TextValue("state"), ExpectedState: TextValue("expected_state")),
                 "inspect_host" => new("inspect_host", Identifier("project_id"), Identifier("endpoint_id")),
                 "open_session" => new("open_session", Identifier("project_id"), Identifier("endpoint_id"), Identifier("workspace_id"), Identifier("session_id"), DisplayName: TextValue("name")),
                 "get_session" or "get_agent_status" => new("get_session", SessionId: Identifier("session_id")),

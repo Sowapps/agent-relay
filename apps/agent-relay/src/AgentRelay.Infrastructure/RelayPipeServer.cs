@@ -80,6 +80,7 @@ public sealed class RelayPipeServer : IDisposable
                     }
                     else if (authenticated is { Administrator: true } && request.Operation is "configure_projects" or "connection" && projects is not null && dataDirectory is not null)
                     {
+                        using var admission = request.Operation == "configure_projects" ? projects.Application.Admission.Configure() : null;
                         if (request.Operation == "configure_projects" && (projects.Work.IsActive || mvp?.Work.IsActive == true)) throw new RelayException("busy", "Wait for active work before changing central project policy.");
                         response = await ProjectMaintenance.ApplyAsync(dataDirectory, request, deadline.Token);
                     }
@@ -88,7 +89,12 @@ public sealed class RelayPipeServer : IDisposable
                     else if (authenticated is { Administrator: false }) throw new RelayException("legacy_unassigned", "This connection must use project-scoped operations; legacy records are not implicitly assigned.");
                     else if (authenticated is not null && request.Operation is "submit" or "start_profile" or "open_session" or "session_send" or "session_transfer" or "session_start" or "session_reopen")
                         throw new RelayException("legacy_unassigned", "Select an authorized project and use its scoped operation; legacy profile actions cannot infer project rights.");
-                    else if (request.Operation == "configure" && projects?.Work.IsActive == true) throw new RelayException("busy", "Wait for active project work before changing technical endpoint bindings.");
+                    else if (request.Operation == "configure" && projects is not null && mvp is not null)
+                    {
+                        using var admission = projects.Application.Admission.Configure();
+                        if (projects.Work.IsActive || mvp.Work.IsActive) throw new RelayException("busy", "Wait for active project work before changing technical endpoint bindings.");
+                        response = await mvp.DispatchAsync(request, deadline.Token).ConfigureAwait(false);
+                    }
                     else if (request.Operation is not ("exchange" or "read") && mvp is not null)
                         response = await mvp.DispatchAsync(request, deadline.Token).ConfigureAwait(false);
                     else

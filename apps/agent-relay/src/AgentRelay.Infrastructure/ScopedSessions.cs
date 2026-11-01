@@ -62,6 +62,11 @@ public sealed class ScopedSessions : IRelaySessions, IWorkExecutor, IOperationRe
         var page = await journal.SessionsAsync(query, ownerId, token);
         return new(page.Items.Select(Snapshot).ToArray(), page.NextCursor, page.HasMore);
     }
+    public async Task<ReadPage<SessionSnapshot>> AllAsync(ReadQuery query, CancellationToken token)
+    {
+        var page = await journal.ObserveSessionsAsync(query, token);
+        return new(page.Items.Select(Snapshot).ToArray(), page.NextCursor, page.HasMore);
+    }
 
     public async Task<SessionSnapshot> ControlAsync(Guid id, string action, CancellationToken token)
     {

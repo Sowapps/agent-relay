@@ -25,8 +25,8 @@ internal static class ProjectScenarios
             { Capabilities = member.Capabilities.Append(RelayCapabilities.LocalWork).ToArray(), Workspaces = [new(workspace, true, true)] } : member).ToArray() };
         store.Save(nativeConfiguration); policy.LocalWork(caller, projectA, workspace, secondary);
         Refused(() => policy.Transfer(caller, projectA, new(new(secondary, workspace, "source"), new(secondary, workspace, "destination"))));
-        store.Save(configuration with { Projects = [new(projectA, "A", false), new(projectB, "B")] });
-        Refused(() => policy.Message(caller, projectA, secondary));
+        store.Save(configuration); store.SetEnabled(projectA, false, true);
+        Refused(() => policy.Message(caller, projectA, secondary), "project_archived");
         Console.WriteLine("PASS: neutral two-project membership, sender/recipient scope, role-independent grants and revocation");
         var connections = new ConnectionStore(data);
         connections.EnsureAdministrator();
@@ -66,9 +66,9 @@ internal static class ProjectScenarios
         Console.WriteLine("PASS: explicit owned-partial inspection and cleanup preserve the final destination");
     }
 
-    private static void Refused(Action action)
+    private static void Refused(Action action, string code = "capability_denied")
     {
         try { action(); throw new Exception("Unauthorized project action accepted."); }
-        catch (RelayException error) when (error.Code == "capability_denied") { }
+        catch (RelayException error) when (error.Code == code) { }
     }
 }

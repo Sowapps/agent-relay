@@ -39,11 +39,13 @@ public sealed class WorkService : IAsyncDisposable
     private readonly CancellationTokenSource stop = new();
     private readonly SemaphoreSlim admission = new(1, 1);
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Task> running = new();
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Guid> activeProjects = new();
     private readonly Dictionary<string, CancellationTokenSource> cancellations = new();
     private readonly Dictionary<Guid, string> operationKeys = new();
     private readonly int maximumConcurrency;
     private int disposeState;
     public bool IsActive => running.Values.Any(task => !task.IsCompleted);
+    public bool IsProjectActive(Guid projectId) => running.Any(item => !item.Value.IsCompleted && activeProjects.GetValueOrDefault(item.Key) == projectId);
     public bool IsSessionActive(Guid sessionId) => running.TryGetValue("session:" + sessionId, out var task) && !task.IsCompleted;
 
     public WorkService(IWorkStore store, IWorkExecutor executor, Func<IReadOnlyCollection<WorkCapability>> capabilities, int maximumConcurrency = 4)
@@ -78,6 +80,7 @@ public sealed class WorkService : IAsyncDisposable
             foreach (var completed in running.Where(pair => pair.Value.IsCompleted).Select(pair => pair.Key).ToArray())
             {
                 running.TryRemove(completed, out _); cancellations.Remove(completed, out var previous); previous?.Dispose();
+                activeProjects.TryRemove(completed, out _);
                 foreach (var id in operationKeys.Where(pair => pair.Value == completed).Select(pair => pair.Key).ToArray()) operationKeys.Remove(id);
             }
             var record = new WorkRecord(request, "pending", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, Metadata: metadata);
@@ -85,6 +88,7 @@ public sealed class WorkService : IAsyncDisposable
             var cancellation = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
             cancellations[key] = cancellation;
             operationKeys[request.Id] = key;
+            activeProjects[key] = request.Scope?.ProjectId ?? Guid.Empty;
             running[key] = Task.Run(() => ExecuteAsync(record, cancellation.Token));
             return record;
         }

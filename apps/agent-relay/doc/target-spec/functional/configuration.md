@@ -22,6 +22,12 @@ grants no file synchronization or implied identity of their contents (evidence `
 The MVP configuration is centralized in Agent Relay. Workspaces contain working files, not the authority that grants relay permissions. A possible workspace declaration can propose settings, but
 cannot grant rights or trigger a worker by itself (evidence `2026-10-28-central-configuration-and-extensible-model-are-accepted`).
 
+## Settings and project state
+
+General settings are independent of the last selected project. Their project directory lists active and archived projects with their status, opening and lifecycle actions, without project configuration forms. Configuration context belongs to a dedicated settings view inside each explicitly selected project (evidence `2026-11-01-project-settings-separation`).
+
+Projects have only Active/Actif and Archived/Archivé states. Archival hides a project from normal navigation and blocks new relay operations while preserving identity, configuration, permissions and history. Archived projects remain openable from the general directory. Verification and transition exclude concurrent new admission; ongoing or uncertain work and incomplete checks refuse archival. Reactivation changes eligibility/visibility without resuming old work (evidence `2026-11-01-guarded-project-archive`).
+
 ## Authorized local work
 
 Project permissions can authorize file changes and local command execution in the assigned workspace. The MVP is not restricted to read-only analysis. Agent tool permissions and direct relay

@@ -35,6 +35,20 @@ internal sealed partial class ProjectWindow
         {
             switch (action)
             {
+                case "project-state":
+                    var projectId = Guid.Parse(Value(message,"project") ?? "");
+                    try
+                    {
+                        var reply = await client.RequestAsync(new("project", ProjectAction: new("set_project_state", ProjectId: projectId,
+                            State: Value(message,"state"), ExpectedState: Value(message,"expectedState"))), lifetime.Token);
+                        await Reload(true);
+                        Presentation.Send(new { type="project-state", project=projectId.ToString("D"), state=reply.Project!.Project!.State });
+                    }
+                    catch (Exception failure) when (!released)
+                    {
+                        Presentation.Send(new { type="project-state", project=projectId.ToString("D"), error=UserMessages.Error(failure), diagnostic=failure.Message });
+                    }
+                    break;
                 case "startup-preference":
                     if (settingStartup) break;
                     if (!message.TryGetProperty("enabled", out var enabled) || enabled.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw new ArgumentException("Startup preference requires an explicit boolean.");

@@ -16,6 +16,7 @@ public interface ITransferMaintenance { Task<TransferPartial> PartialAsync(WorkR
 
 public interface IRelaySessions
 {
+    Task<ReadPage<SessionSnapshot>> AllAsync(ReadQuery query, CancellationToken token) => throw new RelayException("adapter_unavailable", "Project-wide session verification is unavailable; archival is refused.");
     Task<SessionSnapshot> OpenAsync(SessionDefinition definition, CancellationToken token);
     Task<SessionSnapshot> GetAsync(Guid id, CancellationToken token);
     Task<SessionSnapshot> InspectAsync(Guid id, CancellationToken token);
@@ -32,8 +33,9 @@ public interface IRelayJournal
 }
 
 // The public production use cases: no client, operating system or transport decisions.
-public sealed class RelayApplication(ProjectPolicy policy, WorkService work, IRelaySessions sessions, IRelayJournal journal, IHostInspector? hosts = null, IOperationRecovery? recovery = null, ITransferMaintenance? transfers = null)
+public sealed partial class RelayApplication(ProjectPolicy policy, WorkService work, IRelaySessions sessions, IRelayJournal journal, IHostInspector? hosts = null, IOperationRecovery? recovery = null, ITransferMaintenance? transfers = null, IProjectStateStore? projectStates = null)
 {
+    public ProjectAdmission Admission { get; } = new();
     private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, SemaphoreSlim> sessionGates = new();
     private async Task<IDisposable> Gate(Guid id, CancellationToken token)
     {
@@ -46,7 +48,7 @@ public sealed class RelayApplication(ProjectPolicy policy, WorkService work, IRe
     {
         using var policySnapshot = policy.Pin();
         var value = policy.Configuration();
-        var projects = value.Projects.Where(project => project.Enabled && caller.ProjectIds.Contains(project.Id) &&
+        var projects = value.Projects.Where(project => caller.ProjectIds.Contains(project.Id) &&
             value.Memberships.Any(member => member.ProjectId == project.Id && member.EndpointId == caller.EndpointId)).ToArray();
         var memberships = value.Memberships.Where(member => projects.Any(project => project.Id == member.ProjectId)).ToArray();
         var workspaceIds = memberships.Where(member => member.EndpointId == caller.EndpointId).SelectMany(member => member.Workspaces).Select(access => access.WorkspaceId).ToHashSet();
@@ -55,20 +57,22 @@ public sealed class RelayApplication(ProjectPolicy policy, WorkService work, IRe
             Workspaces = value.Workspaces.Where(workspace => workspaceIds.Contains(workspace.Id)).ToArray() };
     }
 
-    public Task<HostReport> InspectHostAsync(CallerIdentity caller, Guid projectId, Guid endpointId, CancellationToken token)
+    public async Task<HostReport> InspectHostAsync(CallerIdentity caller, Guid projectId, Guid endpointId, CancellationToken token)
     {
+        using var projectLease = Admission.Enter(projectId);
         using var policySnapshot = policy.Pin();
         policy.Demand(caller, projectId, RelayCapabilities.InspectHost);
         var configuration = policy.Configuration();
         if (!configuration.Memberships.Any(member => member.ProjectId == projectId && member.EndpointId == endpointId))
             throw new RelayException("capability_denied", "This host endpoint does not belong to the authorized project.");
         var endpoint = configuration.Endpoints.Single(item => item.Id == endpointId);
-        return (hosts ?? throw new RelayException("adapter_unavailable", "No host-inspection adapter is installed.")).InspectAsync(endpoint, token);
+        return await (hosts ?? throw new RelayException("adapter_unavailable", "No host-inspection adapter is installed.")).InspectAsync(endpoint, token);
     }
 
     public async Task<SessionSnapshot> OpenSessionAsync(CallerIdentity caller, Guid projectId, Guid endpointId, Guid workspaceId,
         Guid sessionId, string name, CancellationToken token)
     {
+        using var projectLease = Admission.Enter(projectId);
         using var lease = await Gate(sessionId, token);
         using var policySnapshot = policy.Pin();
         policy.Demand(caller, projectId, RelayCapabilities.ManageSession);
@@ -88,10 +92,12 @@ public sealed class RelayApplication(ProjectPolicy policy, WorkService work, IRe
 
     public async Task<SessionSnapshot> SessionAsync(CallerIdentity caller, Guid id, CancellationToken token)
     {
+        var retained = await sessions.GetAsync(id, token);
+        using var projectLease = Admission.Enter(retained.Scope.ProjectId);
         using var policySnapshot = policy.Pin();
         var session = await sessions.GetAsync(id, token);
         policy.Demand(caller, session.Scope.ProjectId, RelayCapabilities.ReadHistory);
-        return await sessions.InspectAsync(session.Id, token);
+        return policy.Configuration().Projects.Single(project => project.Id == session.Scope.ProjectId).Enabled ? await sessions.InspectAsync(session.Id, token) : session;
     }
 
     public async Task<ReadPage<SessionSnapshot>> SessionsAsync(CallerIdentity caller, ReadQuery query, CancellationToken token)
@@ -103,6 +109,7 @@ public sealed class RelayApplication(ProjectPolicy policy, WorkService work, IRe
 
     public async Task<SessionSnapshot> ControlSessionAsync(CallerIdentity caller, Guid id, string action, CancellationToken token)
     {
+        using var projectLease = Admission.Enter((await sessions.GetAsync(id, token)).Scope.ProjectId);
         using var policySnapshot = policy.Pin();
         using var lease = await Gate(id, token);
         var session = await OwnedAsync(caller, id, RelayCapabilities.ManageSession, token);
@@ -118,6 +125,7 @@ public sealed class RelayApplication(ProjectPolicy policy, WorkService work, IRe
 
     public async Task<WorkRecord> MessageAsync(CallerIdentity caller, Guid sessionId, Guid requestId, string text, Guid? taskId, CancellationToken token)
     {
+        using var projectLease = Admission.Enter((await sessions.GetAsync(sessionId, token)).Scope.ProjectId);
         using var policySnapshot = policy.Pin();
         using var lease = await Gate(sessionId, token);
         var session = await OwnedAsync(caller, sessionId, RelayCapabilities.SendMessage, token);
@@ -129,6 +137,7 @@ public sealed class RelayApplication(ProjectPolicy policy, WorkService work, IRe
     public async Task<WorkRecord> CommandAsync(CallerIdentity caller, Guid projectId, Guid endpointId, Guid workspaceId,
         string commandId, Guid requestId, CancellationToken token)
     {
+        using var projectLease = Admission.Enter(projectId);
         using var policySnapshot = policy.Pin();
         var member = policy.Demand(caller, projectId, RelayCapabilities.RunCommand);
         if (!(member.CommandIds ?? []).Contains(commandId, StringComparer.Ordinal)) throw new RelayException("command_denied", "The project does not authorize this command identifier.");
@@ -140,6 +149,7 @@ public sealed class RelayApplication(ProjectPolicy policy, WorkService work, IRe
 
     public async Task<WorkRecord> TransferAsync(CallerIdentity caller, Guid sessionId, ArtifactTransfer transfer, Guid requestId, CancellationToken token)
     {
+        using var projectLease = Admission.Enter((await sessions.GetAsync(sessionId, token)).Scope.ProjectId);
         using var policySnapshot = policy.Pin();
         using var lease = await Gate(sessionId, token);
         var session = await OwnedAsync(caller, sessionId, RelayCapabilities.ReadHistory, token);
@@ -153,17 +163,26 @@ public sealed class RelayApplication(ProjectPolicy policy, WorkService work, IRe
 
     public async Task<WorkRecord> ResultAsync(CallerIdentity caller, Guid requestId, CancellationToken token)
     {
+        var retained = await work.ReadAsync(requestId, token);
+        using var projectLease = Admission.Enter(retained.Request.Scope?.ProjectId ?? Guid.Empty);
+        return await ResultCore(caller, requestId, token);
+    }
+
+    private async Task<WorkRecord> ResultCore(CallerIdentity caller, Guid requestId, CancellationToken token)
+    {
         using var policySnapshot = policy.Pin();
         var result = await work.ReadAsync(requestId, token);
         if (result.Request.Scope is not { } scope) throw new RelayException("legacy_unassigned", "This legacy operation has no authorized project assignment.");
         policy.Demand(caller, scope.ProjectId, RelayCapabilities.ReadHistory);
-        return result.State == "unknown" && recovery is not null ? await recovery.ReconcileAsync(result, token) : result;
+        return result.State == "unknown" && recovery is not null && policy.Configuration().Projects.Single(project => project.Id == scope.ProjectId).Enabled ? await recovery.ReconcileAsync(result, token) : result;
     }
 
     public async Task<WorkRecord> CancelAsync(CallerIdentity caller, Guid requestId, CancellationToken token)
     {
+        var retained = await work.ReadAsync(requestId, token);
+        using var projectLease = Admission.Enter(retained.Request.Scope?.ProjectId ?? Guid.Empty);
         using var policySnapshot = policy.Pin();
-        var record = await ResultAsync(caller, requestId, token);
+        var record = await ResultCore(caller, requestId, token);
         if (record.Request.SessionId is not { } id) throw new RelayException("capability_denied", "Only session operations support targeted cancellation.");
         using var lease = await Gate(id, token);
         await OwnedAsync(caller, id, RelayCapabilities.ManageSession, token);
@@ -177,8 +196,10 @@ public sealed class RelayApplication(ProjectPolicy policy, WorkService work, IRe
 
     public async Task<TransferPartial> TransferPartialAsync(CallerIdentity caller, Guid requestId, bool remove, CancellationToken token)
     {
+        var retained = await work.ReadAsync(requestId, token);
+        using var projectLease = Admission.Enter(retained.Request.Scope?.ProjectId ?? Guid.Empty);
         using var policySnapshot = policy.Pin();
-        var record = await ResultAsync(caller, requestId, token);
+        var record = await ResultCore(caller, requestId, token);
         if (record.Request.Kind != "transfer" || record.Request.SessionId is not { } id || record.Request.Artifact is not { } artifact)
             throw new RelayException("invalid_operation", "Select a scoped file-transfer operation.");
         using var lease = await Gate(id, token);
@@ -195,6 +216,7 @@ public sealed class RelayApplication(ProjectPolicy policy, WorkService work, IRe
 
     public async Task<ReadPage<InboxMessage>> InboxAsync(CallerIdentity caller, ReadQuery query, CancellationToken token)
     {
+        using var projectLease = Admission.Enter(query.ProjectId);
         using var policySnapshot = policy.Pin();
         policy.Demand(caller, query.ProjectId, RelayCapabilities.ReceiveMessage);
         if (query.SessionId is { } id)
@@ -202,7 +224,8 @@ public sealed class RelayApplication(ProjectPolicy policy, WorkService work, IRe
             var session = await OwnedAsync(caller, id, RelayCapabilities.ReceiveMessage, token);
             if (session.Scope.ProjectId != query.ProjectId) throw new RelayException("capability_denied", "Session project mismatch.");
         }
-        var warnings = await sessions.RefreshMessagesAsync(query.ProjectId, caller.EndpointId, query.SessionId, token);
+        var warnings = policy.Configuration().Projects.Single(project => project.Id == query.ProjectId).Enabled
+            ? await sessions.RefreshMessagesAsync(query.ProjectId, caller.EndpointId, query.SessionId, token) : [];
         return (await journal.MessagesAsync(query, caller.EndpointId, token)) with { Warnings = warnings };
     }
 

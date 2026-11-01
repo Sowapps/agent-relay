@@ -5,6 +5,8 @@
 
 ## Guide
 
+- [Projects and settings](projects.md): separate general/project views, complete project directory and guarded archival/reactivation.
+
 - [Start with your agent](getting-started.md): preserve your working style, understand projects/paths and get from zero to a verified first connection.
 - [Limits and evolution options](limits.md): current boundaries, practical handling and proposed improvements or deliberate priorities.
 

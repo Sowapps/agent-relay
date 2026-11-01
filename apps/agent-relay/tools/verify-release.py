@@ -70,7 +70,7 @@ def probe():
    assert [p['id'] for p in found['structuredContent']['configuration']['projects']]==[contexts[0]['projectId']]
    empty=client.call('tools/call',{'name':'list_results','arguments':{'project_id':contexts[0]['projectId']}});assert not empty.get('isError') and empty['structuredContent']['operations']['items']==[]
    denied=client.call('tools/call',{'name':'list_results','arguments':{'project_id':contexts[1]['projectId']}});assert denied.get('isError')
-   assert len(client.call('tools/list')['tools'])==24
+   assert len(client.call('tools/list')['tools'])==25
    try:client.call('resources/read',{'uri':'agent-relay://docs/../../connections'})
    except RuntimeError:pass
    else:raise AssertionError('Resource traversal accepted')
@@ -91,5 +91,5 @@ for phase in ['initial','restart']:
   finally:
    if host.poll() is None:host.terminate()
    host.wait(timeout=10)
-result={'passed':True,'archiveSha256':digest,'version':a.version,'extracted':str(extracted),'resources':resources,'tools':24,'selfContained':True,'frenchReadme':True,'documentationLinks':documentation_links,'runtimeIsolation':'No dotnet/NuGet variables, nonexistent DOTNET_ROOT, PATH restricted to Windows System32','projectPreservation':True,'scopedConnectionAndForeignProjectRefusal':True,'restartAndDuplicateOwner':True,'modelCalls':0,'wslCalls':0,'guiVerification':'Separate exact-archive native capture required before Publish'}
+result={'passed':True,'archiveSha256':digest,'version':a.version,'extracted':str(extracted),'resources':resources,'tools':25,'selfContained':True,'frenchReadme':True,'documentationLinks':documentation_links,'runtimeIsolation':'No dotnet/NuGet variables, nonexistent DOTNET_ROOT, PATH restricted to Windows System32','projectPreservation':True,'scopedConnectionAndForeignProjectRefusal':True,'restartAndDuplicateOwner':True,'modelCalls':0,'wslCalls':0,'guiVerification':'Separate exact-archive native capture required before Publish'}
 (directory/'verification.json').write_text(json.dumps(result,indent=2),encoding='utf-8');print(json.dumps(result))

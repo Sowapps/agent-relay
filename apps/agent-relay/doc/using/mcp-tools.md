@@ -10,6 +10,7 @@ Parameters ending in `_id` are UUIDs, except `command_id` which is a configured 
 | Tool | Required arguments | Optional arguments / effect |
 | --- | --- | --- |
 | list_projects | none | Authorized contexts and explicit rights |
+| set_project_state | project_id, state, expected_state | Explicit project.manage grant; active/archived transition, guarded preflight; never stops or replays work |
 | list_profiles | none | Compatibility alias of list_projects |
 | inspect_host | project_id, endpoint_id | Explicit environment inspection |
 | execute_command | project_id, endpoint_id, workspace_id, command_id | request_id; configured direct command, no model |
@@ -38,6 +39,14 @@ Common query fields: endpoint_id, session_id, task_id, kind, state, search, sinc
 
 source/destination each require `{endpoint_id, workspace_id, path}`; path is relative, at most500characters. replace defaults false. Session name at most120characters. Sent session text at most8000characters. Unknown fields/type mismatches are refused. The participant-facing server enforces the bound identity/project scope; requests cannot supply an arbitrary actor_id.
 
-Tool results include MCP content plus structuredContent. The project reply holds the appropriate configuration/session/operation/sessions/operations/messages/events/host/partial field. Paged fields contain items/nextCursor/hasMore. A tool error uses isError and readable content; a malformed protocol request uses JSON-RPC error. Check completion state and receipt, not just successful transport.
+Tool results include MCP content plus structuredContent. The project reply holds the appropriate configuration/project/session/operation/sessions/operations/messages/events/host/partial field. Paged fields contain items/nextCursor/hasMore. A tool error uses isError and readable content; a malformed protocol request uses JSON-RPC error. Check completion state and receipt, not just successful transport.
+
+## Active and archived projects
+
+list_projects includes authorized active and archived projects with state and the compatible enabled flag. Archived projects remain discoverable and retain their UUIDs, memberships, grants, work and messages. New requests/session mutations/host inspection/transfers are refused with project_archived; history reads remain scoped and passive (no native inbox import, readiness inspection or receipt reconciliation while archived).
+
+set_project_state accepts state and expected_state as active or archived and returns a project field. It requires the explicit project.manage capability; a Main role alone never grants it, and existing connections do not gain it during an upgrade. Archival blocks new same-project admission while scanning every retained work/session page. Pending/running/approval/unconfirmed operations, an open or uncertain native session, incomplete verification or an adapter error refuse the change. Close sessions and resolve work explicitly first; this tool never interrupts them. Other projects remain independent. Reactivation changes state only and starts no session or task. A retry whose target state is already reached is idempotent; otherwise stale expected state is refused. Request timeout requires discovery/read before retrying.
+
+Full configuration replacement preserves existing project identities/states; it cannot remove a project or flip enabled to bypass this lifecycle. Locally authorized administrative maintenance uses the same guarded host action; ordinary MCP clients cannot grant themselves project.manage. Human navigation and current boundaries are described in [Projects and settings](projects.md).
 
 The native secondary message server has a separate one-tool contract: send_message requires text(max2000) and optional in_reply_to(UUID). It queues a scoped report/reply; queued does not yet confirm Windows import. Omitting in_reply_to creates an independent message. It offers no Windows command capability. Read its own `agent-relay://docs/native-messages` resource when connected to that endpoint.

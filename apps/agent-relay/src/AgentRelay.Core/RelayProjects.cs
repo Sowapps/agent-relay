@@ -4,12 +4,13 @@ public static class RelayCapabilities
 {
     public const string SendMessage = "message.send", ReceiveMessage = "message.receive", ReadHistory = "history.read",
         ManageSession = "session.manage", RunCommand = "command.execute", InspectHost = "host.inspect",
-        ReadFile = "file.read", WriteFile = "file.write", ReplaceFile = "file.replace", LocalWork = "agent.local-work";
+        ReadFile = "file.read", WriteFile = "file.write", ReplaceFile = "file.replace", LocalWork = "agent.local-work", ManageProject = "project.manage";
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
-    { SendMessage, ReceiveMessage, ReadHistory, ManageSession, RunCommand, InspectHost, ReadFile, WriteFile, ReplaceFile, LocalWork };
+    { SendMessage, ReceiveMessage, ReadHistory, ManageSession, RunCommand, InspectHost, ReadFile, WriteFile, ReplaceFile, LocalWork, ManageProject };
 }
 
-public sealed record RelayProject(Guid Id, string Name, bool Enabled = true);
+public sealed record RelayProject(Guid Id, string Name, bool Enabled = true)
+{ public string State => Enabled ? "active" : "archived"; }
 public sealed record RelayEndpoint(Guid Id, string Name, string AdapterId, string BindingId);
 public sealed record RelayWorkspace(Guid Id, Guid EndpointId, string Name, string Location, bool ConcurrentWrites = false);
 public sealed record WorkspaceAccess(Guid WorkspaceId, bool Read, bool Write = false, bool Replace = false);
@@ -25,6 +26,11 @@ public sealed record ArtifactTransfer(ArtifactLocation Source, ArtifactLocation 
 public interface IProjectConfigurationStore
 {
     ProjectConfiguration Load();
+}
+
+public interface IProjectStateStore : IProjectConfigurationStore
+{
+    RelayProject SetEnabled(Guid projectId, bool enabled, bool expectedEnabled);
 }
 
 public sealed class ProjectPolicy(IProjectConfigurationStore configuration)
@@ -73,9 +79,11 @@ public sealed class ProjectPolicy(IProjectConfigurationStore configuration)
     public ProjectMembership Demand(CallerIdentity caller, Guid projectId, string capability)
     {
         var value = Configuration();
-        if (!caller.ProjectIds.Contains(projectId) || !value.Projects.Any(project => project.Id == projectId && project.Enabled)) Denied();
+        if (!caller.ProjectIds.Contains(projectId) || !value.Projects.Any(project => project.Id == projectId)) Denied();
         var member = value.Memberships.SingleOrDefault(item => item.ProjectId == projectId && item.EndpointId == caller.EndpointId);
         if (member is null || !member.Capabilities.Contains(capability, StringComparer.Ordinal)) Denied();
+        if (!value.Projects.Single(project => project.Id == projectId).Enabled && capability is not (RelayCapabilities.ReadHistory or RelayCapabilities.ManageProject or RelayCapabilities.ReceiveMessage))
+            throw new RelayException("project_archived", "This project is archived. Its retained history is readable; reactivate it before new operations.");
         return member!;
     }
 

@@ -2,6 +2,8 @@ using AgentRelay.Core;
 using AgentRelay.Infrastructure;
 using System.IO.Pipes;
 
+if (args.Length == 3 && args[0] == "monitor-project-settings") { await UiRenderScenarios.ProjectSettings(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); Console.WriteLine("NATIVE_PROJECT_SETTINGS=PASS"); return; }
+
 if (args.Length == 3 && args[0] == "monitor-dates") { await UiRenderScenarios.Dates(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); Console.WriteLine("NATIVE_DATES=PASS"); return; }
 
 if (args.Length == 3 && args[0] == "monitor-startup") { await UiRenderScenarios.Startup(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); Console.WriteLine("NATIVE_STARTUP=PASS"); return; }
@@ -77,6 +79,7 @@ await WorkScenarios.Run(data);
 await SessionScenarios.Run(data + "-sessions");
 await ProjectScenarios.Run(data + "-projects");
 await ProjectApplicationScenarios.Run(data + "-application");
+await ProjectLifecycleScenarios.Run(data + "-lifecycle");
 var boundedInput = new BoundedLines(new StringReader(new string('x', 8193) + "\n{\"ok\":true}\n"), 8192);
 try { await boundedInput.ReadAsync(); throw new Exception("Oversized unterminated input was accepted."); }
 catch (InvalidDataException) { }
