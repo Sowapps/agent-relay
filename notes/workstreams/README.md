@@ -80,3 +80,5 @@
 - [Deferred archive and list actions](2026-11-01-deferred-project-archive.md)
 
 - [Maximized opening and restoration](2026-11-01-maximized-window-opening.md)
+
+- [MCP connection refresh audit](2026-11-01-mcp-refresh-audit.md)
