@@ -34,10 +34,10 @@ public sealed class SettingsStore(string dataDirectory)
         {
             if (!Regex.IsMatch(profile.Id, "^[a-z][a-z0-9-]{0,63}$") || string.IsNullOrWhiteSpace(profile.Name) ||
                 !Regex.IsMatch(profile.Distribution, "^[A-Za-z0-9_.-]+$") || !Regex.IsMatch(profile.User, "^[a-z_][a-z0-9_-]*$") ||
-                !Regex.IsMatch(profile.Root, "^/srv/agent-relay-[a-zA-Z0-9-]+$") || profile.Client is not ("command" or "codex" or "claude") ||
+                !RuntimePaths.IsNativeRoot(profile.Root) || profile.Client is not ("command" or "codex" or "claude") ||
                 profile.Commands is null || (profile.Client != "command" && profile.Commands.Length != 0) ||
                 (profile.NativeExecutable is { } executable && (!executable.StartsWith('/') || executable.Length > 500 || executable.Any(char.IsControl))))
-                throw new RelayException("invalid_configuration", "Profiles require a dedicated /srv/agent-relay-* root, Linux user, distribution and supported client.");
+                throw new RelayException("invalid_configuration", "Profiles require a dedicated host runtime root under /srv/agent-relay/var/apps/agent-relay (or an explicit legacy root), Linux user, distribution and supported client.");
             if (profile.Commands.Length > 100 || profile.Commands.Select(rule => rule.Id).Distinct().Count() != profile.Commands.Length)
                 throw new RelayException("invalid_configuration", "Commands require unique identifiers and a bounded count.");
             foreach (var rule in profile.Commands)

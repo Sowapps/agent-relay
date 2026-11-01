@@ -65,6 +65,13 @@ public sealed class RelayPipeServer : IDisposable
                     deadline.CancelAfter(PipeDeadlines.For(request.Operation));
                     if (request.Version != 1) throw new RelayException("unsupported_version", "Unsupported local protocol version.");
                     var authenticated = connections is null ? null : await connections.AuthenticateAsync(request.AccessToken, deadline.Token);
+                    if (dataDirectory is not null && File.Exists(Path.Combine(dataDirectory, "maintenance.json")))
+                    {
+                        var passive = request.Operation is "configuration" or "history" or "result" or "read" or "show_window" ||
+                            request.Operation == "project" && request.ProjectAction is { } action &&
+                            (action.Name is "configuration" or "describe_endpoints" or "list_sessions" or "list_results" or "list_events" or "get_result" || action.Name.StartsWith("observe_", StringComparison.Ordinal));
+                        if (!passive) throw new RelayException("maintenance", "La migration est en cours. Les nouvelles opérations restent bloquées jusqu’à sa validation.");
+                    }
                     if (request.Operation == "show_window")
                     {
                         if (authenticated is not { Administrator: true }) throw new RelayException("capability_denied", "Only the local application can activate its window.");

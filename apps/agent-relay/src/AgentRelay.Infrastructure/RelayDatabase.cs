@@ -4,9 +4,11 @@ namespace AgentRelay.Infrastructure;
 
 public sealed class RelayDatabase
 {
+    public string DataDirectory { get; }
     private readonly string connectionString;
     public RelayDatabase(string dataDirectory)
     {
+        DataDirectory = Path.GetFullPath(dataDirectory);
         Directory.CreateDirectory(dataDirectory);
         connectionString = new SqliteConnectionStringBuilder { DataSource = Path.Combine(Path.GetFullPath(dataDirectory), "relay.sqlite"),
             Pooling = false, DefaultTimeout = 5 }.ToString();

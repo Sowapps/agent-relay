@@ -23,7 +23,7 @@ The local monitoring frontend has a separate passive source adapter. Authenticat
 
 ## Workspace and native session
 
-A real existing workspace is independent of the private session runtime. The latter stores helpers, private native configuration, tmux socket, logs and durable message indexes under its owned /srv/agent-relay-session-UUID root. There is no implicit workspace copying or synchronization. Linux user/distribution/client and optional nativeExecutable belong to the technical binding. A changed physical context requires a new session.
+A real existing workspace is independent of the private session runtime. The latter stores helpers, private native configuration, tmux socket, logs and durable message indexes under its owned /srv/agent-relay/var/apps/agent-relay/sessions/UUID-without-dashes root. There is no implicit workspace copying or synchronization. Linux user/distribution/client and optional nativeExecutable belong to the technical binding. A changed physical context requires a new session.
 
 Native local-work authorization checks both participants and workspace grants. File transfer write permission is a separate capability. Native approvals remain active. Real project instructions may apply to real work; isolated qualification does not silently inherit unrelated home instructions. Authentication reuses protected native account references: Codex uses its auth-file reference; scoped Claude reads the existing private OAuth credential at launch into its environment, without writing a token into launch.py or project files. After shared Claude credentials change, explicitly reopen its idle relay session to refresh that environment. Authentication metadata cannot prove a paid request will succeed.
 

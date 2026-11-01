@@ -33,7 +33,7 @@ The pipe accepts independent bounded clients concurrently; the local exchange co
 
 ## Data and tests
 
-Development commands select `local/apps/agent-relay/data/` explicitly. Test data uses a unique persistent child of the application's local test directory.
+Application commands default to `<installation-root>/var/apps/agent-relay/default/`. The installation descriptor resolves the root independently of the current directory. local/ belongs to developers/operators and is used only for explicit fixtures/exports/toolchains. Test data uses a unique persistent child of the application's local test directory.
 Keep the data directory separate from source/installation and workspaces. Package versions and NuGet integrity locks are retained with the application sources.
 Integration checks exercise the actual core, SQLite adapter, pipe host and client rather than duplicating these implementations in mocks.
 

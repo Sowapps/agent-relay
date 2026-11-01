@@ -17,12 +17,12 @@ parser.add_argument('--binding')
 parser.add_argument('--executable')
 args = parser.parse_args()
 application = Path(__file__).resolve().parents[1]
-root = '/srv/agent-relay-session-' + args.session_id.hex if args.session_id else '/srv/agent-relay-mvp-' + uuid.uuid4().hex
+root = '/srv/agent-relay/var/apps/agent-relay/sessions/' + args.session_id.hex if args.session_id else '/srv/agent-relay/var/apps/agent-relay/profiles/' + uuid.uuid4().hex
 files = {path.name: base64.b64encode(path.read_bytes()).decode() for path in (application / 'wsl').glob('*.py')}
 setup = r'''
-import base64,json,os,pathlib,pwd,sys
-c=json.load(sys.stdin);p=pathlib.Path(c['root']);assert p.parent==pathlib.Path('/srv') and not p.is_symlink()
-assert p.name==('agent-relay-session-'+c['sessionId'].replace('-','')) if c.get('sessionId') else p.name.startswith('agent-relay-mvp-')
+import base64,json,os,pathlib,pwd,sys,re
+c=json.load(sys.stdin);p=pathlib.Path(c['root']);assert re.fullmatch('/srv/agent-relay/var/apps/agent-relay/(sessions/[0-9a-f]{32}|profiles/[0-9a-f]{32})',str(p)) and not p.is_symlink()
+assert p.name==c['sessionId'].replace('-','') if c.get('sessionId') else p.parent.name=='profiles'
 account=pwd.getpwnam(c['user'])
 if p.exists():
  marker=json.loads((p/'provision-owner.json').read_text());assert c.get('sessionId') and marker=={'sessionId':c['sessionId'],'user':c['user']} and p.stat().st_uid==account.pw_uid
@@ -34,6 +34,10 @@ if p.exists():
 for parent in [p.parent,*p.parent.parents]:
  for name in ['CLAUDE.md','CLAUDE.local.md','AGENTS.md','.claude/CLAUDE.md','.claude/AGENTS.md']:
   assert not (parent/name).exists(), 'Inherited instruction file'
+for parent in reversed([p.parent,*p.parent.parents]):
+ if str(parent).startswith('/srv/agent-relay'):
+  if parent.exists():assert not parent.is_symlink() and parent.stat().st_uid in [0,account.pw_uid]
+  else:parent.mkdir(mode=0o700);os.chown(parent,account.pw_uid,account.pw_gid)
 p.mkdir(mode=0o700);(p/'install').mkdir();(p/'tmux.conf').write_text('set -g remain-on-exit on\nset -g history-limit 8000\n')
 for name,value in c['files'].items():(p/'install'/name).write_bytes(base64.b64decode(value))
 (p/'instructions.md').write_text('You are an isolated relay endpoint. Use only relay.send_message. Do not use shell, files, skills or other agents. Be brief.')

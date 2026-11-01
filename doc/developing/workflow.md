@@ -26,5 +26,8 @@ Run `./tools/verify.ps1` for shared tooling. Passing routing fixtures does not p
 
 ## Delivery
 
+Use a dedicated `codex/<scope>` branch from the integration branch. Within the authorized scope, commit and push completed changes autonomously. To validate, merge that branch into `main`, push the integration result and deploy only approved changes missing from the selected instance. Check remote changes before merging; do not force-push, discard unrelated edits or merge failing work. An already deployed matching runtime needs no redundant replacement. Tags and GitHub releases retain their own authorization gate.
+(evidence `2026-11-01-dedicated-branch-delivery`)
+
 Update current documentation. Keep dated measurements and unresolved proposals in notes. Report changes, passed checks and remaining qualification gaps concisely.
 Close the objective when its authorized work ends. An experiment can complete with a negative technical result.

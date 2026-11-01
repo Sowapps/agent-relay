@@ -28,7 +28,7 @@ for guide in [extracted/'README.md',extracted/'README.fr.md',*(extracted/'app/do
   resolved=(guide.parent/relative).resolve()
   assert resolved.is_relative_to(extracted) and resolved.is_file(),f'Broken distribution link: {guide.name}: {target}'
   documentation_links+=1
-exe=extracted/'app/AgentRelay.Windows.exe';data=extracted/'data';main=extracted/'workspaces/main';peer=extracted/'workspaces/peer';main.mkdir(parents=True);peer.mkdir(parents=True)
+exe=extracted/'app/AgentRelay.Windows.exe';data=extracted/'var/apps/agent-relay/default';main=extracted/'workspaces/main';peer=extracted/'workspaces/peer';main.mkdir(parents=True);peer.mkdir(parents=True)
 env={key:value for key,value in os.environ.items() if not key.startswith(('DOTNET_','NUGET_'))}
 env.update({'DOTNET_ROOT':str(extracted/'no-sdk-installed'),'DOTNET_MULTILEVEL_LOOKUP':'0','PATH':str(Path(os.environ['SystemRoot'])/'System32')})
 pwsh=shutil.which('pwsh.exe')
@@ -36,7 +36,8 @@ def run(command):
  r=subprocess.run([str(x) for x in command],cwd=extracted,env=env,capture_output=True,text=True,encoding='utf-8',errors='replace',timeout=45,creationflags=subprocess.CREATE_NO_WINDOW)
  if r.returncode:raise RuntimeError(str(command[0])+': '+r.stderr+r.stdout)
  return r.stdout
-run([exe,'initialize','--data-dir',data])
+run([exe,'initialize'])
+assert (data/'mcp-runtime.json').is_file() and not (extracted/'local').exists(),'Default storage escaped installation var'
 contexts=[]
 for index in range(2):
  request=extracted/('requests-'+str(index))
@@ -76,7 +77,7 @@ def probe():
    return [item['uri'] for item in listed]
 for phase in ['initial','restart']:
  with (directory/('host-'+phase+'.stderr.log')).open('wb') as errors:
-  host=subprocess.Popen([str(exe),'tray','--data-dir',str(data),'--lifetime-ms','120000'],cwd=extracted,env=env,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=errors,creationflags=subprocess.CREATE_NO_WINDOW)
+  host=subprocess.Popen([str(exe),'tray','--lifetime-ms','120000'],cwd=extracted.parent,env=env,stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=errors,creationflags=subprocess.CREATE_NO_WINDOW)
   try:
    for attempt in range(30):
     if host.poll() is not None:raise RuntimeError('Extracted host exited early')
@@ -86,6 +87,7 @@ for phase in ['initial','restart']:
    resources=probe()
    run([exe,'tray','--data-dir',data]) # Reuses the existing owner instead of a duplicate icon.
    assert host.poll() is None
+   assert not (extracted/'local').exists(),'Runtime created a developer local directory'
   finally:
    if host.poll() is None:host.terminate()
    host.wait(timeout=10)

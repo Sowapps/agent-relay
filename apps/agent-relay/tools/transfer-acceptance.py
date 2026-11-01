@@ -1,4 +1,5 @@
 """Real Windows/WSL single-file round trip through MCP in a dedicated model-free session."""
+from runtime_layout import runtime_command
 import argparse
 import hashlib
 import json
@@ -44,7 +45,7 @@ def finish(mcp, request):
 
 
 with (data / 'transfer.stderr.log').open('w', encoding='utf-8') as errors:
-    host = subprocess.Popen([runtime['dotnet'], runtime['assembly'], 'tray', '--data-dir', str(data)],
+    host = subprocess.Popen(runtime_command(runtime) + ['tray', '--data-dir', str(data)],
                             stdout=subprocess.DEVNULL, stderr=errors, creationflags=subprocess.CREATE_NO_WINDOW)
     try:
         time.sleep(.7)

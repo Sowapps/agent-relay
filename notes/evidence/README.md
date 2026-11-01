@@ -5,6 +5,8 @@
 
 ## Records
 
+- [Dedicated branch delivery](2026-11-01-dedicated-branch-delivery.md): autonomous scoped commit/push, integration merge and deployment of missing changes.
+
 - [V1 correction GO](2026-10-29-go-authorizes-v1-correction-plan.md): continuous implementation, tests and documentation of the scoped correction plan.
 
 - [Evening MVP and V1 GO](2026-10-28-go-authorizes-evening-mvp-and-v1.md): bundled development/qualification, scoped MCP registration and consumption limits.

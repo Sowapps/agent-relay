@@ -1,4 +1,5 @@
 """Exercise the prepared normal-use profiles and visible window without an AI turn."""
+from runtime_layout import runtime_command
 import argparse
 import json
 from pathlib import Path
@@ -12,7 +13,7 @@ args = parser.parse_args()
 data = Path(args.data).resolve()
 fragment = json.loads((data / 'mcp.windows.json').read_text(encoding='utf-8-sig'))['mcpServers']['agent_relay']
 runtime = json.loads((data / 'mcp-runtime.json').read_text(encoding='utf-8-sig'))
-base = [runtime['dotnet'], runtime['assembly']]
+base = runtime_command(runtime)
 configuration = json.loads((data / 'relay-config.json').read_text(encoding='utf-8-sig'))
 profile = next(item for item in configuration['profiles'] if item['client'] == 'command')
 host = subprocess.Popen(base + ['tray', '--data-dir', str(data), '--show', '--lifetime-ms', '8000'],

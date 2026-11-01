@@ -4,7 +4,7 @@ import fcntl
 import os
 from pathlib import Path, PurePosixPath
 import uuid
-from relay_files import commit, workspace as assigned_workspace
+from relay_files import commit, workspace as assigned_workspace, session_root
 
 MAXIMUM_BYTES = 256 * 1024 * 1024
 
@@ -18,7 +18,7 @@ def digest(path):
 
 
 def paths(root, client, request, create=False):
-    if not root.name.startswith('agent-relay-session-'):
+    if not session_root(root):
         raise PermissionError('File transfers require a dedicated named session')
     workspace = assigned_workspace(root, client)
     if workspace.is_symlink() or workspace.resolve() != workspace:
@@ -34,9 +34,20 @@ def paths(root, client, request, create=False):
     target = workspace / relative
     if not target.resolve().is_relative_to(workspace):
         raise PermissionError('Path escaped the workspace')
+    protected = [Path('/srv/agent-relay/var'), root / 'install', *(root / name / 'data' for name in ['codex', 'claude', 'command'])]
+    if any(target == folder or target.is_relative_to(folder) for folder in protected):
+        raise PermissionError('Private relay storage cannot be a transfer source or destination')
+    private = root / client / 'data/staging/transfers'
+    temporary = private / (str(uuid.UUID(request['id'])) + '.part')
+    for folder in [private, *private.parents]:
+        if folder.is_symlink(): raise PermissionError('Private staging cannot traverse a symbolic link')
     if create:
+        private.mkdir(parents=True, exist_ok=True)
+        existing = target.parent
+        while not existing.exists(): existing = existing.parent
+        if existing.stat().st_dev != private.stat().st_dev:
+            raise PermissionError('cross_filesystem_publication: private var staging and destination must share a filesystem')
         target.parent.mkdir(parents=True, exist_ok=True)
-    temporary = target.with_name('.relay-transfer-' + str(uuid.UUID(request['id'])) + '.part')
     if temporary.is_symlink():
         raise PermissionError('Temporary file cannot be a symbolic link')
     return workspace, target, temporary

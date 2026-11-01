@@ -48,17 +48,17 @@ For actual native WSL work, additionally establish the selected installed distri
 
 Omit Offline for an authorized locked restore when the private cache needs packages. Ordinary tests exercise local application processes and storage; native paid-agent acceptance is separate. Do not run its agent phase just to prepare documentation or register a connection.
 
-The current local publisher accepts data/report paths only under this checkout’s local/apps/agent-relay. Use a clearly named scope; never silently substitute its default data directory for the operator’s selected one. This example uses a new scope and explicitly owned demonstration workspaces:
+Normal deployment data, runtime and reports live under this checkout’s var/apps/agent-relay. Explicit developer test scopes under local/apps/agent-relay are also accepted; local/ is never an application default. Use a clearly named scope; never silently substitute its default data directory for the operator’s selected one. This example uses a new scope and explicitly owned demonstration workspaces:
 
 ```powershell
 $workspaceRoot = (Get-Location).Path
-$relayData = Join-Path $workspaceRoot 'local/apps/agent-relay/bootstrap-example/data'
-$relayReports = Join-Path $workspaceRoot 'local/apps/agent-relay/bootstrap-example/reports'
+$relayData = Join-Path $workspaceRoot 'var/apps/agent-relay/bootstrap-example'
+$relayReports = Join-Path $workspaceRoot 'var/apps/agent-relay/deployment/bootstrap-example'
 $mainWorkspace = Join-Path $workspaceRoot 'local/apps/agent-relay/bootstrap-example/workspaces/main'
 $peerWorkspace = Join-Path $workspaceRoot 'local/apps/agent-relay/bootstrap-example/workspaces/peer'
 $requestDirectory = Join-Path $workspaceRoot 'local/apps/agent-relay/bootstrap-example/requests'
 New-Item -ItemType Directory -Force $mainWorkspace, $peerWorkspace | Out-Null
-./apps/agent-relay/tools/export-mcp.ps1 -DataDirectory $relayData
+./apps/agent-relay/tools/export-mcp.ps1 -DataDirectory $relayData -PrepareRuntime
 $runtime = Get-Content -LiteralPath (Join-Path $relayData 'mcp-runtime.json') -Raw | ConvertFrom-Json
 ```
 
@@ -78,7 +78,7 @@ LocalOnly declares two local-file participants and read-only discovery/history r
 Check the full proposed configuration against the previous relay-projects.json: all earlier projects/endpoints/workspaces/memberships must be retained, and only the requested grants added. The admin contract replaces the complete configuration; never submit only the new project to an existing data scope. Apply after that review and within the already authorized scope:
 
 ```powershell
-& $runtime.dotnet $runtime.assembly admin --data-dir $relayData --input (Join-Path $requestDirectory 'configure-project.request.json')
+& $runtime.executable admin --data-dir $relayData --input (Join-Path $requestDirectory 'configure-project.request.json')
 if ($LASTEXITCODE -ne 0) { throw 'Project configuration was not applied; inspect the returned error.' }
 ```
 
@@ -106,7 +106,7 @@ Review/apply its configure-project.request.json with the same admin command, the
 The example also writes connection.request.json, binding only its new principal to its new project. Creating a project alone does not create that MCP connection. Apply the existing admin connection contract:
 
 ```powershell
-& $runtime.dotnet $runtime.assembly admin --data-dir $relayData --input (Join-Path $requestDirectory 'connection.request.json')
+& $runtime.executable admin --data-dir $relayData --input (Join-Path $requestDirectory 'connection.request.json')
 if ($LASTEXITCODE -ne 0) { throw 'Scoped connection was not created.' }
 $context = Get-Content -LiteralPath (Join-Path $requestDirectory 'example-context.json') -Raw | ConvertFrom-Json
 ```
@@ -145,7 +145,7 @@ The installed launcher waits for exit and reuses an already running owner of the
 
 ## 6. Connect the client and prove the actual MCP path
 
-Read the generated mcp.codex.toml / mcp.windows.json in the selected data directory. They use Python + the stable mcp-entry.py launcher, with explicit data scope; no secret is passed on the command line. The launcher follows mcp-runtime.json but does not start the tray host. Register the fragment in the caller’s supported project/client settings after reviewing existing configuration. Do not overwrite unrelated servers/global trust or invent a restart button. Reload the MCP connection through the actual client’s supported lifecycle, then invoke its discovered tools.
+Read the generated mcp.codex.toml / mcp.windows.json in the selected data directory. They use the prepared self-contained AgentRelay.Windows.exe, with explicit data scope and connection ID; no secret is passed on the command line. No checkout Python or private development SDK is required by the deployed Windows host/MCP. The optional source mcp-entry.py launcher follows mcp-runtime.json but does not start the tray host. Register the fragment in the caller’s supported project/client settings after reviewing existing configuration. Do not overwrite unrelated servers/global trust or invent a restart button. Reload the MCP connection through the actual client’s supported lifecycle, then invoke its discovered tools.
 
 1. Read resources/list → agent-relay://docs/quickstart if resources are available. A new facade advertises packaged guides; an old connected facade may need the client’s normal reconnect.
 2. Call list_projects. Confirm the expected project UUID and principal membership from example-context.json. Only allowed projects/rights should appear. An enabled settings row is insufficient proof.
@@ -159,7 +159,7 @@ For repeatable preparation diagnostics, check-mcp-docs.py reads packaged documen
 
 | Human goal | Exact path/action | Expected result / caution |
 | --- | --- | --- |
-| Prepare a technical native profile | Réglages → Outils d’administration et de diagnostic → Console technique → Paramètres → Profils techniques | Nouveau profil offers Type(Agent Codex/Agent Claude/Commandes WSL), Distribution, Utilisateur WSL, dedicated /srv/agent-relay-* runtime, optional executable. Replace defaults with discovered/selected facts. This runtime is distinct from the project workspace. |
+| Prepare a technical native profile | Réglages → Outils d’administration et de diagnostic → Console technique → Paramètres → Profils techniques | Nouveau profil offers Type(Agent Codex/Agent Claude/Commandes WSL), Distribution, Utilisateur WSL, dedicated /srv/agent-relay/var/apps/agent-relay runtime, optional executable. Replace defaults with discovered/selected facts. This runtime is distinct from the project workspace. |
 | Prepare missing dedicated WSL files | In Profils techniques, fill selected distribution/user, then Préparer un espace WSL dédié, then Enregistrer et fermer | This button changes WSL-owned runtime/configuration files; it requires corresponding preparation authorization. It is not native account login and does not prove model readiness. Do not ask the human to guess paths/.NET details. |
 | Add a native relay project | Réglages → Outils d’administration et de diagnostic → Modifier les projets | Fill Nom du projet relayé, Main/Principal, existing Windows workspace, Secondary/Secondaire profile and existing absolute Linux workspace. Select only intended local-work/transfer/direct-command rights, then Créer le projet. The current UI wizard requires a configured native profile; use the admin local-only example for the diagnostic nonnative case. |
 | Bind this project’s MCP principal | Console technique: select project/principal, then Paramètres → Préparer la connexion MCP de ce projet | Writes a scoped connection reference; register/reload the client separately. Existing clients do not silently change identity. |

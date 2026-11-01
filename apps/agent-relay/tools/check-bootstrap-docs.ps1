@@ -16,9 +16,9 @@ New-Item -ItemType Directory -Path @($main,$peer) -Force | Out-Null
 Import-Module (Join-Path $PSScriptRoot 'AppCommands.psm1') -Force
 $context=New-AppCommandContext $root (Join-Path (Split-Path $PSScriptRoot -Parent) 'app.psd1')
 $example=Join-Path $root 'apps/agent-relay/doc/using/examples/new-project-request.ps1'
-& (Join-Path $PSScriptRoot 'export-mcp.ps1') -DataDirectory $data
+& (Join-Path $PSScriptRoot 'export-mcp.ps1') -DataDirectory $data -PrepareRuntime
 $runtime=Get-Content -LiteralPath (Join-Path $data 'mcp-runtime.json') -Raw | ConvertFrom-Json
-function Apply-Request([string] $Path){Invoke-AppDotnet $context @($runtime.assembly,'admin','--data-dir',$data,'--input',$Path) | Out-Null}
+function Apply-Request([string] $Path){& $runtime.executable admin --data-dir $data --input $Path | Out-Null;if($LASTEXITCODE -ne 0){throw 'Documented native administration failed.'}}
 $first=Join-Path $base 'requests-first'
 & $example -DataDirectory $data -Name 'Bootstrap first' -MainWorkspace $main -PeerWorkspace $peer -OutputDirectory $first -LocalOnly
 Apply-Request (Join-Path $first 'configure-project.request.json')
@@ -48,7 +48,7 @@ try{
     $python=(Get-Command python.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
     & $python -X utf8 -B $probe --data $data --expected-project $firstContext.projectId --foreign-project ($saved.projects | Where-Object {$_.id -ne $firstContext.projectId} | Select-Object -First 1).id --output (Join-Path $base 'mcp')
     if($LASTEXITCODE -ne 0){throw 'Fresh scoped MCP bootstrap checks failed.'}
-    & $python -X utf8 -B (Join-Path $PSScriptRoot 'check-mcp-docs.py') --dotnet $runtime.dotnet --assembly $runtime.assembly --output (Join-Path $base 'docs')
+    & $python -X utf8 -B (Join-Path $PSScriptRoot 'check-mcp-docs.py') --executable $runtime.executable --output (Join-Path $base 'docs')
     if($LASTEXITCODE -ne 0){throw 'Packaged documentation checks failed.'}
     @{passed=$true;projectsPreserved=3;nativeProfile='Synthetic schema only; no WSL/client/model started';setup='Existing qualified private toolchain; no installation performed';scope=$data;connection=$firstContext.connectionId} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $base 'result.json') -Encoding utf8
 }
@@ -57,7 +57,7 @@ finally{
         $owned=Get-Content -LiteralPath (Join-Path $reports 'host.json') -Raw | ConvertFrom-Json
         $actual=Get-CimInstance Win32_Process -Filter ('ProcessId='+[int]$owned.pid)
         if($actual){
-            if($owned.data -ne $data -or $actual.ExecutablePath -ne $owned.dotnet -or -not $actual.CommandLine.Contains($owned.assembly) -or -not $actual.CommandLine.Contains($data)){throw 'Owned-host cleanup identity differs; process preserved.'}
+            if($owned.data -ne $data -or $actual.ExecutablePath -ne $owned.executable -or -not $actual.CommandLine.Contains(' tray ') -or -not $actual.CommandLine.Contains($data)){throw 'Owned-host cleanup identity differs; process preserved.'}
             Stop-Process -Id $owned.pid -ErrorAction Stop
             Wait-Process -Id $owned.pid -Timeout 10 -ErrorAction SilentlyContinue
         }

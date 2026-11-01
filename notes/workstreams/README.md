@@ -5,6 +5,20 @@
 
 ## Records
 
+- [Branch delivery and validation](2026-11-01-branch-delivery.md): standing scoped Git workflow and delivery of completed runtime/UI corrections.
+
+- [Date and time display](2026-11-01-date-display.md): full dates,24-hour padded times and shared presentation formats.
+
+- [Compact review notification](2026-11-01-review-toast.md): short responsive toast and retained per-operation alert review.
+
+- [Application runtime var migration](2026-11-01-var-migration.md): approved five-lot storage correction and selected-scope migration, with rollback and no publication.
+
+- [Runtime storage audit and correction plan](2026-11-01-runtime-paths-audit.md): internal var/ ownership, developer local/ exceptions and migration proposal; audit only.
+
+- [Shared hover alignment](2026-11-01-hover-alignment.md): prototype-aligned backgrounds without generic inset borders; local application only.
+
+- [Tab hover refinement](2026-11-01-tab-hover.md): subtle tab hover, active underline and keyboard-focus visual check; local only.
+
 - [v1.0.1 publication](2026-11-01-v1.0.1-publication.md): delivery GO, archive recheck and repository visibility decision gate.
 
 - [v1.0.1 local archive preparation](2026-10-31-v1.0.1-local-preparation.md): exact ZIP, startup and documentation qualification before any delivery action.

@@ -13,7 +13,7 @@ public sealed class FileTransferService(SessionService sessions, WslBridge bridg
 
     private void ValidateProtectedPath(string path)
     {
-        foreach (var protectedRoot in new[] { protectedDataDirectory, AppContext.BaseDirectory }.Where(value => value is not null))
+        foreach (var protectedRoot in RuntimePaths.ProtectedRoots(protectedDataDirectory ?? database.DataDirectory))
         {
             var root = Path.GetFullPath(protectedRoot!).TrimEnd(Path.DirectorySeparatorChar);
             if (path.Equals(root, StringComparison.OrdinalIgnoreCase) || path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
@@ -60,8 +60,8 @@ public sealed class FileTransferService(SessionService sessions, WslBridge bridg
         }
         var target = WorkspacePath(localWorkspace, destination);
         ValidateProtectedPath(target);
-        var relative = Path.GetRelativePath(localWorkspace, Path.Combine(Path.GetDirectoryName(target)!, ".relay-transfer-" + request.Id.ToString("D") + ".part"));
-        var partial = WorkspacePath(localWorkspace, relative); var info = new FileInfo(partial);
+        var partial = RuntimePaths.TransferPartial(database.DataDirectory, request.Id); var info = new FileInfo(partial);
+        RuntimePaths.DemandPrivatePath(partial);
         var exists = info.Exists; var bytes = exists ? info.Length : 0;
         if (remove && exists) File.Delete(partial);
         return new(request.Id, destination, bytes, exists, remove && exists);
@@ -101,10 +101,14 @@ public sealed class FileTransferService(SessionService sessions, WslBridge bridg
         var upload = transfer.Direction == "upload";
         var source = upload ? windowsPath : Unc(linuxPath);
         var destination = upload ? Unc(native.GetProperty("temporary").GetString()!) :
-            Path.Combine(Path.GetDirectoryName(windowsPath)!, ".relay-transfer-" + request.Id.ToString("D") + ".part");
+            RuntimePaths.TransferPartial(database.DataDirectory, request.Id);
         if (!upload)
         {
             WorkspacePath(windowsWorkspace, localRelative);
+            RuntimePaths.DemandPrivatePath(destination);
+            Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+            FilePublication.DemandSameVolume(Path.GetDirectoryName(destination)!, windowsPath);
+            if (File.Exists(destination)) throw new RelayException("uncertain_partial", "A retained private partial exists; inspect it before a new transfer.", effectsPossible: false);
             if (!transfer.Overwrite && File.Exists(windowsPath)) throw new RelayException("destination_exists", "Destination exists; overwrite must be explicit.");
             Directory.CreateDirectory(Path.GetDirectoryName(windowsPath)!);
             WorkspacePath(windowsWorkspace, Path.GetRelativePath(windowsWorkspace, destination));

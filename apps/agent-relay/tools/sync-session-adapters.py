@@ -12,7 +12,7 @@ args = parser.parse_args()
 application = Path(__file__).resolve().parents[1]
 root = application.parents[1]
 data = args.data.resolve()
-assert data.is_relative_to(root / 'local/apps/agent-relay'), 'Select explicit application-local data'
+assert any(data.is_relative_to(root / folder) for folder in ['var/apps/agent-relay','local/apps/agent-relay']), 'Select explicit declared relay data'
 with sqlite3.connect(data / 'relay.sqlite') as database:
     active = database.execute("SELECT count(*) FROM work WHERE json_extract(payload,'$.state') IN ('pending','running')").fetchone()[0]
     assert active == 0, 'Wait for active relay work before updating adapters'
@@ -21,7 +21,7 @@ files = {path.name: base64.b64encode(path.read_bytes()).decode() for path in (ap
 script = '''
 import base64,json,os,pathlib,sys,uuid
 c=json.load(sys.stdin);s=c['session'];p=pathlib.Path(s['root'])
-assert p.parent==pathlib.Path('/srv') and p.name=='agent-relay-session-'+uuid.UUID(s['id']).hex and p.resolve()==p and p.stat().st_uid==os.getuid()
+assert (str(p)=='/srv/agent-relay/var/apps/agent-relay/sessions/'+uuid.UUID(s['id']).hex or str(p)=='/srv/agent-relay-session-'+uuid.UUID(s['id']).hex) and p.resolve()==p and p.stat().st_uid==os.getuid()
 assert json.loads((p/'provision-owner.json').read_text())=={'sessionId':s['id'],'user':s['template']['user']}
 install=p/'install';assert install.resolve()==install
 for name,value in c['files'].items():

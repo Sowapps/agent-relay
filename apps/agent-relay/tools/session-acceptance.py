@@ -1,4 +1,5 @@
 """Dedicated named-session qualification through the real MCP protocol, separate from desktop-tool discovery."""
+from runtime_layout import runtime_command
 import argparse
 from datetime import datetime, timezone
 import json
@@ -73,7 +74,7 @@ def wait_result(mcp, request):
 
 
 with (data / ('host-' + args.phase + '.stderr.log')).open('w', encoding='utf-8') as host_errors, (data / ('mcp-' + args.phase + '.stderr.log')).open('w', encoding='utf-8') as errors:
-    host = subprocess.Popen([runtime['dotnet'], runtime['assembly'], 'tray', '--data-dir', str(data)],
+    host = subprocess.Popen(runtime_command(runtime) + ['tray', '--data-dir', str(data)],
                             stdout=subprocess.DEVNULL, stderr=host_errors, creationflags=subprocess.CREATE_NO_WINDOW)
     result = {'at': datetime.now(timezone.utc).isoformat(), 'desktopCurrentChatToolsProven': False}
     try:

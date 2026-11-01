@@ -160,7 +160,7 @@ internal sealed class MvpWindow : Form
             var bounds = new Rectangle(args.Bounds.X + 10, args.Bounds.Y + 10, args.Bounds.Width - 20, 22);
             TextRenderer.DrawText(args.Graphics, $"{State(row.Work.State)} · {row.Work.Label ?? row.ProfileName}", Font, bounds, UiTheme.Text, TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
             bounds.Y += 23;
-            TextRenderer.DrawText(args.Graphics, $"{row.Work.CreatedAt.ToLocalTime():dd/MM HH:mm}  ·  {row.Preview}", Font, bounds, UiTheme.Muted, TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
+            TextRenderer.DrawText(args.Graphics, $"{DisplayDateTime.Format(row.Work.CreatedAt)}  ·  {row.Preview}", Font, bounds, UiTheme.Muted, TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
             if ((args.State & DrawItemState.Focus) != 0) args.DrawFocusRectangle();
         };
     }
@@ -170,7 +170,7 @@ internal sealed class MvpWindow : Form
         if (tabs.SelectedIndex != 1) return;
         if (inbox.SelectedItem is not InboxRow row) { selectedDetail = null; resultTitle.Text = "Aucun message sélectionné"; resultMeta.Text = "Les messages relevés depuis WSL apparaissent ici."; RenderDetail(); return; }
         resultTitle.Text = profileNames.GetValueOrDefault(row.Message.ProfileId, row.Message.Sender);
-        resultMeta.Text = $"{(row.Message.InReplyTo is null ? "Message spontané" : "Réponse à une demande")} · {row.Message.Sender} → {row.Message.Recipient} · {row.Message.ReceivedAt.ToLocalTime():dd/MM HH:mm}";
+        resultMeta.Text = $"{(row.Message.InReplyTo is null ? "Message spontané" : "Réponse à une demande")} · {row.Message.Sender} → {row.Message.Recipient} · {DisplayDateTime.Format(row.Message.ReceivedAt)}";
         if (row.Message.SessionId is { } sessionId) resultMeta.Text += "\nSession : " + sessionId;
         selectedDetail = row.Message; RenderDetail();
     }
@@ -186,7 +186,7 @@ internal sealed class MvpWindow : Form
             var bounds = new Rectangle(args.Bounds.X + 10, args.Bounds.Y + 10, args.Bounds.Width - 20, 22);
             TextRenderer.DrawText(args.Graphics, $"{(row.Message.InReplyTo is null ? "Message spontané" : "Réponse")} · {profileNames.GetValueOrDefault(row.Message.ProfileId, row.Message.Sender)}", Font, bounds, UiTheme.Text, TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
             bounds.Y += 23;
-            TextRenderer.DrawText(args.Graphics, $"{row.Message.ReceivedAt.ToLocalTime():dd/MM HH:mm} · {row.Message.Text.ReplaceLineEndings(" ")}", Font, bounds, UiTheme.Muted, TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
+            TextRenderer.DrawText(args.Graphics, $"{DisplayDateTime.Format(row.Message.ReceivedAt)} · {row.Message.Text.ReplaceLineEndings(" ")}", Font, bounds, UiTheme.Muted, TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine);
             if ((args.State & DrawItemState.Focus) != 0) args.DrawFocusRectangle();
         };
     }
@@ -336,7 +336,7 @@ internal sealed class MvpWindow : Form
             var work = response.Work!;
             if (IsDisposed || tabs.SelectedIndex != 0 || (history.SelectedItem as HistoryRow)?.Work.Id != row.Work.Id) return;
             resultTitle.Text = $"{State(work.State)} · {row.Work.Label ?? profileNames.GetValueOrDefault(work.Request.ProfileId, work.Request.ProfileId)}";
-            resultMeta.Text = $"{work.CreatedAt.ToLocalTime():dd/MM/yyyy HH:mm}  ·  {(work.Request.Kind switch { "command" => "Commande WSL", "transfer" => "Transfert de fichier", _ => "Message à l’agent" })}" +
+            resultMeta.Text = $"{DisplayDateTime.Format(work.CreatedAt)}  ·  {(work.Request.Kind switch { "command" => "Commande WSL", "transfer" => "Transfert de fichier", _ => "Message à l’agent" })}" +
                 (work.Result?.ExitCode is { } code ? $"  ·  Code de sortie : {code}" : "") + $"\nIdentifiant : {work.Request.Id}";
             if (work.Metadata?.Context is { } context) resultMeta.Text += "\nDossier : " + context;
             else if (work.Request.Kind == "command")

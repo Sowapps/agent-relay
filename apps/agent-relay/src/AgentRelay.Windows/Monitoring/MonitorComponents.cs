@@ -133,7 +133,7 @@ internal sealed class HistoryRow : Button
     private readonly string heading, secondary, state, stamp;
     public HistoryRow(string heading, string secondary, string state, DateTimeOffset at, int width, Action action)
     {
-        this.heading = heading; this.secondary = secondary; this.state = state; stamp = at.ToLocalTime().ToString("dd/MM HH:mm");
+        this.heading = heading; this.secondary = secondary; this.state = state; stamp = DisplayDateTime.Format(at);
         Text = heading + " · " + secondary + " · " + MonitorComponents.State(state); AccessibleName = Text; Width = width; Height = 92; Margin = new Padding(0, 0, 0, 1);
         FlatStyle = FlatStyle.Flat; FlatAppearance.BorderSize = 0; BackColor = Color.White; Cursor = Cursors.Hand; Click += (_, _) => action();
     }
@@ -144,8 +144,9 @@ internal sealed class HistoryRow : Button
         using var title = new Font("Segoe UI", 10, FontStyle.Bold); using var small = new Font("Segoe UI", 9);
         TextRenderer.DrawText(e.Graphics, heading, title, new Rectangle(18, 12, Width - 42, 25), MonitorComponents.Ink, flags);
         TextRenderer.DrawText(e.Graphics, secondary, small, new Rectangle(18, 38, Width - 42, 21), MonitorComponents.Quiet, flags);
-        TextRenderer.DrawText(e.Graphics, "● " + MonitorComponents.State(state), small, new Rectangle(18, 64, Width - 140, 22), MonitorComponents.StateColor(state), flags);
-        TextRenderer.DrawText(e.Graphics, stamp, small, new Rectangle(Width - 120, 64, 100, 22), MonitorComponents.Quiet, flags | TextFormatFlags.Right);
+        var stampWidth = TextRenderer.MeasureText(e.Graphics, stamp, small, Size.Empty, TextFormatFlags.SingleLine).Width + 2;
+        TextRenderer.DrawText(e.Graphics, "● " + MonitorComponents.State(state), small, new Rectangle(18, 64, Math.Max(0, Width - stampWidth - 48), 22), MonitorComponents.StateColor(state), flags);
+        TextRenderer.DrawText(e.Graphics, stamp, small, new Rectangle(Width - stampWidth - 18, 64, stampWidth, 22), MonitorComponents.Quiet, flags | TextFormatFlags.Right);
         using var border = new Pen(UiTheme.Border); e.Graphics.DrawLine(border, 0, Height - 1, Width, Height - 1);
         if (Focused) ControlPaint.DrawFocusRectangle(e.Graphics, new Rectangle(3, 3, Width - 6, Height - 6));
     }

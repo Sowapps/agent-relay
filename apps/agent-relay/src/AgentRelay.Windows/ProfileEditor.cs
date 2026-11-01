@@ -37,7 +37,7 @@ internal sealed class ProfileEditor : Form
         var fieldsPanel = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, Margin = new Padding(0) };
         fieldsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         var fields = new (string Label, Control Field)[] { ("Nom", name), ("Type", kind), ("Distribution", distribution), ("Utilisateur WSL", user),
-            ("Dossier dédié /srv/agent-relay-*", root), ("Exécutable natif (agent)", executable), ("Programme autorisé (commande)", program), ("Arguments : un par ligne", arguments) };
+            ("Dossier privé var de l’hôte WSL", root), ("Exécutable natif (agent)", executable), ("Programme autorisé (commande)", program), ("Arguments : un par ligne", arguments) };
         for (var index = 0; index < fields.Length; index++)
         {
             var panel = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, Margin = new Padding(0, 0, 0, 14) };

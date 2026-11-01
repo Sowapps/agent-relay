@@ -9,6 +9,7 @@ p.add_argument('--version',required=True);a=p.parse_args()
 payload=a.payload.resolve();notices=payload/'third-party';notices.mkdir()
 app=Path(__file__).resolve().parents[1]
 root=app.parents[1]
+(payload/'app/installation.json').write_text(json.dumps({'version':1,'root':'..'}),encoding='utf-8')
 # Keep repository prose as the only source; adapt links to the extracted layout.
 def distribution_links(text):
  text=text.replace('](apps/agent-relay/doc/using/','](app/documentation/')
@@ -42,7 +43,7 @@ for name,version in sorted(versions.items()):
 assert (payload/'app/coreclr.dll').is_file(),'Self-contained runtime missing'
 assert (payload/'app/AgentRelay.Windows.exe').is_file()
 files={file.relative_to(payload).as_posix():hashlib.sha256(file.read_bytes()).hexdigest() for file in sorted(payload.rglob('*')) if file.is_file()}
-assert not any(any(part in {'data','connections','presentation-cache','.codex','.git','bin','obj'} for part in Path(name).parts) for name in files)
+assert not any(any(part in {'var','local','data','connections','presentation-cache','.codex','.git','bin','obj'} for part in Path(name).parts) for name in files)
 inputs=[file for folder in ['src','packaging','wsl','doc/using'] for file in (app/folder).rglob('*') if file.is_file() and not {'bin','obj','__pycache__'}.intersection(file.relative_to(app).parts)]
 inputs += list(app.glob('*.props')) + [root/'README.md',root/'README.fr.md',app/'NuGet.Config'] + [app/'tools'/name for name in ['release.ps1','package-release.py','verify-release.py','provision-wsl.py','test-startup.ps1']]
 source_inputs={file.relative_to(root).as_posix():hashlib.sha256(file.read_bytes()).hexdigest() for file in sorted(inputs)}

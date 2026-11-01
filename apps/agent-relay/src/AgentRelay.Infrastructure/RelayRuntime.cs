@@ -17,6 +17,7 @@ public sealed class RelayRuntime : IAsyncDisposable
 
     private RelayRuntime(string dataDirectory, Action<Exception> reportError)
     {
+        RuntimePaths.DemandActive(dataDirectory);
         Directory.CreateDirectory(dataDirectory);
         try { ownership = new FileStream(Path.Combine(dataDirectory, "host.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
         catch (IOException error) when ((error.HResult & 0xffff) is 32 or 33) { throw new RelayAlreadyRunningException(error); }
@@ -49,6 +50,6 @@ public sealed class RelayRuntime : IAsyncDisposable
     {
         stop.Cancel();
         try { await listener.ConfigureAwait(false); }
-        finally { await projects.DisposeAsync(); await mvp.DisposeAsync(); server.Dispose(); service.Dispose(); stop.Dispose(); ownership.Dispose(); }
+            finally { await projects.DisposeAsync(); await mvp.DisposeAsync(); server.Dispose(); service.Dispose(); stop.Dispose(); ownership.Dispose(); }
     }
 }

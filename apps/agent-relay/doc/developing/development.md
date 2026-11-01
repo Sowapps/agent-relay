@@ -19,7 +19,7 @@ Normal builds restore in locked mode. A deliberate dependency change requires up
 The current Windows executable targets win-x64 and uses the qualified shared runtime; it does not copy unused native binaries for other operating systems into its execution directory.
 
 Run opens the French project-monitoring window and notification icon. The command waits until Quitter or an application failure, propagating its exit code.
-Runtime output is copied once per content fingerprint into ignored `local/apps/agent-relay/run/`; running binaries do not lock the compiler's output directory.
+Deployed runtime output is copied once per content fingerprint into ignored `var/apps/agent-relay/run/`; explicit test-runtime copies may stay in developer local/; running binaries do not lock the compiler's output directory.
 Old runtime versions are retained until explicitly cleaned after confirming no process uses them. Do not replace a running instance silently.
 
 ## Tests

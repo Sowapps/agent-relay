@@ -1,4 +1,5 @@
 """Verify late receipt reconciliation without replaying any real model request."""
+from runtime_layout import runtime_command
 import argparse
 import json
 from pathlib import Path
@@ -10,7 +11,7 @@ parser.add_argument('--runtime', required=True)
 args = parser.parse_args()
 runtime = json.loads(Path(args.runtime).read_text(encoding='utf-8-sig'))
 data = Path(runtime['data'])
-base = [runtime['dotnet'], runtime['assembly']]
+base = runtime_command(runtime)
 original = json.loads((data / 'acceptance-codex.json').read_text())
 identifier = original['request']['id']
 # This is a deliberately injected unconfirmed state in qualification data only.
