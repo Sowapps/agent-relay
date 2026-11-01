@@ -43,6 +43,26 @@ internal sealed partial class ProjectWindow : Form
         FormClosing += (_, args) => { if (args.CloseReason == CloseReason.UserClosing) { args.Cancel = true; Hide(); } };
     }
 
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+        if (!TopLevel) return; // Embedded rendering surfaces retain their explicitly selected test/preview size.
+        var area = Screen.FromControl(this).WorkingArea;
+        var size = new Size(Math.Max(1, area.Width * 85 / 100), Math.Max(1, area.Height * 85 / 100));
+        // OnLoad follows WinForms DPI scaling; working-area coordinates must not be scaled again.
+        MinimumSize = new Size(Math.Min(MinimumSize.Width, size.Width), Math.Min(MinimumSize.Height, size.Height));
+        StartPosition = FormStartPosition.Manual;
+        Bounds = new Rectangle(area.Left + (area.Width - size.Width) / 2, area.Top + (area.Height - size.Height) / 2, size.Width, size.Height);
+        WindowState = FormWindowState.Maximized;
+    }
+
+    internal void OpenFromTray()
+    {
+        if (WindowState == FormWindowState.Minimized) WindowState = FormWindowState.Maximized;
+        Show();
+        Activate();
+    }
+
     internal Task InitializePresentation() => initialization ??= InitializeCore();
     private async Task InitializeCore()
     {
