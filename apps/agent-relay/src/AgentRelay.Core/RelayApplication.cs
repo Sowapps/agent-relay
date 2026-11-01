@@ -113,6 +113,8 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
         using var policySnapshot = policy.Pin();
         using var lease = await Gate(id, token);
         var session = await OwnedAsync(caller, id, RelayCapabilities.ManageSession, token);
+        if (policy.Configuration().Projects.Single(project => project.Id == session.Scope.ProjectId).ArchiveRequested && action is not ("close" or "interrupt"))
+            throw new RelayException("project_draining", "New session changes are suspended during archival; closing or interrupting existing work remains available.");
         if (action is not ("start" or "reopen" or "close" or "interrupt") && !action.StartsWith("rename:", StringComparison.Ordinal))
             throw new RelayException("invalid_operation", "Unknown session action.");
         if (action.StartsWith("rename:", StringComparison.Ordinal) && (string.IsNullOrWhiteSpace(action[7..]) || action.Length > 127 || action.Any(char.IsControl)))

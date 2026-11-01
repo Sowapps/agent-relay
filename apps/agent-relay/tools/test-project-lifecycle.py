@@ -10,6 +10,8 @@ import shutil
 import sqlite3
 import subprocess
 import uuid
+import time
+from datetime import datetime, timezone
 from deployment import launch
 from relay_mcp import RelayMcp
 from runtime_layout import runtime_command
@@ -47,21 +49,38 @@ def main(pointer):
             run([exe, 'admin', '--data-dir', data, '--input', admin])
             denied = mcp.call('tools/call', {'name': 'set_project_state', 'arguments': dict(request, project_id=contexts[1]['projectId'])})
             assert denied.get('isError') and 'capability_denied' in denied['content'][0]['text']
-            result = mcp.tool('set_project_state', request); assert result['project']['state'] == 'archived'
-            assert mcp.tool('set_project_state', request)['project']['state'] == 'archived'  # Lost-response retry.
-            projects = mcp.tool('list_projects')['configuration']['projects']; assert len(projects) == 1 and projects[0]['state'] == 'archived'
-            assert mcp.tool('list_results', {'project_id': project})['operations']['items'] == []
+            # Insert a fictional uncertain record so the real host must retain intent across restart.
+            identifier = str(uuid.uuid4()); stamp = datetime.now(timezone.utc).isoformat()
+            record = {'request': {'id': identifier, 'profileId': contexts[0]['peerId'], 'kind': 'command',
+                       'scope': {'projectId': project, 'senderId': contexts[0]['mainId'], 'recipientId': contexts[0]['peerId']}},
+                      'state': 'unknown', 'createdAt': stamp, 'updatedAt': stamp}
+            with sqlite3.connect(data / 'relay.sqlite') as database:
+                database.execute('INSERT INTO work VALUES(?,?)', (identifier, json.dumps(record)))
+            result = mcp.tool('set_project_state', request)['project']
+            assert result['state'] == 'active' and result['archiveRequested']
+            assert mcp.tool('set_project_state', request)['project']['archiveRequested']  # Lost-response retry.
             blocked = mcp.call('tools/call', {'name': 'execute_command', 'arguments': {'project_id': project, 'endpoint_id': contexts[0]['peerId'], 'workspace_id': contexts[0]['peerWorkspaceId'], 'command_id': 'fixture-list'}})
-            assert blocked.get('isError') and 'project_archived' in blocked['content'][0]['text']
+            assert blocked.get('isError') and 'project_draining' in blocked['content'][0]['text']
         host.terminate(); host.wait(timeout=10); host = launch(runtime, data, reports)
         with (reports / 'mcp.stderr.log').open('a') as errors, RelayMcp(runtime, data, root, errors) as mcp:
-            assert mcp.tool('list_projects')['configuration']['projects'][0]['state'] == 'archived'
+            current = lambda: mcp.tool('list_projects')['configuration']['projects'][0]
+            assert current()['archiveRequested'] and current()['state'] == 'active'
+            deadline = time.monotonic() + 12
+            while not current().get('archiveDiagnostic') and time.monotonic() < deadline: time.sleep(.15)
+            assert 'unknown' in current()['archiveDiagnostic']
+            # Only this explicit fictional record is resolved, without executing any command.
+            with sqlite3.connect(data / 'relay.sqlite') as database:
+                database.execute("UPDATE work SET payload=json_set(payload,'$.state','failed') WHERE id=?", (identifier,))
+            deadline = time.monotonic() + 12
+            while current()['state'] != 'archived' and time.monotonic() < deadline: time.sleep(.15)
+            assert current()['state'] == 'archived' and not current()['archiveRequested']
+            assert len(mcp.tool('list_results', {'project_id': project})['operations']['items']) == 1
             assert mcp.tool('set_project_state', {'project_id': project, 'state': 'active', 'expected_state': 'archived'})['project']['state'] == 'active'
         with closing(sqlite3.connect(data / 'relay.sqlite')) as database:
-            assert database.execute('SELECT count(*) FROM work').fetchone()[0] == 0
+            assert database.execute('SELECT count(*) FROM work').fetchone()[0] == 1
             assert database.execute('SELECT count(*) FROM sessions').fetchone()[0] == 0
         result = {'passed': True, 'scopedPermissionAndForeignProjectRefusal': True, 'archiveIdempotence': True, 'archivedDiscoveryAndHistory': True,
-                  'newCommandRefusedBeforeExecution': True, 'restartPersistence': True, 'reactivationWithoutWorkOrSession': True, 'modelCalls': 0, 'wslCalls': 0, 'fixture': str(fixture)}
+                  'newCommandRefusedBeforeExecution': True, 'restartPersistence': True, 'durableDeferredArchival': True, 'unknownDiagnostic': True, 'automaticFinalization': True, 'reactivationWithoutWorkOrSession': True, 'modelCalls': 0, 'wslCalls': 0, 'fixture': str(fixture)}
         write(fixture / 'result.json', result); print(json.dumps(result))
     finally:
         if host.poll() is None: host.terminate(); host.wait(timeout=10)

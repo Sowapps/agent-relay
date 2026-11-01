@@ -11,18 +11,25 @@ public sealed class ProjectSettingsStore(string dataDirectory) : IProjectStateSt
         ProjectPolicy.Validate(configuration);
         using var ownership = WriteLease();
         var previous = Load();
-        if (previous.Projects.Any(project => !configuration.Projects.Any(item => item.Id == project.Id && item.Enabled == project.Enabled)))
+        if (previous.Projects.Any(project => !configuration.Projects.Any(item => item.Id == project.Id && item.Enabled == project.Enabled && item.ArchiveRequested == project.ArchiveRequested && item.ArchiveDiagnostic == project.ArchiveDiagnostic)))
             throw new RelayException("project_lifecycle_required", "Preserve existing projects and use the guarded lifecycle action to archive/reactivate them.");
         SaveCore(configuration);
     }
     public RelayProject SetEnabled(Guid projectId, bool enabled, bool expectedEnabled)
     {
+        var project = Load().Projects.Single(item => item.Id == projectId);
+        if (project.Enabled != expectedEnabled) throw new RelayException("state_conflict", "Project state changed.");
+        return SetLifecycle(project, enabled, false, null);
+    }
+    public RelayProject SetLifecycle(RelayProject expected, bool enabled, bool archiveRequested, string? diagnostic)
+    {
         using var ownership = WriteLease();
         var configuration = Load(); ProjectPolicy.Validate(configuration);
-        var project = configuration.Projects.SingleOrDefault(item => item.Id == projectId) ?? throw new RelayException("not_found", "Unknown project.");
-        if (project.Enabled != expectedEnabled) throw new RelayException("state_conflict", "Project state changed; no update was written.");
-        var updated = project with { Enabled = enabled };
-        SaveCore(configuration with { Projects = configuration.Projects.Select(item => item.Id == projectId ? updated : item).ToArray() });
+        var project = configuration.Projects.SingleOrDefault(item => item.Id == expected.Id) ?? throw new RelayException("not_found", "Unknown project.");
+        if (project.Enabled != expected.Enabled || project.ArchiveRequested != expected.ArchiveRequested)
+            throw new RelayException("state_conflict", "Project state changed; no update was written.");
+        var updated = project with { Enabled = enabled, ArchiveRequested = archiveRequested, ArchiveDiagnostic = diagnostic };
+        if (updated != project) SaveCore(configuration with { Projects = configuration.Projects.Select(item => item.Id == project.Id ? updated : item).ToArray() });
         return updated;
     }
     private FileStream WriteLease()

@@ -15,19 +15,52 @@ public sealed partial class RelayApplication
         if (caller is not null) policy.Demand(caller, projectId, RelayCapabilities.ManageProject);
         var project = policy.Configuration().Projects.SingleOrDefault(project => project.Id == projectId)
             ?? throw new RelayException("not_found", "Unknown project.");
-        if (project.Enabled == enabled) return project; // Safe retry after a lost response; no work is replayed.
-        if (project.Enabled != expectedEnabled) throw new RelayException("state_conflict", "Project state changed. Refresh before deciding on a transition.");
         var writer = projectStates ?? throw new RelayException("adapter_unavailable", "Project state persistence is unavailable.");
-        if (!enabled)
+        if (enabled)
         {
-            if (work.IsProjectActive(projectId)) throw new RelayException("archive_blocked", "Project work is still active; no state was changed.");
+            if (project.Enabled && !project.ArchiveRequested) return project;
+            if (project.Enabled != expectedEnabled) throw new RelayException("state_conflict", "Project state changed. Refresh before deciding.");
+            return writer.SetLifecycle(project, true, false, null); // Also cancels a pending archive; never replays work.
+        }
+        if (!project.Enabled || project.ArchiveRequested) return project;
+        if (project.Enabled != expectedEnabled) throw new RelayException("state_conflict", "Project state changed. Refresh before deciding.");
+        token.ThrowIfCancellationRequested();
+        // Persist intent before checking work: the request outlives the caller, UI and host process.
+        return writer.SetLifecycle(project, true, true, null);
+    }
+
+    public async Task ReconcileArchivesAsync(CancellationToken token)
+    {
+        if (projectStates is null) return;
+        foreach (var project in projectStates.Load().Projects.Where(project => project.Enabled && project.ArchiveRequested))
+        {
+            token.ThrowIfCancellationRequested();
+            try { await CompleteArchiveAsync(project.Id, token); }
+            catch (RelayException error) when (error.Code is "busy" or "state_conflict") { /* Another admission/configuration won; inspect the next fresh snapshot. */ }
+        }
+    }
+
+    private async Task CompleteArchiveAsync(Guid projectId, CancellationToken stopping)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stopping);
+        timeout.CancelAfter(TimeSpan.FromSeconds(10));
+        var token = timeout.Token;
+        using var admission = Admission.Enter(projectId);
+        using var snapshot = policy.Pin();
+        var project = policy.Configuration().Projects.SingleOrDefault(project => project.Id == projectId);
+        if (project is not { Enabled: true, ArchiveRequested: true }) return;
+        var writer = projectStates!;
+        try
+        {
+            if (work.IsProjectActive(projectId)) throw new RelayException("archive_waiting", "Waiting for existing project work to finish.");
             long? cursor = null;
             do
             {
                 var page = await journal.OperationsAsync(new(projectId, Cursor: cursor, Limit: 100), token);
                 if (page.Warnings?.Count > 0 || page.Items.Any(item => item.Request.Scope?.ProjectId != projectId)) throw new RelayException("archive_unverified", "Project work verification is incomplete.");
                 var blocking = page.Items.FirstOrDefault(item => item.State is not ("completed" or "failed"));
-                if (blocking is not null) throw new RelayException("archive_blocked", "Archival refused: an operation is active, awaiting approval or unconfirmed. Inspect operation " + blocking.Request.Id + " before continuing.");
+                if (blocking is not null) throw new RelayException(blocking.State is "running" or "pending" ? "archive_waiting" : "archive_unverified",
+                    "Waiting for operation " + blocking.Request.Id + " (" + blocking.State + "). No work is retried or approved automatically.");
                 cursor = Next(page.HasMore, page.NextCursor, cursor);
             } while (cursor is not null);
             do
@@ -36,17 +69,26 @@ public sealed partial class RelayApplication
                 if (page.Warnings?.Count > 0 || page.Items.Any(item => item.Scope.ProjectId != projectId)) throw new RelayException("archive_unverified", "Project session verification is incomplete.");
                 foreach (var retained in page.Items)
                 {
-                    if (retained.WorkActive || work.IsSessionActive(retained.Id)) throw new RelayException("archive_blocked", "A project session still has active work.");
+                    if (retained.WorkActive || work.IsSessionActive(retained.Id)) throw new RelayException("archive_waiting", "Waiting for existing session work to finish.");
                     var observed = await sessions.InspectAsync(retained.Id, token);
-                    if (observed.WorkActive || observed.State is not ("closed" or "not_started"))
-                        throw new RelayException("archive_blocked", "Close the session or resolve its uncertain state before archival: " + retained.Name + ". No session is closed automatically.");
+                    if (observed.Scope.ProjectId != projectId) throw new RelayException("archive_unverified", "Session scope could not be confirmed.");
+                    if (observed.WorkActive) throw new RelayException("archive_waiting", "Waiting for existing native session work to finish.");
+                    if (observed.State is not ("closed" or "not_started" or "ready"))
+                        throw new RelayException("archive_unverified", "Resolve the session state before archival: " + retained.Name + " (" + observed.State + "). No session is closed automatically.");
                 }
                 cursor = Next(page.HasMore, page.NextCursor, cursor);
             } while (cursor is not null);
-            if (work.IsProjectActive(projectId)) throw new RelayException("archive_blocked", "Project work is still finishing; no state was changed.");
+            if (work.IsProjectActive(projectId)) throw new RelayException("archive_waiting", "Project work is still finishing.");
+            token.ThrowIfCancellationRequested();
+            writer.SetLifecycle(project, false, false, null);
         }
-        token.ThrowIfCancellationRequested();
-        return writer.SetEnabled(projectId, enabled, expectedEnabled);
+        catch (OperationCanceledException) when (stopping.IsCancellationRequested) { throw; }
+        catch (Exception error) when (error is not OutOfMemoryException)
+        {
+            var code = error is RelayException relay ? relay.Code : "archive_unverified";
+            var diagnostic = code + ": " + (error is OperationCanceledException ? "Verification timed out; archival remains pending." : error.Message);
+            writer.SetLifecycle(project, true, true, diagnostic[..Math.Min(diagnostic.Length, 800)]);
+        }
     }
     private static long? Next(bool more, long? next, long? previous)
     {

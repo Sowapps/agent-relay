@@ -51,3 +51,6 @@
 
 The dates identify the decision messages available in the conversation. The initial requirements were supplied on 2026-10-16; the subsequent arbitrations and organization request are dated
 2026-10-28. Agent measurements remain in the observation records until the operator validates them.
+
+- [GO request format](2026-11-01-go-request-format.md)
+- [Deferred project archival](2026-11-01-deferred-project-archive.md)

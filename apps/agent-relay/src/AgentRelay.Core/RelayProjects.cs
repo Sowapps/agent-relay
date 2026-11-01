@@ -9,7 +9,7 @@ public static class RelayCapabilities
     { SendMessage, ReceiveMessage, ReadHistory, ManageSession, RunCommand, InspectHost, ReadFile, WriteFile, ReplaceFile, LocalWork, ManageProject };
 }
 
-public sealed record RelayProject(Guid Id, string Name, bool Enabled = true)
+public sealed record RelayProject(Guid Id, string Name, bool Enabled = true, bool ArchiveRequested = false, string? ArchiveDiagnostic = null)
 { public string State => Enabled ? "active" : "archived"; }
 public sealed record RelayEndpoint(Guid Id, string Name, string AdapterId, string BindingId);
 public sealed record RelayWorkspace(Guid Id, Guid EndpointId, string Name, string Location, bool ConcurrentWrites = false);
@@ -31,6 +31,7 @@ public interface IProjectConfigurationStore
 public interface IProjectStateStore : IProjectConfigurationStore
 {
     RelayProject SetEnabled(Guid projectId, bool enabled, bool expectedEnabled);
+    RelayProject SetLifecycle(RelayProject expected, bool enabled, bool archiveRequested, string? diagnostic);
 }
 
 public sealed class ProjectPolicy(IProjectConfigurationStore configuration)
@@ -55,7 +56,7 @@ public sealed class ProjectPolicy(IProjectConfigurationStore configuration)
         }
         static bool Name(string? text) => !string.IsNullOrWhiteSpace(text) && text.Length <= 200 && !text.Any(char.IsControl);
         Ids(value.Projects.Select(item => item.Id)); Ids(value.Endpoints.Select(item => item.Id)); Ids(value.Workspaces.Select(item => item.Id));
-        if (value.Projects.Any(item => !Name(item.Name)) || value.Endpoints.Any(item => !Name(item.Name) || !Name(item.AdapterId) || !Name(item.BindingId)) ||
+        if (value.Projects.Any(item => !Name(item.Name) || (!item.Enabled && item.ArchiveRequested) || item.ArchiveDiagnostic?.Length > 800) || value.Endpoints.Any(item => !Name(item.Name) || !Name(item.AdapterId) || !Name(item.BindingId)) ||
             value.Workspaces.Any(item => !Name(item.Name) || string.IsNullOrWhiteSpace(item.Location) || !value.Endpoints.Any(endpoint => endpoint.Id == item.EndpointId)) ||
             value.Memberships.Select(item => (item.ProjectId, item.EndpointId)).Distinct().Count() != value.Memberships.Length)
             throw new RelayException("invalid_configuration", "Project, endpoint, workspace or membership definition is invalid.");
@@ -84,6 +85,9 @@ public sealed class ProjectPolicy(IProjectConfigurationStore configuration)
         if (member is null || !member.Capabilities.Contains(capability, StringComparer.Ordinal)) Denied();
         if (!value.Projects.Single(project => project.Id == projectId).Enabled && capability is not (RelayCapabilities.ReadHistory or RelayCapabilities.ManageProject or RelayCapabilities.ReceiveMessage))
             throw new RelayException("project_archived", "This project is archived. Its retained history is readable; reactivate it before new operations.");
+        var project = value.Projects.Single(project => project.Id == projectId);
+        if (project.ArchiveRequested && capability is not (RelayCapabilities.ReadHistory or RelayCapabilities.ReceiveMessage or RelayCapabilities.ManageProject or RelayCapabilities.ManageSession))
+            throw new RelayException("project_draining", "Archival is pending. New work is suspended while existing work finishes.");
         return member!;
     }
 

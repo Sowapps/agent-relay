@@ -23,19 +23,36 @@ internal static class ProjectLifecycleScenarios
         configuration = configuration with { Memberships=configuration.Memberships.Select(item=>item.EndpointId==owner?item with {Capabilities=item.Capabilities.Append(RelayCapabilities.ManageProject).ToArray()}:item).ToArray() };
         settings.Save(configuration);
         await Refuses("capability_denied",()=>app.SetProjectStateAsync(foreign,a,false,true,token));
+        // An admitted operation drains without interruption; restart keeps the request and closes admission.
+        fake.ExecutePause=true;
+        var inflight=await app.CommandAsync(caller,a,worker,wa,"list",Guid.NewGuid(),token);
+        await fake.ExecuteEntered.Task.WaitAsync(TimeSpan.FromSeconds(3));
+        var requested=await app.SetProjectStateAsync(caller,a,false,true,token);
+        if(!requested.Enabled||!requested.ArchiveRequested)throw new Exception("Archival request was not persisted before draining.");
+        await app.ReconcileArchivesAsync(token);
+        await Refuses("project_draining",()=>app.CommandAsync(caller,a,worker,wa,"list",Guid.NewGuid(),token));
+        await Refuses("project_draining",()=>app.ControlSessionAsync(caller,sessionId,"reopen",token));
+        var resumed=new RelayApplication(new(new ProjectSettingsStore(data)),work,fake,journal,projectStates:new ProjectSettingsStore(data));
+        if(!resumed.Discover(caller).Projects.Single().ArchiveRequested)throw new Exception("Pending archival did not survive reconstruction.");
+        fake.ExecuteRelease.TrySetResult();
+        while(work.IsProjectActive(a))await Task.Delay(10);
+        await resumed.ReconcileArchivesAsync(token);
+        if(settings.Load().Projects.Single(p=>p.Id==a).Enabled||fake.Executed!=1)throw new Exception("Completed work did not archive or was replayed.");
+        await resumed.SetProjectStateAsync(caller,a,true,false,token);fake.ExecutePause=false;
         var now = DateTimeOffset.UtcNow;
         var uncertain = new WorkRecord(new(Guid.NewGuid(),worker.ToString("D"),"transfer",Scope:new(a,owner,worker,wa)),"unknown",now,now);
         await store.SaveAsync(uncertain,token);
         for(var i=0;i<151;i++)await store.SaveAsync(uncertain with {Request=uncertain.Request with {Id=Guid.NewGuid(),Kind="command"},State="completed"},token);
-        await Refuses("archive_blocked",()=>app.SetProjectStateAsync(caller,a,false,true,token));
-        if(fake.Inspected!=0||!settings.Load().Projects.Single(p=>p.Id==a).Enabled)throw new Exception("Paged preflight missed old uncertain work or touched an adapter too early.");
+        var previousInspections=fake.Inspected;
+        await app.SetProjectStateAsync(caller,a,false,true,token);
+        await app.ReconcileArchivesAsync(token);
+        if(fake.Inspected!=previousInspections||!settings.Load().Projects.Single(p=>p.Id==a).ArchiveRequested||settings.Load().Projects.Single(p=>p.Id==a).ArchiveDiagnostic?.Contains("unknown")!=true)throw new Exception("Paged preflight missed old uncertain work or touched an adapter too early.");
         await store.SaveAsync(uncertain with {State="failed"},token);
-        fake.State="ready";
-        await Refuses("archive_blocked",()=>app.SetProjectStateAsync(caller,a,false,true,token));
-        fake.State="closed";fake.Failure=true;
-        await Refuses("adapter_unavailable",()=>app.SetProjectStateAsync(caller,a,false,true,token));
+        fake.State="ready";fake.Failure=true;
+        await app.ReconcileArchivesAsync(token);
+        if(settings.Load().Projects.Single(p=>p.Id==a).ArchiveDiagnostic?.StartsWith("adapter_unavailable:")!=true)throw new Exception("Verification failure disappeared.");
         fake.Failure=false;fake.Pause=true;
-        var archive = app.SetProjectStateAsync(caller,a,false,true,token);
+        var archive = app.ReconcileArchivesAsync(token);
         await fake.Entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
         await Refuses("busy",()=>app.MessageAsync(caller,sessionId,Guid.NewGuid(),"must not start",null,token));
         await Refuses("busy",()=>app.CommandAsync(caller,a,worker,wa,"list",Guid.NewGuid(),token));
@@ -45,8 +62,8 @@ internal static class ProjectLifecycleScenarios
         var otherWork=await app.CommandAsync(foreign,b,worker,wb,"list",Guid.NewGuid(),token);
         var deadline=DateTime.UtcNow.AddSeconds(3);
         while((await app.ResultAsync(foreign,otherWork.Request.Id,token)).State is "pending" or "running" && DateTime.UtcNow<deadline)await Task.Delay(10);
-        fake.Release.TrySetResult();var archived=await archive;
-        if(archived.Enabled||fake.Executed!=1)throw new Exception("Unrelated project was blocked or a forbidden project operation ran.");
+        fake.Release.TrySetResult();await archive;var archived=settings.Load().Projects.Single(p=>p.Id==a);
+        if(archived.Enabled||fake.Executed!=2)throw new Exception("Unrelated project was blocked or a forbidden project operation ran.");
         var discover=app.Discover(caller);
         if(discover.Projects.Single().State!="archived"||discover.Projects[0].Id!=a)throw new Exception("Archived discovery lost scope or status.");
         await Refuses("project_archived",()=>app.MessageAsync(caller,sessionId,Guid.NewGuid(),"blocked",null,token));
@@ -65,7 +82,7 @@ internal static class ProjectLifecycleScenarios
         await afterRestart.SetProjectStateAsync(caller,a,true,false,token);
         await Refuses("state_conflict",()=>afterRestart.SetProjectStateAsync(caller,a,false,false,token));
         if(fake.Executed!=beforeCalls||!settings.Load().Projects.Single(p=>p.Id==a).Enabled||!settings.Load().Memberships.SequenceEqual(configuration.Memberships,new MembershipComparer()))throw new Exception("Reactivation replayed work or altered permissions.");
-        Console.WriteLine("PROJECT_LIFECYCLE=PASS (paged preflight, uncertain/ready/fault refusal, locked admission/configuration, unrelated-project concurrency, scoped archived history, restart and no replay)");
+        Console.WriteLine("PROJECT_LIFECYCLE=PASS (paged preflight, durable drain, uncertainty/fault diagnostics, locked admission/configuration, unrelated-project concurrency, scoped archived history, restart and no replay)");
     }
     private static async Task Refuses(string code, Func<Task> action)
     {try{await action();throw new Exception("Expected lifecycle refusal: "+code);}catch(RelayException error) when(error.Code==code){} }
@@ -73,7 +90,8 @@ internal static class ProjectLifecycleScenarios
     {public bool Equals(ProjectMembership? x,ProjectMembership? y)=>RelayJson.Serialize(x)==RelayJson.Serialize(y);public int GetHashCode(ProjectMembership x)=>x.ProjectId.GetHashCode();}
     private sealed class Adapter(SessionSnapshot retained) : IRelaySessions,IWorkExecutor
     {
-        public string State="closed";public bool Pause,Failure;public int Inspected,Executed,Refreshed;
+        public string State="closed";public bool Pause,Failure,ExecutePause;
+        public TaskCompletionSource ExecuteEntered=new(TaskCreationOptions.RunContinuationsAsynchronously),ExecuteRelease=new(TaskCreationOptions.RunContinuationsAsynchronously);public int Inspected,Executed,Refreshed;
         public TaskCompletionSource Entered=new(TaskCreationOptions.RunContinuationsAsynchronously),Release=new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Task<SessionSnapshot> GetAsync(Guid id,CancellationToken token)=>Task.FromResult(retained with {State=State});
         public async Task<SessionSnapshot> InspectAsync(Guid id,CancellationToken token){Inspected++;if(Failure)throw new RelayException("adapter_unavailable","Fixture unavailable");if(Pause){Entered.TrySetResult();await Release.Task.WaitAsync(token);}return await GetAsync(id,token);}
@@ -82,6 +100,6 @@ internal static class ProjectLifecycleScenarios
         public Task<SessionSnapshot> OpenAsync(SessionDefinition definition,CancellationToken token)=>throw new Exception("Unexpected session start");
         public Task<SessionSnapshot> ControlAsync(Guid id,string action,CancellationToken token)=>throw new Exception("Unexpected session mutation");
         public Task<IReadOnlyList<string>> RefreshMessagesAsync(Guid project,Guid recipient,Guid? session,CancellationToken token){Refreshed++;return Task.FromResult<IReadOnlyList<string>>([]);}
-        public Task<WorkResult> ExecuteAsync(WorkRequest request,CancellationToken token){Executed++;return Task.FromResult(new WorkResult("fixture","done"));}
+        public async Task<WorkResult> ExecuteAsync(WorkRequest request,CancellationToken token){Executed++;if(ExecutePause){ExecuteEntered.TrySetResult();await ExecuteRelease.Task.WaitAsync(token);}return new WorkResult("fixture","done");}
     }
 }

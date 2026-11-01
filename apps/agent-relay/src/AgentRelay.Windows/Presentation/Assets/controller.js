@@ -80,8 +80,8 @@
   else if(action==='manage-projects'){navigate('settings');ui.settingScope='projects';render();}
   else if(action==='project-state'){
    const project=data.projects.find(p=>p.id===el.dataset.project);if(!project||ui.projectChange)return;
-   const archived=project.state==='archived',state=archived?'active':'archived';
-   modal(archived?'Réactiver ce projet ?':'Archiver ce projet ?',`<p><strong>${C.escape(project.name)}</strong></p><p>${archived?'Le projet réapparaîtra dans la navigation. Aucun travail ni aucune session ne sera relancé.':'Le projet quittera la navigation ; son historique et ses permissions seront conservés. Les nouvelles opérations seront bloquées.'}</p>${archived?'':'<p>Terminez les opérations, vérifiez les résultats incertains et fermez les sessions. Le relais contrôlera ces conditions avant l’archivage ; aucune interruption automatique.</p>'}`,C.button(archived?'Réactiver':'Vérifier et archiver','confirm-project-state',`data-project="${C.escape(project.id)}" data-value="${state}" data-expected="${archived?'archived':'active'}"`,'primary'));
+   const archived=project.state==='archived',pending=project.archiveRequested,state=archived||pending?'active':'archived';
+   modal(pending?'Annuler l’archivage ?':archived?'Réactiver ce projet ?':'Archiver ce projet ?',`<p><strong>${C.escape(project.name)}</strong></p><p>${pending?'Les nouvelles actions seront de nouveau autorisées selon les permissions existantes. Aucun travail ne sera relancé.':archived?'Le projet réapparaîtra dans la navigation. Aucun travail ni aucune session ne sera relancé.':'Les nouvelles actions seront suspendues immédiatement. Le relais attendra la fin du travail engagé, puis archivera le projet automatiquement. Son historique et ses permissions seront conservés.'}</p>${archived||pending?'':'<p>Un résultat incertain ou une vérification impossible maintiendra la demande en attente avec un diagnostic. Aucune interruption ni approbation automatique. Vous pourrez annuler cette demande.</p>'}`,C.button(pending?'Annuler l’archivage':archived?'Réactiver':'Demander l’archivage','confirm-project-state',`data-project="${C.escape(project.id)}" data-value="${state}" data-expected="${archived?'archived':'active'}"`,'primary'));
   }
   else if(action==='confirm-project-state'){
    if(ui.projectChange)return;ui.projectChange={project:el.dataset.project,state:value,expectedState:el.dataset.expected};$('#app-modal').innerHTML='';render();host('project-state',ui.projectChange);
@@ -128,9 +128,9 @@
   }else if(message.type==='startup-preference'){
    ui.startupPending=false;ui.startupError=message.data?.error||null;data.startup=message.data;data.startupEnabled=message.data?.enabled===true;render();if(ui.view==='settings'&&ui.settingScope==='general')$('#startup-switch')?.focus({preventScroll:true});
   }else if(message.type==='project-state'){
-   ui.projectChange=null;const project=data?.projects.find(p=>p.id===message.project);if(project&&message.state)project.state=message.state;render();
+   ui.projectChange=null;const project=data?.projects.find(p=>p.id===message.project);if(project&&message.state){project.state=message.state;project.archiveRequested=Boolean(message.archiveRequested);}render();
    if(message.error)modal('Changement d’état non confirmé',`<p>${C.escape(message.error)}</p><p>Consultez l’état actuel avant de réessayer.</p>${message.diagnostic?`<details class="advanced"><summary>Détails techniques</summary><pre>${C.escape(message.diagnostic)}</pre></details>`:''}`,C.button('Actualiser','project-state-refresh','','primary'));
-   else toast(message.state==='archived'?'Projet archivé. Son historique reste accessible dans Réglages → Projets.':'Projet réactivé. Aucun travail n’a été relancé.');
+   else toast(message.archiveCancelled?'Archivage annulé. Les nouvelles actions sont de nouveau autorisées selon les permissions existantes.':message.archiveRequested?'Archivage demandé. Les nouveaux travaux sont suspendus pendant la fin du travail engagé.':message.state==='archived'?'Projet archivé. Son historique reste accessible dans Réglages → Projets.':'Projet réactivé. Aucun travail n’a été relancé.');
   }else if(message.type==='operation'){
    const index=data?.operations.findIndex(o=>o.id===message.data?.id)??-1;
    if(index>=0){fullOperations.set(message.data.id,message.data);data.operations[index]=message.data;if(ui.detail?.type==='operation'&&ui.detail.id===message.data.id)renderDetail();}

@@ -67,7 +67,7 @@ internal static class PresentationSnapshot
             workspaces = configuration.Workspaces.Select(item => new { item.Id, item.EndpointId, item.Name, item.Location }).ToArray(),
             projects = configuration.Projects.Select((project, index) => new
             {
-                id = project.Id.ToString("D"), project.Name, state = project.State, initial = Initial(project.Name), color = Colors[index % Colors.Length],
+                id = project.Id.ToString("D"), project.Name, state = project.State, archiveRequested = project.ArchiveRequested, archiveDiagnostic = project.ArchiveDiagnostic, initial = Initial(project.Name), color = Colors[index % Colors.Length],
                 description = "Suivi du projet relayé.",
                 hasMore = observations.Any(item=>item.ProjectId==project.Id && (item.MoreOperations || item.MoreMessages || item.MoreSessions)),
                 more = observations.Where(item=>item.ProjectId==project.Id).Select(item=>new { operations=item.MoreOperations,messages=item.MoreMessages,sessions=item.MoreSessions }).FirstOrDefault(),
