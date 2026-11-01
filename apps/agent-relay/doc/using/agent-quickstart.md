@@ -27,7 +27,7 @@ An installation directory contains the application; a data directory stores rela
 
 ## A named, reusable conversation
 
-Before submitting work, inspect the project's state returned by list_projects. Archived projects allow retained history reads, not new operations. Reactivation is an explicit authorized decision using set_project_state with project.manage; never infer it from the presence of a project or silently reactivate to make a request succeed. Existing grants are unchanged. See [Projects and settings](projects.md) for the human route.
+Before submitting work, inspect the project's state and archiveRequested metadata returned by list_projects. A pending archival request still has state=active but blocks new work with project_draining: let admitted work finish, inspect archiveDiagnostic if needed, and never cancel the request merely to make your next action succeed. Archived projects allow retained history reads, not new operations. Reactivation is an explicit authorized decision using set_project_state with project.manage; never infer it from the presence of a project or silently reactivate to make a request succeed. Existing grants are unchanged. See [Projects and settings](projects.md) for the human route.
 
 1. Call `list_sessions` with the chosen `project_id` (optionally `endpoint_id`). Reuse an owned session only when its project, endpoint, workspace and purpose match your task. Preserve its UUID.
 2. If a new conversation is authorized, generate a UUID and call `open_session` with `project_id`, `endpoint_id`, `workspace_id`, `session_id` and `name`. It prepares a native conversation without a model prompt; it is not a text exchange.

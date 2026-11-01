@@ -159,7 +159,7 @@ For repeatable preparation diagnostics, check-mcp-docs.py reads packaged documen
 
 | Human goal | Exact path/action | Expected result / caution |
 | --- | --- | --- |
-| Find general preferences or every project | Réglages → Général / Projets | General settings retain no hidden project selection. Projets includes archived entries and offers only open/archive/reactivate, not project configuration forms. |
+| Find general preferences or every project | Réglages → Général / Projets | General settings retain no hidden project selection. Projets includes archived entries and offers titled icon actions for opening the project or its dedicated settings and archive/reactivate/cancel-pending, without project configuration forms. |
 | Read one project's configuration context | Open that project → Réglages | Dedicated project view: participants, environment connections, its granted workspaces and permissions. Archived projects open from the general directory with history retained. |
 | Archive/reactivate a project | Réglages → Projets → Archiver / Réactiver | Confirm, finish/resolve work and close sessions first. Verification is locked; failures leave the old state, and uncertain transport requires refresh. Reactivation starts no task/session. |
 | Prepare a technical native profile | Réglages → Outils d’administration et de diagnostic → Console technique → Paramètres → Profils techniques | Nouveau profil offers Type(Agent Codex/Agent Claude/Commandes WSL), Distribution, Utilisateur WSL, dedicated /srv/agent-relay/var/apps/agent-relay runtime, optional executable. Replace defaults with discovered/selected facts. This runtime is distinct from the project workspace. |
