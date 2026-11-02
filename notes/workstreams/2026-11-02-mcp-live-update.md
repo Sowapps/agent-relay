@@ -48,3 +48,11 @@ Latest ordinary suite4d95a769e88f4540ad83a9c4ea6366fc passed. Delivery candidate
 Final archive4121efc... initially hit transient Windows directory publication denial for its own mcp-launcher.pending path. No pending folder remained and a second identical initialize on that extracted scope immediately succeeded without any ACL change. Added a bounded2second retry only for atomic owned directory publication; never retries MCP work. This changes build generation, not contract. Rebuild/requalify the last local archive; earlier archives remain superseded private qualification artifacts, no release. Shared checks and Python AST41files pass. Next: package+verify, final source review/commit/push/merge, one-command real deployment and repeat/idempotence, existing AP binding/native Codex fresh-only qualification and explicit same-desktop limitation.
 
 Portable final qualification PASSED archive50af2b1d7e7a4bdeb8f5c5137a9d81d7 (SHA25616a7fd06f1aa46b7d9b6309e35d61c805171a3a03a77687202b24efb0e77f1c3); extraction/restart/identity/foreign-project/refusal/native broker passed under restricted PATH/nonexistent DOTNET_ROOT, no WSL/model. SOURCE_AND_PORTABLE_CONTRACT passed: same version and hash despite adapted documentation links. Explicit same-client reload capability reports unknown (not a false mandatory restart or success) when its actual catalog cannot be inspected. Implementation complete; awaiting final source checks then delivery. No live data/settings changed yet.
+
+## Arrêt demandé par Florent — 02/11/2026
+Travail interrompu immédiatement à sa demande. Implémentation et qualifications réalisées ; vérifier le dernier commit et le statut Git avant toute reprise. Fusion, déploiement final et message à Pilotage AP ne sont pas confirmés dans ce checkpoint. Aucun travail supplémentaire autorisé sans nouveau GO. Le checkpoint détaillé précédent conserve les résultats et les étapes restantes.
+
+
+## Authorized delivery resumed — 02/11/2026
+Florent requested resuming delivery with minimal deployment checks, reusing passed qualifications. Objective: merge/push, standard deployment preserving scope, verification and message to Pilotage AP. Goal API still refuses a new objective because an unrelated historical goal remains unfinished; its counters are not attributed here.
+
