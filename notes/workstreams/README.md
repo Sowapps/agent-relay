@@ -5,6 +5,8 @@
 
 ## Records
 
+- [UI feedback audit](2026-11-02-ui-feedback-audit.md): source causes and prototype-first correction plan; no implementation.
+
 - [Project settings and lifecycle](2026-11-01-project-settings-archive.md): general/project separation and guarded Active/Archived transitions.
 
 - [Branch delivery and validation](2026-11-01-branch-delivery.md): standing scoped Git workflow and delivery of completed runtime/UI corrections.

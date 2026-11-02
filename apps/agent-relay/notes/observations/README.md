@@ -5,6 +5,8 @@
 
 ## Reports
 
+- [UI feedback audit](2026-11-02-ui-feedback-audit.md): confirmed rendering/refresh causes, diagnostic semantics, prototype drift and a prototype-first correction plan; no implementation.
+
 - [Shared stable Codex connection](2026-10-30-shared-stable-connection.md): actual user entry/runtime upgrade, preserved scope/rights/history, native Codex discovery and remaining standard-command gap.
 
 - [Stable v1.0.0 delivery verification](2026-10-30-stable-publication.md): operator validation, stable/latest private release and downloaded archive/checksum match.
