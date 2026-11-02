@@ -10,3 +10,5 @@ For UI corrections, copy presentation assets to an explicit developer draft, mod
 Default output is the operator's existing `local/apps/agent-relay/prototypes/interface-v1/agent-relay-maquette.html` preview. This is an explicit developer export, not an application runtime dependency. A normal checkout can reproduce it without historical ignored prototype sources. No network, account, WSL or model is involved.
 
 The targeted native `monitor-feedback` scenario accepts an asset directory and tests expansion, DOM identity, focus/selection, tabs, modal spacing and conflict drafts while capturing only its own WebView. A passed capture remains an observation, separate from operator visual acceptance.
+
+The cleanup tab is a design-only extension in cleanup-preview.js, embedded by the prototype builder but never copied to production assets. Exterior tools let the operator simulate local time around02:00. Analyze, confirm and recheck operate only on a small in-memory fictional list; they cannot inspect/delete real files or call native cleanup. Its design is recorded in the manual-cleanup proposal; implementing it requires a separate GO.

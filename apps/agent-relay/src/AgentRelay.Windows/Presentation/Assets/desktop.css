@@ -31,7 +31,7 @@ select:not(:disabled):hover{background-color:#f8faff}
 .setting-switch:not(:disabled):hover{box-shadow:none}
 .activity-row:focus-visible,.message-preview:focus-visible,.task-event:focus-visible{outline-offset:-3px}
 /* Tabs use a soft hover; the underline identifies selection, the outline keyboard focus. */
-.tabs button{padding:6px 8px 11px;margin:-6px -8px 0;border-radius:6px 6px 0 0;user-select:none}
+.tabs button{padding:8px 8px 11px;margin:0;border-radius:6px 6px 0 0;user-select:none}
 .tabs button:not(:disabled):hover,.tabs button.active:hover{background:var(--blue-soft);color:var(--blue-text);filter:none;box-shadow:none}
 .tabs button:focus-visible{outline:2px solid #91acff;outline-offset:3px}
 .history-count{line-height:1.6}.history-controls{margin-bottom:14px}
@@ -54,3 +54,6 @@ select:not(:disabled):hover{background-color:#f8faff}
 .section-intro{margin:22px 0 14px}.section-intro:first-child{margin-top:0}.section-intro h2,.section-intro h3{font-size:14px;font-weight:650;color:var(--ink)}.section-intro p{margin:7px 0 0;font-size:11px;line-height:1.7;color:var(--muted);max-width:90ch}
 .dot{background:#96a1b2}.dot.ready,.dot.completed{background:var(--success)}.dot.unverified,.dot.declared,.dot.unsupported,.dot.closed{background:#96a1b2}.dot.stale{background:#bd8c36}.dot.checking{background:var(--blue)}
 .badge.declared,.badge.unverified,.badge.unsupported,.badge.stale{background:#f0f3f7;color:#65748b}.connection-facts{display:flex;align-items:center;flex-wrap:wrap;gap:7px;font-size:11px;line-height:1.7}.connection-facts b{font-weight:500;color:#65748b}.fact-row{gap:16px;align-items:start}.fact-row .fact-label{min-width:0;overflow-wrap:anywhere}.fact-row>strong{min-width:0;text-align:right}.diagnostic-note{display:block;margin-top:5px;font-size:11px;color:var(--muted);font-weight:400;line-height:1.7;max-width:70ch}.fact-row>strong .diagnostic-note{text-align:right}.app-modal-card p{line-height:1.65}.app-modal-card p+p{margin-top:8px}.app-modal-card [role=alert]{margin-top:12px;color:#9a6229;font-size:12px}.tabs{overflow-x:auto;gap:20px;flex-shrink:0}.tabs button{white-space:nowrap}.permissions-list code{overflow-wrap:anywhere}.status-explanation{margin:10px 0;font-size:11px;line-height:1.7;color:var(--muted)}
+
+.tabs{padding:6px 5px 0;scroll-padding:6px}
+.project-directory + .actions{margin-top:14px;margin-bottom:12px}

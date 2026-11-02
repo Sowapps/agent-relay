@@ -2,6 +2,8 @@ using AgentRelay.Core;
 using AgentRelay.Infrastructure;
 using System.IO.Pipes;
 
+if (args.Length == 4 && args[0] == "monitor-polish") { await UiRenderScenarios.Polish(Path.GetFullPath(args[1]),Path.GetFullPath(args[2]),Path.GetFullPath(args[3])); Console.WriteLine("NATIVE_UI_POLISH=PASS"); return; }
+
 if (args.Length == 5 && args[0] == "monitor-feedback") { await UiRenderScenarios.Feedback(Path.GetFullPath(args[1]),Path.GetFullPath(args[2]),Path.GetFullPath(args[3]),args[4]); Console.WriteLine("NATIVE_UI_FEEDBACK=PASS"); return; }
 
 if (args.Length == 3 && args[0] == "monitor-mcp") { await UiRenderScenarios.McpClients(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); Console.WriteLine("NATIVE_MCP_CONNECTIONS=PASS"); return; }

@@ -5,6 +5,8 @@
 
 ## Records
 
+- [UI polish and cleanup design](2026-11-02-ui-polish-cleanup-design.md): three prototype-first corrections plus read-only inventory and fictional manual-cleanup design.
+
 - [UI consistency delivery](2026-11-02-ui-consistency.md): authorized prototype-first feedback corrections and targeted qualification.
 
 - [UI feedback audit](2026-11-02-ui-feedback-audit.md): source causes and prototype-first correction plan; no implementation.

@@ -5,6 +5,8 @@
 
 ## Records
 
+- [Cleanup protected calendar days](2026-11-02-cleanup-protected-days.md): current local day always excluded; before02:00the previous day is also excluded.
+
 - [General and project settings separation](2026-11-01-project-settings-separation.md): full general project directory and dedicated project settings.
 - [Guarded project archive](2026-11-01-guarded-project-archive.md): two states, protected preflight/admission and retained history.
 
