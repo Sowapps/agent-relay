@@ -82,3 +82,5 @@
 - [Maximized opening and restoration](2026-11-01-maximized-window-opening.md)
 
 - [MCP connection refresh audit](2026-11-01-mcp-refresh-audit.md)
+
+- [Live MCP correction](2026-11-02-mcp-live-update.md)

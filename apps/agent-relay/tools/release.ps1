@@ -9,7 +9,7 @@ $ErrorActionPreference='Stop'
 $root=Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent
 $app=Split-Path $PSScriptRoot -Parent
 $version=([xml](Get-Content -LiteralPath (Join-Path $app 'Version.props') -Raw)).Project.PropertyGroup.Version
-if($version -notmatch '^\d+\.\d+\.\d+(?:-[a-z0-9.]+)?$'){throw 'Invalid application version.'}
+if($version -notmatch '^\d+\.\d+\.\d+(?:-rc\.[1-9]\d*)?$'){throw 'Only stable X.Y.Z and RC X.Y.Z-rc.N versions are supported.'}
 $tag='v'+$version
 $python=(Get-Command python.exe -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 if($Action -in @('Lock','Package')){

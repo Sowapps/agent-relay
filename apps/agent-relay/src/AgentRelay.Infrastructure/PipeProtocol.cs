@@ -15,7 +15,7 @@ public sealed record PipeResponse(RelayExchange? Exchange = null, RelayFailure? 
     IReadOnlyList<string>? Warnings = null, AgentStatus? Agent = null,
     IReadOnlyList<ProfileContext>? Profiles = null, SessionDetail? Session = null,
     IReadOnlyList<SessionDetail>? Sessions = null, JournalPage<WorkSummary>? ResultsPage = null,
-    JournalPage<InboxMessage>? InboxPage = null, JournalPage<RelaySession>? SessionsPage = null, ProjectReply? Project = null, Guid? ConnectionId = null);
+    JournalPage<InboxMessage>? InboxPage = null, JournalPage<RelaySession>? SessionsPage = null, ProjectReply? Project = null, Guid? ConnectionId = null, McpHostStatus? Mcp = null);
 
 public static class PipeDeadlines
 {

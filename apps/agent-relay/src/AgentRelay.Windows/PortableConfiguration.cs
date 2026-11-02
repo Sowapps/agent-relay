@@ -31,9 +31,11 @@ internal static class PortableConfiguration
             Console.WriteLine("Local portable data initialized. Create a project and scoped connection, then initialize again. No client settings or permissions changed.");
             return;
         }
+        var broker = McpInstallation.PrepareBroker(data);
+        await AtomicWrite(pointerPath, JsonSerializer.Serialize(new { executable, distribution = "portable-win-x64", connectionId = connection.Value.ToString("D"), mcpExecutable = broker }));
         string[] arguments = ["mcp", "--data-dir", data, "--connection-id", connection.Value.ToString("D")];
-        await AtomicWrite(Path.Combine(data, "mcp.windows.json"), JsonSerializer.Serialize(new { mcpServers = new { agent_relay = new { command = executable, args = arguments } } }));
-        var toml = "[mcp_servers.agent_relay]\ncommand = " + JsonSerializer.Serialize(executable) + "\nargs = " + JsonSerializer.Serialize(arguments) + "\nrequired = true\ntool_timeout_sec = 180\n";
+        await AtomicWrite(Path.Combine(data, "mcp.windows.json"), JsonSerializer.Serialize(new { mcpServers = new { agent_relay = new { command = broker, args = arguments } } }));
+        var toml = "[mcp_servers.agent_relay]\ncommand = " + JsonSerializer.Serialize(broker) + "\nargs = " + JsonSerializer.Serialize(arguments) + "\nrequired = true\ntool_timeout_sec = 180\n";
         await AtomicWrite(Path.Combine(data, "mcp.codex.toml"), toml);
         Console.WriteLine("Scoped MCP fragments exported. No client settings changed; regenerate after changing connection or moving the package.");
     }

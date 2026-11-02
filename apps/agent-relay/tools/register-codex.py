@@ -51,6 +51,18 @@ def update(original, fragment):
     return result
 
 
+def replace_if_unchanged(path, expected, desired):
+    """One CAS/atomic-write owner shared by registration, migration and update/rollback."""
+    path = Path(path); temporary = path.with_name('config.agent-relay-' + uuid.uuid4().hex + '.tmp')
+    try:
+        with temporary.open('xb') as stream:
+            stream.write(desired); stream.flush(); os.fsync(stream.fileno())
+        if path.read_bytes() != expected: raise RuntimeError('Configuration changed concurrently; preserve it and re-inspect')
+        os.replace(temporary, path)
+    finally:
+        if temporary.exists(): temporary.unlink()
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, required=True)
@@ -67,15 +79,7 @@ def main():
     proposal = args.backup_dir / (identifier + '.proposed.toml')
     proposal.write_bytes(new)
     if args.apply:
-        temporary = args.config.with_name('config.agent-relay-' + uuid.uuid4().hex + '.tmp')
-        try:
-            with temporary.open('xb') as stream:
-                stream.write(new);stream.flush();os.fsync(stream.fileno())
-            if args.config.read_bytes() != raw:
-                raise RuntimeError('Configuration changed concurrently; preserve it and re-inspect')
-            os.replace(temporary, args.config)
-        finally:
-            if temporary.exists():temporary.unlink()
+        replace_if_unchanged(args.config, raw, new)
     print(json.dumps({'applied': args.apply, 'backup': str(backup), 'beforeSha256': hashlib.sha256(raw).hexdigest(),
                       'afterSha256': hashlib.sha256(new).hexdigest(), 'onlyAgentRelayChanged': True}))
 

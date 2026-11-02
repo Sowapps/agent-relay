@@ -24,7 +24,7 @@ with (a.output/'stderr.log').open('w',encoding='utf-8') as errors:
         bootstrap=client.call('resources/read',{'uri':'agent-relay://docs/bootstrap'})['contents'][0]['text']
         assert 'new-project-request.ps1' in bootstrap and 'configure-project.request.json' in bootstrap
         names={item['name'] for item in client.call('tools/list')['tools']}
-        assert len(names)==25 and 'configure_projects' not in names
+        assert len(names)==26 and 'configure_projects' not in names
     finally:client.close()
 result={'passed':True,'scopedProject':a.expected_project,'foreignProjectRefused':True,'emptyResultsAndSessions':True,'documentationResource':True,'toolCount':25,'nativeModelCalls':0}
 (a.output/'result.json').write_text(json.dumps(result,indent=2),encoding='utf-8');print(json.dumps(result))

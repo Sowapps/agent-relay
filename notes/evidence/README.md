@@ -56,3 +56,5 @@ The dates identify the decision messages available in the conversation. The init
 - [Deferred project archival](2026-11-01-deferred-project-archive.md)
 
 - [Opening and restoration geometry](2026-11-01-window-opening-geometry.md)
+
+- [Stable and RC MCP versions](2026-11-02-mcp-stable-rc-versions.md)

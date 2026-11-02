@@ -187,3 +187,15 @@ If the agent has no approved computer-use tool, explain these steps and the expe
 | Native authentication/unknown outcome | Human login or retained-result investigation as appropriate; no automatic replay, reinstall or credential dump. |
 
 Before leaving, record the selected data/report directory, runtime/host metadata, added project/participant/connection UUIDs, exact passed checks and remaining native prerequisites. Do not publish data, credentials or local history. Version/tag/GitHub work is separate.
+
+## Updating an existing source installation
+
+Use the standard command from the checkout, with its existing data scope (never substitute a workspace):
+
+```powershell
+./apps/agent-relay/tools/update-local.ps1 -DataDirectory <absolute-existing-relay-data-directory> -Show
+```
+
+It stages/checks the runtime, guards version/contract uniqueness, deploys with backups, exports a retained native MCP launcher and updates only matching existing repository/user agent_relay registrations. Connection UUIDs and unrelated settings remain unchanged. It authenticates each preserved principal before registration writes. This does not add projects, grant rights or publish a GitHub release. Report paths and pending client reload are part of the result. A different project-specific registration can be included explicitly using update-connections.py --config; do not scan/rewrite arbitrary projects.
+
+The host switch is safe/idempotent, but host health is not proof that an existing client refreshed its catalog. Optional -CodexControlSocket and -ThreadId target an already exposed owning Codex backend; no replacement backend, daemon or remote-control setup is created. Without a reachable socket, use the client's reconnect/reload action, or restart Codex if necessary. Then verify get_connection_status, current tools/resources and scoped list_projects from that same client. Never close old processes as a substitute for that verification.

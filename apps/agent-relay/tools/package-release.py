@@ -1,7 +1,7 @@
 """Utility: package an explicit self-contained payload with notices, file hashes and stable ZIP ordering.
 Usage: called by release.ps1 Package; never includes local application data or uploads anything.
 """
-import argparse, hashlib, json, shutil, zipfile
+import argparse, hashlib, json, shutil, zipfile, subprocess
 from pathlib import Path
 p=argparse.ArgumentParser(description=__doc__)
 for name in ['payload','output','cache','sdk']:p.add_argument('--'+name,type=Path,required=True)
@@ -42,6 +42,10 @@ for name,version in sorted(versions.items()):
 (notices/'README.txt').write_text('Third-party components retain their respective licenses. Included .NET runtime notices and NuGet package metadata/license files accompany this distribution. This file grants no separate license to Agent Relay source. WebView2 Runtime is an external prerequisite and is not redistributed here.\n',encoding='utf-8')
 assert (payload/'app/coreclr.dll').is_file(),'Self-contained runtime missing'
 assert (payload/'app/AgentRelay.Windows.exe').is_file()
+# Fingerprint the final distributed guides after link adaptation, before hashing/zipping the payload.
+contract=subprocess.run([str(payload/'app/AgentRelay.Windows.exe'),'mcp-contract','--data-dir',str(payload/'contract-preparation-unused')],capture_output=True,text=True,encoding='utf-8',check=True,timeout=20,creationflags=subprocess.CREATE_NO_WINDOW)
+identity=json.loads(contract.stdout);assert identity['version']==a.version
+(payload/'app/mcp-contract.json').write_text(json.dumps(identity),encoding='utf-8')
 files={file.relative_to(payload).as_posix():hashlib.sha256(file.read_bytes()).hexdigest() for file in sorted(payload.rglob('*')) if file.is_file()}
 assert not any(any(part in {'var','local','data','connections','presentation-cache','.codex','.git','bin','obj'} for part in Path(name).parts) for name in files)
 inputs=[file for folder in ['src','packaging','wsl','doc/using'] for file in (app/folder).rglob('*') if file.is_file() and not {'bin','obj','__pycache__'}.intersection(file.relative_to(app).parts)]

@@ -1,6 +1,7 @@
 using System.IO.Pipes;
 using System.Text.Json;
 using AgentRelay.Core;
+using Microsoft.Data.Sqlite;
 
 namespace AgentRelay.Infrastructure;
 
@@ -72,7 +73,12 @@ public sealed class RelayPipeServer : IDisposable
                             (action.Name is "configuration" or "describe_endpoints" or "list_sessions" or "list_results" or "list_events" or "get_result" || action.Name.StartsWith("observe_", StringComparison.Ordinal));
                         if (!passive) throw new RelayException("maintenance", "La migration est en cours. Les nouvelles opérations restent bloquées jusqu’à sa validation.");
                     }
-                    if (request.Operation == "show_window")
+                    if (request.Operation == "mcp_handshake")
+                    {
+                        if (authenticated is not { Administrator: false }) throw new RelayException("capability_denied", "An MCP connection must retain its explicit participant identity.");
+                        response = new(Mcp: new(McpIdentity.Current, authenticated.ConnectionId, authenticated.Caller.EndpointId, authenticated.Caller.ProjectIds));
+                    }
+                    else if (request.Operation == "show_window")
                     {
                         if (authenticated is not { Administrator: true }) throw new RelayException("capability_denied", "Only the local application can activate its window.");
                         if (showWindow?.Invoke() != true) throw new RelayException("unavailable", "No application window is attached to this relay host.");
@@ -108,6 +114,7 @@ public sealed class RelayPipeServer : IDisposable
                         response = new(exchange, null);
                     }
                 }
+                catch (SqliteException error) { reportError(error); response = new(Error: new("storage_unavailable", "Relay storage is unavailable. Inspect the local diagnostic; no replacement database or permission change was attempted.")); }
                 catch (RelayException error) { response = new(null, new(error.Code, error.Message)); }
                 catch (Exception error) when (error is JsonException or InvalidDataException)
                 { response = new(null, new("invalid_frame", "The local request is malformed.")); }

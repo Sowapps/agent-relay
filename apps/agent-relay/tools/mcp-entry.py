@@ -16,7 +16,8 @@ def main():
     runtime = read_runtime(data)
     root = Path(__file__).resolve().parents[3]
     command = validate_runtime(runtime, root, development=data.is_relative_to(root / 'local/apps/agent-relay')) + ['mcp', '--data-dir', str(data)]
-    connection = args.connection_id or runtime.get('connectionId')
+    connection = args.connection_id
+    if not connection: raise ValueError('An explicit connection-id is required; no principal is inferred from the runtime pointer')
     if connection:command += ['--connection-id',connection]
     with subprocess.Popen(command,
                           stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,

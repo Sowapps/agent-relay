@@ -16,7 +16,7 @@ internal static class StorageScenarios
         var data = Path.Combine(fixture, "migrated"); Directory.CreateDirectory(data);
         File.WriteAllText(Path.Combine(data, "migrated-to.json"), "{}");
         try { _ = RelayRuntime.Start(data, _ => { }); throw new Exception("A retired scope was started."); }
-        catch (IOException) { }
+        catch (AgentRelay.Core.RelayException error) when (error.Code == "relay_migrated") { }
         if (File.Exists(Path.Combine(data, "relay.sqlite"))) throw new Exception("Retired scope created a database.");
         var id = Guid.NewGuid();
         if (!RuntimePaths.TransferPartial(expected, id).StartsWith(Path.Combine(expected, "staging", "transfers") + Path.DirectorySeparatorChar)) throw new Exception("Transfer partial escaped private storage.");

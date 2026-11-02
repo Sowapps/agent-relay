@@ -42,7 +42,7 @@ public static class RuntimePaths
     }
     public static void DemandActive(string data)
     {
-        if (File.Exists(Path.Combine(data, "migrated-to.json"))) throw new IOException("Cette instance a été migrée. Rechargez la connexion MCP et utilisez le nouveau lanceur ; aucun nouveau journal ne sera créé ici.");
+        if (File.Exists(Path.Combine(data, "migrated-to.json"))) throw new AgentRelay.Core.RelayException("relay_migrated", "Cette instance a été migrée. Rechargez la connexion MCP et utilisez le nouveau lanceur ; aucun nouveau journal ne sera créé ici.", effectsPossible: false);
     }
 
     public static bool IsNativeRoot(string root) => Regex.IsMatch(root, "^/srv/agent-relay/var/apps/agent-relay/(sessions/[a-f0-9]{32}|profiles/[a-zA-Z0-9-]+)$") || Regex.IsMatch(root, "^/srv/agent-relay-[a-zA-Z0-9-]+$");

@@ -2,6 +2,8 @@ using AgentRelay.Core;
 using AgentRelay.Infrastructure;
 using System.IO.Pipes;
 
+if (args.Length == 3 && args[0] == "monitor-mcp") { await UiRenderScenarios.McpClients(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); Console.WriteLine("NATIVE_MCP_CONNECTIONS=PASS"); return; }
+
 if (args.Length == 3 && args[0] == "monitor-window") { await UiRenderScenarios.WindowOpening(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); Console.WriteLine("NATIVE_WINDOW_OPENING=PASS"); return; }
 
 if (args.Length == 3 && args[0] == "monitor-project-settings") { await UiRenderScenarios.ProjectSettings(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); Console.WriteLine("NATIVE_PROJECT_SETTINGS=PASS"); return; }
@@ -19,6 +21,7 @@ if (args.Length == 3 && args[0] == "monitor-usability") { await UiRenderScenario
 var data = Path.GetFullPath(args.Single());
 DateDisplayScenarios.Run();
 StorageScenarios.Run(Path.Combine(data, "storage"));
+await RawPipeScenarios.Run(data+"-raw-pipe");
 MonitorScenarios.Run();
 AttentionReviewScenarios.Run(Path.Combine(data,"attention-reviews"));
 var errors = new List<Exception>();

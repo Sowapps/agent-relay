@@ -16,6 +16,7 @@ class RelayMcp(StdioRpc):
             self.initialization = self.call('initialize', {'protocolVersion': '2025-11-25', 'capabilities': {},
                 'clientInfo': {'name': 'agent-relay-qualification', 'version': '1'}})
             self._write({'jsonrpc': '2.0', 'method': 'notifications/initialized'})
+            self.inventory = self.call('tools/list')['tools']
         except BaseException:
             self.close()
             raise
