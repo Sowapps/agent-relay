@@ -18,7 +18,7 @@ internal static class PresentationSnapshot
     private static readonly string[] Colors = ["blue", "purple", "green"];
 
     public static JsonElement Build(ProjectConfiguration configuration, IReadOnlyList<EndpointDescriptor> descriptions,
-        IReadOnlyList<ProjectObservation> observations, bool online, string? error, DateTimeOffset observedAt, bool startupEnabled = false, AttentionReviews? reviews = null, IReadOnlyDictionary<Guid, ProjectObservation>? threads = null, StartupPreferenceState? startup = null, IReadOnlyList<McpConnectionLease>? mcpConnections = null)
+        IReadOnlyList<ProjectObservation> observations, bool online, string? error, DateTimeOffset observedAt, bool startupEnabled = false, AttentionReviews? reviews = null, IReadOnlyDictionary<Guid, ProjectObservation>? threads = null, StartupPreferenceState? startup = null, IReadOnlyList<McpConnectionLease>? mcpConnections = null, IReadOnlyDictionary<Guid,IReadOnlyList<KeyValuePair<string,string>>>? environmentFacts = null)
     {
         var operations = observations.SelectMany(item => item.Operations).OrderByDescending(item => item.CreatedAt).ToArray();
         var messages = observations.SelectMany(item => item.Messages).OrderByDescending(item => item.ReceivedAt).ToArray();
@@ -58,14 +58,12 @@ internal static class PresentationSnapshot
             observedAt = Stamp(observedAt),
             relay = online ? "ready" : "offline",
             relayError = error,
-            instances = 1,
             startupEnabled,
             startup = startup ?? new StartupPreferenceState(startupEnabled),
             hasMore = observations.Any(item => item.MoreOperations || item.MoreMessages || item.MoreSessions),
             more = new { operations = observations.Any(item=>item.MoreOperations), messages=observations.Any(item=>item.MoreMessages), sessions=observations.Any(item=>item.MoreSessions) },
             sessionHistory = threads?.ToDictionary(item=>item.Key.ToString("D"),item=>new { loaded=item.Value.Loaded, hasMore=item.Value.MoreOperations||item.Value.MoreMessages, error=item.Value.Error }),
             unreadAvailable = false,
-            mcpState = "unverified",
             workspaces = configuration.Workspaces.Select(item => new { item.Id, item.EndpointId, item.Name, item.Location }).ToArray(),
             projects = configuration.Projects.Select((project, index) => new
             {
@@ -86,13 +84,14 @@ internal static class PresentationSnapshot
             connectors = configuration.Endpoints.GroupBy(item => ConnectorId(item.Id)).Select(group => new
             {
                 id = group.Key, name = descriptors[group.First().Id].Connector,
-                state = "unverified", capabilities = UiCapabilities(descriptors[group.First().Id].Capabilities ?? []),
+                state = "declared", capabilities = UiCapabilities(descriptors[group.First().Id].Capabilities ?? []),
                 limitation = (descriptors[group.First().Id].Capabilities?.Count ?? 0) == 0 ? "Aucune action native n’est déclarée pour ce connecteur." : ""
             }).ToArray(),
             connections = configuration.Endpoints.GroupBy(item => ConnectionId(item.Id)).Select(group => new
             {
                 id = group.Key, name = descriptors[group.First().Id].Environment ?? descriptors[group.First().Id].Connection,
-                kind = descriptors[group.First().Id].Connection, state = "unverified"
+                kind = descriptors[group.First().Id].Connection, state = "declared",
+                facts = environmentFacts?.GetValueOrDefault(group.First().Id)?.Select(fact=>new {label=fact.Key,value=fact.Value}).ToArray()
             }).ToArray(),
             sessions = sessions.Select(session => new
             {

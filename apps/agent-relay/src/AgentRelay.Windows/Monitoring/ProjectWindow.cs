@@ -123,10 +123,11 @@ internal sealed partial class ProjectWindow : Form
         var online=observingOnline;var error=observingError;
         var startup = startupPreference.Read();
         var mcp = McpConnections.List(data);
-        var version = RelayJson.Serialize(mcp) + RelayJson.Serialize(configuration) + RelayJson.Serialize(descriptors) + observations.Values.Sum(item=>item.Revision) + RelayJson.Serialize(threads.Select(item=>new {item.Key,item.Value.Revision,item.Value.Loaded,item.Value.Error,item.Value.MoreOperations,item.Value.MoreMessages})) + online + error + startup + reviews.Revision + DateTime.Today;
+        var version = RelayJson.Serialize(mcp.Select(c=>new {c.InstanceId,c.BindingId,c.Client,c.BrokerVersion,c.Version,c.ContractHash,c.Generation,c.CatalogContract,c.State})) + RelayJson.Serialize(configuration) + RelayJson.Serialize(descriptors) + observations.Values.Sum(item=>item.Revision) + RelayJson.Serialize(threads.Select(item=>new {item.Key,item.Value.Revision,item.Value.Loaded,item.Value.Error,item.Value.MoreOperations,item.Value.MoreMessages})) + online + error + startup + reviews.Revision + DateTime.Today;
         if (!force && version == previousPresentation) return;
         previousPresentation = version;
-        var snapshot = PresentationSnapshot.Build(configuration,descriptors,observations.Values.ToArray(),online,error,DateTimeOffset.Now,startup.Enabled ?? false,reviews,threads,startup,mcp);
+        var facts=EndpointDescriptions.DisplayFacts(configuration,new SettingsStore(data).Load());
+        var snapshot = PresentationSnapshot.Build(configuration,descriptors,observations.Values.ToArray(),online,error,DateTimeOffset.Now,startup.Enabled ?? false,reviews,threads,startup,mcp,facts);
         Presentation.Send(new { type = "snapshot", data = snapshot });
     }
 

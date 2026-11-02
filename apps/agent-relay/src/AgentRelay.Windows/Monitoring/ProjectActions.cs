@@ -127,7 +127,7 @@ internal sealed partial class ProjectWindow
                             if (index>=0) { records.Sessions[index]=updated; records.Revision++; }
                         }
                     }
-                    await Reload(true); Notice("Session actualisée."); break;
+                    await Reload(true); Presentation.Send(new {type="action-result",success=true,text="Session actualisée."}); break;
                 case "interrupt-operation":
                     var operation = Operations.FirstOrDefault(item=>item.Request.Id==id) ?? throw new RelayException("not_found","Operation unavailable");
                     var owner = Sessions.FirstOrDefault(item=>item.Id==operation.Request.SessionId);
@@ -142,6 +142,6 @@ internal sealed partial class ProjectWindow
             }
         }
         catch (OperationCanceledException) when (released) { }
-        catch (Exception error) when (!released) { Notice(error is IOException && reviews.Warning is not null ? reviews.Warning : UserMessages.Error(error)); if (error is RelayException { Code: "review_stale" }) await Reload(true); }
+        catch (Exception error) when (!released) { Presentation.Send(new {type="action-result",success=false,text=error is IOException && reviews.Warning is not null ? reviews.Warning : UserMessages.Error(error)}); if (error is RelayException { Code: "review_stale" }) await Reload(true); }
     }
 }

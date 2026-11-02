@@ -1,0 +1,560 @@
+{
+  "referenceDate": "2026-10-29",
+  "clockMinutes": 643,
+  "connections": [
+    {
+      "id": "local",
+      "name": "Poste principal",
+      "kind": "Local",
+      "state": "declared",
+      "facts": [
+        {
+          "label": "Hôte",
+          "value": "Poste local"
+        }
+      ]
+    },
+    {
+      "id": "workspace",
+      "name": "Environnement de travail",
+      "kind": "WSL",
+      "state": "declared",
+      "facts": [
+        {
+          "label": "Distribution",
+          "value": "Ubuntu-24.04"
+        },
+        {
+          "label": "Utilisateur",
+          "value": "sowapps"
+        }
+      ]
+    },
+    {
+      "id": "remote",
+      "name": "Serveur de validation",
+      "kind": "SSH",
+      "state": "declared",
+      "facts": [
+        {
+          "label": "Hôte",
+          "value": "validation.example"
+        }
+      ]
+    }
+  ],
+  "connectors": [
+    {
+      "id": "code",
+      "name": "Connecteur de création",
+      "capabilities": [
+        "messages.read",
+        "messages.send",
+        "sessions.manage",
+        "operations.interrupt"
+      ],
+      "state": "declared"
+    },
+    {
+      "id": "review",
+      "name": "Connecteur de relecture",
+      "capabilities": [
+        "messages.read",
+        "messages.send",
+        "sessions.manage",
+        "operations.interrupt"
+      ],
+      "state": "declared"
+    },
+    {
+      "id": "read",
+      "name": "Connecteur de consultation",
+      "capabilities": [
+        "messages.read"
+      ],
+      "state": "declared",
+      "limitation": "Ce connecteur permet de consulter les messages. La gestion des sessions et l’interruption ne sont pas exposées."
+    }
+  ],
+  "participants": [
+    {
+      "id": "pilot",
+      "name": "Pilote",
+      "initial": "P",
+      "color": "blue",
+      "role": "main",
+      "connectorId": "code",
+      "connectionId": "local"
+    },
+    {
+      "id": "creator",
+      "name": "Création",
+      "initial": "C",
+      "color": "blue",
+      "role": "secondary",
+      "connectorId": "code",
+      "connectionId": "workspace"
+    },
+    {
+      "id": "reviewer",
+      "name": "Relecture",
+      "initial": "R",
+      "color": "",
+      "role": "secondary",
+      "connectorId": "review",
+      "connectionId": "remote"
+    },
+    {
+      "id": "docs",
+      "name": "Documentation",
+      "initial": "D",
+      "color": "",
+      "role": "secondary",
+      "connectorId": "review",
+      "connectionId": "remote"
+    },
+    {
+      "id": "observer",
+      "name": "Observation",
+      "initial": "O",
+      "color": "",
+      "role": "observer",
+      "connectorId": "read",
+      "connectionId": "local"
+    }
+  ],
+  "projects": [
+    {
+      "id": "atelier",
+      "name": "Site Atelier",
+      "initial": "A",
+      "color": "",
+      "description": "Site vitrine · interface et contenus",
+      "workspace": "/workspaces/site-atelier",
+      "participantIds": [
+        "pilot",
+        "creator",
+        "reviewer"
+      ],
+      "state": "active",
+      "archiveRequested": false,
+      "permissions": [
+        {
+          "endpointId": "pilot",
+          "role": "main",
+          "capabilities": [
+            "history.read",
+            "message.send",
+            "session.manage"
+          ],
+          "workspaces": []
+        },
+        {
+          "endpointId": "creator",
+          "role": "secondary",
+          "capabilities": [
+            "history.read",
+            "message.send",
+            "session.manage"
+          ],
+          "workspaces": [
+            {
+              "workspaceId": "w-s1",
+              "read": true,
+              "write": true,
+              "replace": false
+            }
+          ]
+        },
+        {
+          "endpointId": "reviewer",
+          "role": "secondary",
+          "capabilities": [
+            "history.read",
+            "message.send",
+            "session.manage"
+          ],
+          "workspaces": [
+            {
+              "workspaceId": "w-s2",
+              "read": true,
+              "write": true,
+              "replace": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "catalogue",
+      "name": "API Catalogue",
+      "initial": "C",
+      "color": "violet",
+      "description": "API produits · endpoints et documentation",
+      "workspace": "/srv/api-catalogue",
+      "participantIds": [
+        "pilot",
+        "docs"
+      ],
+      "state": "active",
+      "archiveRequested": false,
+      "permissions": [
+        {
+          "endpointId": "pilot",
+          "role": "main",
+          "capabilities": [
+            "history.read",
+            "message.send",
+            "session.manage"
+          ],
+          "workspaces": []
+        },
+        {
+          "endpointId": "docs",
+          "role": "secondary",
+          "capabilities": [
+            "history.read",
+            "message.send",
+            "session.manage"
+          ],
+          "workspaces": [
+            {
+              "workspaceId": "w-s3",
+              "read": true,
+              "write": true,
+              "replace": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "exploration",
+      "name": "Explorations",
+      "initial": "E",
+      "color": "slate",
+      "description": "Un contexte prêt pour de prochains échanges",
+      "workspace": "D:/Workspaces/explorations",
+      "participantIds": [
+        "pilot",
+        "observer"
+      ],
+      "state": "active",
+      "archiveRequested": false,
+      "permissions": [
+        {
+          "endpointId": "pilot",
+          "role": "main",
+          "capabilities": [
+            "history.read",
+            "message.send",
+            "session.manage"
+          ],
+          "workspaces": []
+        },
+        {
+          "endpointId": "observer",
+          "role": "secondary",
+          "capabilities": [
+            "history.read",
+            "message.send",
+            "session.manage"
+          ],
+          "workspaces": []
+        }
+      ]
+    }
+  ],
+  "sessions": [
+    {
+      "id": "s1",
+      "project": "atelier",
+      "participantId": "creator",
+      "name": "Interface & composants",
+      "state": "ready",
+      "workspace": "/workspaces/site-atelier",
+      "time": "À l’instant",
+      "conversation": "conversation-fictive-01",
+      "ownerId": "pilot"
+    },
+    {
+      "id": "s2",
+      "project": "atelier",
+      "participantId": "reviewer",
+      "name": "Relecture des contenus",
+      "state": "ready",
+      "workspace": "/srv/site-atelier",
+      "time": "Il y a 12 min",
+      "conversation": "conversation-fictive-02",
+      "ownerId": "pilot"
+    },
+    {
+      "id": "s3",
+      "project": "catalogue",
+      "participantId": "docs",
+      "name": "Documentation API",
+      "state": "ready",
+      "workspace": "/srv/api-catalogue",
+      "time": "Il y a 2 min",
+      "conversation": "conversation-fictive-03",
+      "ownerId": "pilot"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "t-home",
+      "project": "atelier",
+      "title": "Préparer la page d’accueil",
+      "description": "Réunir la proposition de structure, les composants et les informations manquantes.",
+      "participantId": "creator"
+    },
+    {
+      "id": "t-content",
+      "project": "atelier",
+      "title": "Préparer les contenus et documents",
+      "description": "Partager les documents utiles et relire les libellés du site.",
+      "participantId": "reviewer"
+    },
+    {
+      "id": "t-api",
+      "project": "catalogue",
+      "title": "Documenter et vérifier l’API",
+      "description": "Rassembler la documentation, les contrôles et les retours de validation.",
+      "participantId": "docs"
+    }
+  ],
+  "operations": [
+    {
+      "id": "op1",
+      "taskId": "t-home",
+      "project": "atelier",
+      "session": "s1",
+      "participantId": "creator",
+      "initiatorId": "pilot",
+      "kind": "message",
+      "title": "Préparer la structure de la page",
+      "state": "running",
+      "time": "10:42",
+      "stamp": "2026-10-29T10:42:00",
+      "description": "Les composants et la structure sont en préparation.",
+      "result": "Les composants et la structure sont en préparation.",
+      "request": "Prépare une proposition de page d’accueil avec les composants existants.",
+      "progress": 64,
+      "reviewToken": "fixture-op1",
+      "reviewable": false
+    },
+    {
+      "id": "op2",
+      "taskId": "t-api",
+      "project": "catalogue",
+      "session": "s3",
+      "participantId": "docs",
+      "initiatorId": "pilot",
+      "kind": "command",
+      "title": "Vérifier les routes de l’API",
+      "state": "attention",
+      "time": "10:40",
+      "stamp": "2026-10-29T10:40:00",
+      "description": "L’exécution attend une autorisation dans la session. Aucune approbation automatique.",
+      "result": "L’exécution attend une autorisation dans la session. Aucune approbation automatique.",
+      "request": "Exécuter le contrôle de routes autorisé. Aucun modèle impliqué.",
+      "program": "php",
+      "arguments": [
+        "artisan",
+        "route:list"
+      ],
+      "reviewToken": "fixture-op2",
+      "reviewable": true
+    },
+    {
+      "id": "op3",
+      "taskId": "t-content",
+      "project": "atelier",
+      "session": "s2",
+      "participantId": "reviewer",
+      "initiatorId": "pilot",
+      "kind": "transfer",
+      "title": "Transférer la charte graphique",
+      "state": "completed",
+      "time": "10:38",
+      "stamp": "2026-10-29T10:38:00",
+      "description": "documents/charte-graphique.pdf est disponible. Taille et empreinte vérifiées.",
+      "result": "documents/charte-graphique.pdf est disponible. Taille et empreinte vérifiées.",
+      "request": "Partager la charte graphique avec le participant de relecture.",
+      "bytes": "2,4 Mo",
+      "sourceParticipantId": "pilot",
+      "reviewToken": "fixture-op3",
+      "reviewable": false
+    },
+    {
+      "id": "op4",
+      "taskId": "t-content",
+      "project": "atelier",
+      "session": "s2",
+      "participantId": "reviewer",
+      "initiatorId": "pilot",
+      "kind": "message",
+      "title": "Relire les titres de navigation",
+      "state": "completed",
+      "time": "10:31",
+      "stamp": "2026-10-29T10:31:00",
+      "description": "Je propose : Accueil, Nos réalisations, Notre atelier et Contact.",
+      "result": "Je propose : Accueil, Nos réalisations, Notre atelier et Contact.",
+      "request": "Relis les titres de navigation et propose des libellés plus courts.",
+      "reviewToken": "fixture-op4",
+      "reviewable": false
+    },
+    {
+      "id": "op5",
+      "taskId": "t-api",
+      "project": "catalogue",
+      "session": "s3",
+      "participantId": "docs",
+      "initiatorId": "pilot",
+      "kind": "message",
+      "title": "Documenter les endpoints produits",
+      "state": "running",
+      "time": "10:29",
+      "stamp": "2026-10-29T10:29:00",
+      "description": "Les exemples de réponses et les paramètres de filtrage sont en préparation.",
+      "result": "Les exemples de réponses et les paramètres de filtrage sont en préparation.",
+      "request": "Prépare les exemples de réponses pour les endpoints produits.",
+      "progress": 35,
+      "reviewToken": "fixture-op5",
+      "reviewable": false
+    },
+    {
+      "id": "op6",
+      "taskId": "t-api",
+      "project": "catalogue",
+      "session": "s3",
+      "participantId": "docs",
+      "initiatorId": "pilot",
+      "kind": "command",
+      "title": "Lister les fichiers du workspace",
+      "state": "completed",
+      "time": "10:24",
+      "stamp": "2026-10-29T10:24:00",
+      "description": "app/\ndocs/\nroutes/\ntests/\ncomposer.json",
+      "result": "app/\ndocs/\nroutes/\ntests/\ncomposer.json",
+      "request": "Lister les fichiers dans l’espace de travail.",
+      "program": "ls",
+      "arguments": [
+        "-1"
+      ],
+      "reviewToken": "fixture-op6",
+      "reviewable": false
+    }
+  ],
+  "messages": [
+    {
+      "id": "m1",
+      "project": "atelier",
+      "session": "s1",
+      "taskId": "t-home",
+      "senderId": "creator",
+      "recipientId": "pilot",
+      "kind": "independent",
+      "time": "10:42",
+      "stamp": "2026-10-29T10:42:00",
+      "text": "Les composants existants couvrent les sections principales. Il me manque le texte d’introduction pour finaliser le premier écran.",
+      "operation": null,
+      "unread": true
+    },
+    {
+      "id": "m2",
+      "project": "atelier",
+      "session": "s2",
+      "taskId": "t-content",
+      "senderId": "reviewer",
+      "recipientId": "pilot",
+      "kind": "reply",
+      "time": "10:31",
+      "stamp": "2026-10-29T10:31:00",
+      "text": "Je propose des titres plus courts : Accueil, Nos réalisations, Notre atelier et Contact.",
+      "operation": "op4",
+      "unread": false
+    },
+    {
+      "id": "m3",
+      "project": "catalogue",
+      "session": "s3",
+      "taskId": "t-api",
+      "senderId": "docs",
+      "recipientId": "pilot",
+      "kind": "independent",
+      "time": "10:30",
+      "stamp": "2026-10-29T10:30:00",
+      "text": "Les exemples JSON sont prêts. Je poursuis la description des paramètres de filtrage.",
+      "operation": null,
+      "unread": true
+    }
+  ],
+  "schemaVersion": 1,
+  "relayVersion": "1.1.0-rc.1",
+  "relay": "ready",
+  "startup": {
+    "enabled": false
+  },
+  "unreadAvailable": true,
+  "sessionHistory": {
+    "s1": {
+      "loaded": true,
+      "hasMore": false
+    },
+    "s2": {
+      "loaded": true,
+      "hasMore": false
+    },
+    "s3": {
+      "loaded": true,
+      "hasMore": false
+    }
+  },
+  "workspaces": [
+    {
+      "id": "w-s1",
+      "endpointId": "creator",
+      "name": "Espace de Interface & composants",
+      "location": "/workspaces/site-atelier"
+    },
+    {
+      "id": "w-s2",
+      "endpointId": "reviewer",
+      "name": "Espace de Relecture des contenus",
+      "location": "/srv/site-atelier"
+    },
+    {
+      "id": "w-s3",
+      "endpointId": "docs",
+      "name": "Espace de Documentation API",
+      "location": "/srv/api-catalogue"
+    }
+  ],
+  "mcpConnections": [
+    {
+      "instanceId": "mock-1",
+      "bindingId": "mock-binding",
+      "client": "Client de pilotage",
+      "version": "1.1.0-rc.1",
+      "brokerVersion": "1.1.0-rc.1",
+      "contractHash": "fixture-current",
+      "catalogContract": "fixture-current",
+      "generation": "simulation",
+      "state": "current",
+      "lastSeen": "2026-11-02T14:40:00+01:00"
+    },
+    {
+      "instanceId": "mock-2",
+      "bindingId": "mock-secondary",
+      "client": "Client de relecture",
+      "version": "1.1.0-rc.1",
+      "brokerVersion": "1.1.0-rc.1",
+      "contractHash": "fixture-current",
+      "catalogContract": "fixture-old",
+      "generation": "simulation",
+      "state": "client_reload_required",
+      "lastSeen": "2026-11-02T14:40:00+01:00"
+    }
+  ]
+}

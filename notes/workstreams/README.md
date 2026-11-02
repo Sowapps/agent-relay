@@ -5,6 +5,8 @@
 
 ## Records
 
+- [UI consistency delivery](2026-11-02-ui-consistency.md): authorized prototype-first feedback corrections and targeted qualification.
+
 - [UI feedback audit](2026-11-02-ui-feedback-audit.md): source causes and prototype-first correction plan; no implementation.
 
 - [Project settings and lifecycle](2026-11-01-project-settings-archive.md): general/project separation and guarded Active/Archived transitions.

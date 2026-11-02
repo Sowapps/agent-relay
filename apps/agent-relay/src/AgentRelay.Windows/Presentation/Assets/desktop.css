@@ -11,7 +11,7 @@ html,body{width:100%;height:100%;overflow:hidden}
 .app-modal-card{background:white;border-radius:14px;box-shadow:var(--shadow);width:440px;max-width:100%;padding:24px}
 .app-modal-card h2{margin-bottom:16px}
 .app-modal-card input{width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;margin:8px 0 18px}
-.app-modal-card .actions{display:flex;justify-content:flex-end;gap:8px}
+.app-modal-card .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px;flex-wrap:wrap}
 .modal-description{font-size:12px;color:var(--muted);margin-bottom:12px}
 .desktop-advanced{margin-top:18px}
 .desktop-advanced .btn{margin:8px 8px 0 0}
@@ -49,3 +49,8 @@ select:not(:disabled):hover{background-color:#f8faff}
 .project-directory-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto}.project-directory-row .actions{justify-content:flex-end}
 
 @media(max-width:760px){.project-directory-row{grid-template-columns:minmax(0,1fr) auto;gap:10px}.project-directory-row>div:first-child{grid-column:1/-1}.project-directory-row>.badge{grid-column:1;grid-row:2;justify-self:start}.project-directory-row>.actions{grid-column:2;grid-row:2}}
+
+/* Shared sections and explicit diagnostic semantics, identical in preview and application. */
+.section-intro{margin:22px 0 14px}.section-intro:first-child{margin-top:0}.section-intro h2,.section-intro h3{font-size:14px;font-weight:650;color:var(--ink)}.section-intro p{margin:7px 0 0;font-size:11px;line-height:1.7;color:var(--muted);max-width:90ch}
+.dot{background:#96a1b2}.dot.ready,.dot.completed{background:var(--success)}.dot.unverified,.dot.declared,.dot.unsupported,.dot.closed{background:#96a1b2}.dot.stale{background:#bd8c36}.dot.checking{background:var(--blue)}
+.badge.declared,.badge.unverified,.badge.unsupported,.badge.stale{background:#f0f3f7;color:#65748b}.connection-facts{display:flex;align-items:center;flex-wrap:wrap;gap:7px;font-size:11px;line-height:1.7}.connection-facts b{font-weight:500;color:#65748b}.fact-row{gap:16px;align-items:start}.fact-row .fact-label{min-width:0;overflow-wrap:anywhere}.fact-row>strong{min-width:0;text-align:right}.diagnostic-note{display:block;margin-top:5px;font-size:11px;color:var(--muted);font-weight:400;line-height:1.7;max-width:70ch}.fact-row>strong .diagnostic-note{text-align:right}.app-modal-card p{line-height:1.65}.app-modal-card p+p{margin-top:8px}.app-modal-card [role=alert]{margin-top:12px;color:#9a6229;font-size:12px}.tabs{overflow-x:auto;gap:20px;flex-shrink:0}.tabs button{white-space:nowrap}.permissions-list code{overflow-wrap:anywhere}.status-explanation{margin:10px 0;font-size:11px;line-height:1.7;color:var(--muted)}
