@@ -15,5 +15,5 @@ if ($Show) { $arguments += '--show' }
 if ($LASTEXITCODE -ne 0) { throw 'Publication failed; inspect the deployment report and rollback status.' }
 # Export the final existing pointer without rebuilding or replacing the just-qualified runtime.
 $runtime=Get-Content (Join-Path $data 'mcp-runtime.json') -Raw | ConvertFrom-Json
-& $runtime.executable initialize --data-dir $data
-if($LASTEXITCODE -ne 0){throw 'Final connection export failed.'}
+Import-Module (Join-Path $PSScriptRoot 'NativeRuntime.psm1') -Force
+Invoke-RelayNative -Executable $runtime.executable -Arguments @('initialize','--data-dir',$data)

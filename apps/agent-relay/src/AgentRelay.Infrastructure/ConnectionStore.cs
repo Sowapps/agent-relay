@@ -7,7 +7,7 @@ using AgentRelay.Core;
 namespace AgentRelay.Infrastructure;
 
 public sealed record ConnectionBinding(Guid Id, Guid EndpointId, Guid[] ProjectIds, string Digest, bool Administrator = false, bool Revoked = false);
-public sealed record AuthenticatedConnection(CallerIdentity Caller, bool Administrator);
+public sealed record AuthenticatedConnection(CallerIdentity Caller, bool Administrator, Guid ConnectionId = default);
 
 public sealed class ConnectionStore(string dataDirectory)
 {
@@ -34,12 +34,15 @@ public sealed class ConnectionStore(string dataDirectory)
         await bindings.SaveAsync(id, binding, token); return binding;
     }
 
-    public string Secret(Guid? connectionId)
+    public string Secret(Guid? connectionId) => ReadSecret(dataDirectory, connectionId);
+    public static string ReadSecret(string dataDirectory, Guid? connectionId)
     {
+        RuntimePaths.DemandActive(dataDirectory);
         var id = connectionId ?? AdministratorId;
-        var path = Path.Combine(directory, id.ToString("N") + ".bin");
+        var path = Path.Combine(dataDirectory, "connections", id.ToString("N") + ".bin");
         if (!File.Exists(path)) throw new RelayException("authentication_required", "This MCP connection has no scoped credential. Configure its endpoint/project binding.");
-        return Encoding.UTF8.GetString(ProtectedSecret.Unprotect(File.ReadAllBytes(path)));
+        try { return Encoding.UTF8.GetString(ProtectedSecret.Unprotect(File.ReadAllBytes(path))); }
+        catch (Win32Exception) { throw new RelayException("credential_unavailable", "This Windows account cannot read the configured protected credential. Repair that explicit binding with authorization; no new principal was selected.", false); }
     }
 
     public async Task<AuthenticatedConnection> AuthenticateAsync(string? secret, CancellationToken token)
@@ -48,7 +51,7 @@ public sealed class ConnectionStore(string dataDirectory)
         var digest = Encoding.ASCII.GetBytes(Hash(secret));
         foreach (var binding in await bindings.ListAsync(token))
             if (!binding.Revoked && CryptographicOperations.FixedTimeEquals(digest, Encoding.ASCII.GetBytes(binding.Digest)))
-                return new(new(binding.EndpointId, binding.ProjectIds), binding.Administrator);
+                return new(new(binding.EndpointId, binding.ProjectIds), binding.Administrator, binding.Id);
         throw new RelayException("authentication_required", "The connection credential is invalid or revoked.");
     }
 

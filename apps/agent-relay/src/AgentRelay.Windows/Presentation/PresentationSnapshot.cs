@@ -18,7 +18,7 @@ internal static class PresentationSnapshot
     private static readonly string[] Colors = ["blue", "purple", "green"];
 
     public static JsonElement Build(ProjectConfiguration configuration, IReadOnlyList<EndpointDescriptor> descriptions,
-        IReadOnlyList<ProjectObservation> observations, bool online, string? error, DateTimeOffset observedAt, bool startupEnabled = false, AttentionReviews? reviews = null, IReadOnlyDictionary<Guid, ProjectObservation>? threads = null, StartupPreferenceState? startup = null)
+        IReadOnlyList<ProjectObservation> observations, bool online, string? error, DateTimeOffset observedAt, bool startupEnabled = false, AttentionReviews? reviews = null, IReadOnlyDictionary<Guid, ProjectObservation>? threads = null, StartupPreferenceState? startup = null, IReadOnlyList<McpConnectionLease>? mcpConnections = null)
     {
         var operations = observations.SelectMany(item => item.Operations).OrderByDescending(item => item.CreatedAt).ToArray();
         var messages = observations.SelectMany(item => item.Messages).OrderByDescending(item => item.ReceivedAt).ToArray();
@@ -51,6 +51,8 @@ internal static class PresentationSnapshot
         var response = new
         {
             schemaVersion = 1,
+            relayVersion = McpIdentity.Current.Version,
+            mcpConnections = mcpConnections ?? [],
             revision = observations.Sum(item => item.Revision),
             referenceDate = observedAt.ToLocalTime().ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture),
             observedAt = Stamp(observedAt),

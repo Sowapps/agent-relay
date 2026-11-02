@@ -35,6 +35,8 @@ internal sealed partial class ProjectWindow
         {
             switch (action)
             {
+                case "close-mcp":
+                    McpConnections.RequestClose(data,id); Notice("Fermeture demandée après la requête en cours. Le client devra recharger sa connexion MCP ; ses permissions sont conservées."); await Reload(true); break;
                 case "project-state":
                     var projectId = Guid.Parse(Value(message,"project") ?? "");
                     try

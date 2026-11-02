@@ -31,7 +31,9 @@ internal static class Program
             Console.WriteLine(RelayJson.Serialize(state)); return 0;
         }
         if (options.Mode == "initialize") { await PortableConfiguration.InitializeAsync(options.DataDirectory, options.ConnectionId); return 0; }
-        if (options.Mode == "mcp") { await McpFacade.RunAsync(options.DataDirectory, options.ConnectionId); return 0; }
+        if (options.Mode == "mcp-contract") { Console.WriteLine(RelayJson.Serialize(McpIdentity.Current)); return 0; }
+        if (options.Mode == "mcp-worker") { await McpFacade.RunAsync(options.DataDirectory, options.ConnectionId); return 0; }
+        if (options.Mode == "mcp") { await McpBroker.RunAsync(options.DataDirectory, options.ConnectionId); return 0; }
         if (options.Mode == "admin")
         {
             if (options.InputFile is null) throw new ArgumentException("Administrative maintenance requires an explicit input file.");

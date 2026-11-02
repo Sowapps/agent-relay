@@ -30,8 +30,8 @@ def host():
     while time.monotonic() < deadline:
         if process.poll() is not None:
             raise AssertionError(process.communicate())
-        # The exclusive ownership file exists before the server; allow its short startup path.
-        if (data / "host.lock").exists():
+        # Ownership precedes credential initialization. Wait for the real host credential, never create a database in the client.
+        if (data / "host.lock").exists() and (data / "connections/28c10e25b80242da92f598723e6b54ae.bin").is_file():
             return process
         time.sleep(0.025)
     process.kill()

@@ -54,7 +54,7 @@ for forbidden in ['11111111-1111-4111-8111-111111111111','28c10e25-b802-42da-92f
  else:raise AssertionError('Missing/administrator connection was exportable')
  assert (data/'mcp-runtime.json').read_bytes()==pointer_before
 fragment=json.loads((data/'mcp.windows.json').read_text(encoding='utf-8-sig'))['mcpServers']['agent_relay']
-assert fragment['command']==str(exe) and fragment['args'][0]=='mcp'
+assert Path(fragment['command'])==data/'mcp-launcher/AgentRelay.Windows.exe' and fragment['args'][0]=='mcp'
 resources=[]
 def probe():
  with (directory/'mcp.stderr.log').open('a',encoding='utf-8') as errors:
@@ -62,6 +62,7 @@ def probe():
    init=client.call('initialize',{'protocolVersion':'2025-11-25','capabilities':{},'clientInfo':{'name':'portable-archive-check','version':'1'}})
    assert init['serverInfo']['version']==a.version
    client._write({'method':'notifications/initialized'})
+   assert len(client.call('tools/list')['tools'])==26
    listed=client.call('resources/list')['resources'];assert len(listed)==5
    for item in listed:
     contents=client.call('resources/read',{'uri':item['uri']})['contents'][0]
@@ -70,7 +71,7 @@ def probe():
    assert [p['id'] for p in found['structuredContent']['configuration']['projects']]==[contexts[0]['projectId']]
    empty=client.call('tools/call',{'name':'list_results','arguments':{'project_id':contexts[0]['projectId']}});assert not empty.get('isError') and empty['structuredContent']['operations']['items']==[]
    denied=client.call('tools/call',{'name':'list_results','arguments':{'project_id':contexts[1]['projectId']}});assert denied.get('isError')
-   assert len(client.call('tools/list')['tools'])==25
+   assert len(client.call('tools/list')['tools'])==26
    try:client.call('resources/read',{'uri':'agent-relay://docs/../../connections'})
    except RuntimeError:pass
    else:raise AssertionError('Resource traversal accepted')
@@ -91,5 +92,5 @@ for phase in ['initial','restart']:
   finally:
    if host.poll() is None:host.terminate()
    host.wait(timeout=10)
-result={'passed':True,'archiveSha256':digest,'version':a.version,'extracted':str(extracted),'resources':resources,'tools':25,'selfContained':True,'frenchReadme':True,'documentationLinks':documentation_links,'runtimeIsolation':'No dotnet/NuGet variables, nonexistent DOTNET_ROOT, PATH restricted to Windows System32','projectPreservation':True,'scopedConnectionAndForeignProjectRefusal':True,'restartAndDuplicateOwner':True,'modelCalls':0,'wslCalls':0,'guiVerification':'Separate exact-archive native capture required before Publish'}
+result={'passed':True,'archiveSha256':digest,'version':a.version,'extracted':str(extracted),'resources':resources,'tools':26,'selfContained':True,'frenchReadme':True,'documentationLinks':documentation_links,'runtimeIsolation':'No dotnet/NuGet variables, nonexistent DOTNET_ROOT, PATH restricted to Windows System32','projectPreservation':True,'scopedConnectionAndForeignProjectRefusal':True,'restartAndDuplicateOwner':True,'modelCalls':0,'wslCalls':0,'guiVerification':'Separate exact-archive native capture required before Publish'}
 (directory/'verification.json').write_text(json.dumps(result,indent=2),encoding='utf-8');print(json.dumps(result))

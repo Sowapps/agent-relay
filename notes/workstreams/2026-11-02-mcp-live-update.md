@@ -1,0 +1,58 @@
+# Live MCP correction
+
+**Utility:** recovery checkpoint for the authorized five-lot implementation.  
+**Usage:** continue implementation, offline/no-model tests, docs, dedicated-branch commit/push, merge and selected-instance deployment. Preserve existing projects/grants/credentials; no release/tag, native agent/model work, daemon installation or unsupported desktop control.
+
+## Scope and decisions
+
+Florent explicitly authorized all five audit lots, delivery/deployment and only stable/RC versions; the app is unused. Branch codex/mcp-live-update from main9f37ad7. Start07:27UTC /08:27Europe/Paris02/11/2026. Goal creation attempted/refused due the unrelated unfinished historical blocked goal; do not reuse its counters.
+
+Version1.1.0-rc.1 adds a connection-status contract. Only stable X.Y.Z and RC X.Y.Z-rc.N accepted, never reuse an already-deployed version with a changed contract fingerprint. Build generation stays separate from contract/version. Stable published release not changed.
+
+A retained native stdio broker selects current qualified runtime per data pointer and holds one initialized mcp-worker child per generation. It forwards raw JSON, switches between calls (no replay), publishes list-change notifications and tracks the last catalog requested by the client. Worker validates authenticated host version/contract before operations and returns raw project payloads without dropping unknown fields. Same-client catalog refresh remains distinct from worker switch. Protected-secret reads must not open/create SQLite. Retired scopes can follow only verified same-installation migration records while preserving explicit connection identity; otherwise readable errors.
+
+Broker leases/closure requests live under selected data var directory, are bounded/expiring, contain no secrets and drive a general-settings MCP connections view. Close drains, never revokes rights or promises auto-reconnect. Codex client-connector uses only an actually reachable existing control socket; absent capability yields pending client reload, never creates a separate backend or restarts Codex. One update command stages/validates/deploys, preserves matching registrations/IDs, optionally reloads reachable owning client and reports the actual verification level.
+
+## Checkpoint
+
+Design/read prerequisites complete; implementation next. Keep all meaningful test results and remaining work here before compaction.
+
+## Implementation checkpoint
+
+Core lots1–3 compile: static protected secret reads avoid SQLite on the client; typed migrated/error responses; authenticated host handshake;26th get_connection_status tool; raw project JSON forwarding; stable native broker with initialized worker, pointer switch between calls, notifications, client-catalog mismatch gate, leases/explicit drain closure. initialize exports a retained hardlinked native mcp-launcher with corrected installation ownership. General settings now has MCP connections diagnostics/close action. Prepared runtimes embed identity metadata; deployment ledger refuses changed contract under a previously deployed version before stopping host.
+
+Operational client_refresh.py exposes a client connector protocol and Codex adapter using only an existing proxy/socket, with same-thread contract/resource checks or truthful unsupported/pending status. update-local.ps1 composes normal deployment and exact-identity registration maintenance. Public guides/tool reference aligned stable/RC and recovery; actual docs protocol qualifier passes26tools/5resources/7examples. First ordinary suite exposed expected changed exception type in retired-storage fixture; update that assertion, rerun. No live data/config/host changed. Remaining: prepared native nominal/update/error/no-replay fixtures, raw future fields and client adapter fixtures, UI capture/close verification, register-ledger/version tests and idempotent command, source/docs review, final commit/push/integration/deployment using update-local, external same-client qualification where reachable (otherwise explicit desktop fallback).
+
+## Native update qualification
+
+Ordinary full suite PASSED c4178fb1804143f9bc2fe8ddded0ac39 after correcting the process readiness fixture to wait for the host credential (client reads no longer open SQLite and cannot mask that startup race). Native lifecycle regression PASSED project-lifecycle-8c413f30c56c489bab4a3580c27ce21e. New maintained test-mcp-update.py PASSED fixture local/apps/agent-relay/qualification/mcp-update-70d1a0455c224ed4a03ba48580296a99: same retained outer stdio process observed1.1.0-rc.1 then qualification-only1.1.0-rc.2; contract change refused work before submission until tools/list; notifications/resources/current status updated; verified migration preserved explicit identity; missing credential created no DB; repeated registration update was byte-idempotent; unsupported client stated no same-client success; conflicting version ledger refused before host stop; explicit close retained host/credentials. No work/model/native-agent calls. The rc.2 payload exists only as a fixture, not a release or live deployment.
+
+The new test caught native GUI executable command capture returning no metadata under PowerShell. Factored Invoke-RelayNative into NativeRuntime.psm1 with redirected pipes, explicit wait/exit checks and owned-command timeout; used by metadata preparation and final deployment initialization. Future candidates now include validated metadata before immutable staging. The first rc.1 candidate used for tests lacks that file; prepare a fresh final candidate after all source/docs changes.
+
+RAW_PIPE scenarios now cover unknown response fields and accepted-but-lost replies without replay. Added native MCP connections view fixture and run mode; final suite/UI run in progress. Added reflected public DTO schema to fingerprint rather than relying solely on a manual revision. Protected live instance, registrations, existing projects and roles remain untouched.
+
+## Finalization checkpoint
+
+Final ordinary suite117c1031b33b471cb511989c2dca256f passed including raw future fields and accepted-but-lost response uncertainty. Native MCP connections UI passed local/apps/agent-relay/qualification/mcp-live/ui/render/verification.json (1120/816px captures inspected, independent settings scope, active/outdated/offline states, cancellation and exact-instance close). Client adapter decision fixture test-client-refresh.py passed same-owner contract/resource verification, wrong-contract refusal, no-thread incomplete state and missing socket unsupported; no Codex/model launched by that fixture.
+
+Final2 candidate75B0... qualified test-mcp-update fixture mcp-update-a347a29a189f4585b90b7891a3307414 and docs-final(26tools/5resources/7examples). Candidate metadata and version ledger guards work. Subsequent small internal robustness fixes bounded lease/client metadata, serialize close/admission, classify child response loss, share CAS/rollback atomic owner in register-codex.py, and skip redundant host replacement when exactly the same healthy runtime is active. Added typed error diagnostic reference and private bounded worker logging; this changes the pending/unpublished RC contract, so rebuild final candidate before first live deployment. No live RC has been deployed yet.
+
+Portable packaging now computes metadata after final link adaptation and canonicalizes those benign link-layout differences when fingerprinting, so source/ZIP should share one contract/version. First local package archive69a68e... (52MB compressed/128MB expanded) is a superseded qualification artifact, not a release; its standalone Verify is running. Prepare only the final archive after current source passes. Release/version parser restricts stable/RC; no tag/Publish action.
+
+Remaining: final build + prepared candidate after logging field, standalone package qualification issues if any; rerun focused broker/docs fixtures and native UI only if render changes. Inspect complete diff/new files and syntax. Commit/push branch, fetch/recheck main, merge/push. Then run update-local.ps1 against var/apps/agent-relay/v1-qualification with protected hashes; repeat to prove idempotence/no host restart; validate bound AP identity via fresh real Codex diagnostics without touching AP files (same existing desktop remains conditional on its control availability). Current historical Codex control socket absent in audit; never fake its reload using a new backend or force-restart it. Finish source/docs and branch-based delivery record.
+
+## Delivery candidate checks
+
+Latest ordinary suite4d95a769e88f4540ad83a9c4ea6366fc passed. Delivery candidate real broker/update fixture mcp-update-11dddc1c04c044e8bfc2f9fbc3e02fc0 passed with exact authenticated binding-ID confirmation, a deliberately misnamed copied credential refused, contract switch/no replay and idempotent registrations; docs-delivery26tools/5resources/7examples passed. Diagnostics are now typed references with bounded private logs and no request/token logging. Client updater compares the owning thread's version/hash/resource AND authenticated identity. Known global/repository configs still untouched at this checkpoint.
+
+Final archive4121efc... initially hit transient Windows directory publication denial for its own mcp-launcher.pending path. No pending folder remained and a second identical initialize on that extracted scope immediately succeeded without any ACL change. Added a bounded2second retry only for atomic owned directory publication; never retries MCP work. This changes build generation, not contract. Rebuild/requalify the last local archive; earlier archives remain superseded private qualification artifacts, no release. Shared checks and Python AST41files pass. Next: package+verify, final source review/commit/push/merge, one-command real deployment and repeat/idempotence, existing AP binding/native Codex fresh-only qualification and explicit same-desktop limitation.
+
+Portable final qualification PASSED archive50af2b1d7e7a4bdeb8f5c5137a9d81d7 (SHA25616a7fd06f1aa46b7d9b6309e35d61c805171a3a03a77687202b24efb0e77f1c3); extraction/restart/identity/foreign-project/refusal/native broker passed under restricted PATH/nonexistent DOTNET_ROOT, no WSL/model. SOURCE_AND_PORTABLE_CONTRACT passed: same version and hash despite adapted documentation links. Explicit same-client reload capability reports unknown (not a false mandatory restart or success) when its actual catalog cannot be inspected. Implementation complete; awaiting final source checks then delivery. No live data/settings changed yet.
+
+## Arrêt demandé par Florent — 02/11/2026
+Travail interrompu immédiatement à sa demande. Implémentation et qualifications réalisées ; vérifier le dernier commit et le statut Git avant toute reprise. Fusion, déploiement final et message à Pilotage AP ne sont pas confirmés dans ce checkpoint. Aucun travail supplémentaire autorisé sans nouveau GO. Le checkpoint détaillé précédent conserve les résultats et les étapes restantes.
+
+
+## Authorized delivery resumed — 02/11/2026
+Florent requested resuming delivery with minimal deployment checks, reusing passed qualifications. Objective: merge/push, standard deployment preserving scope, verification and message to Pilotage AP. Goal API still refuses a new objective because an unrelated historical goal remains unfinished; its counters are not attributed here.
+

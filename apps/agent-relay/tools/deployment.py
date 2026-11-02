@@ -12,6 +12,7 @@ import sqlite3
 import subprocess
 import time
 import uuid
+import re
 
 
 def read(path): return json.loads(path.read_text(encoding='utf-8-sig'))
@@ -35,7 +36,7 @@ def exclusive(data):
 
 def snapshot(data, destination):
     destination.mkdir()
-    for name in ['mcp-runtime.json', 'relay-config.json', 'relay-projects.json']:
+    for name in ['mcp-runtime.json', 'relay-config.json', 'relay-projects.json', 'mcp-contract.json', 'mcp-contract-history.json']:
         if (data / name).exists(): shutil.copy2(data / name, destination / name)
     if (data / 'connections').exists(): shutil.copytree(data / 'connections', destination / 'connections')
     if (data / 'relay.sqlite').exists():
@@ -78,6 +79,24 @@ def publish(data, prepared, reports, show):
     for path in [data, prepared, reports]:
         if not any(path.is_relative_to(base) for base in [app_var(root), root / 'local/apps/agent-relay']): raise ValueError('Deployment paths escaped the declared application roots')
     runtime = read(prepared / 'mcp-runtime.json'); development=data.is_relative_to(root / 'local/apps/agent-relay'); validate(runtime, root, development)
+    contract_path = Path(runtime_command(runtime)[0]).parent / 'mcp-contract.json'
+    contract = read(contract_path)
+    if not re.fullmatch(r'\d+\.\d+\.\d+(?:-rc\.[1-9]\d*)?', contract['version']): raise ValueError('Only stable and RC versions may be deployed')
+    history_path = data / 'mcp-contract-history.json'
+    history = read(history_path) if history_path.exists() else {}
+    known = history.get(contract['version'])
+    if known is not None and known != contract['contractHash']:
+        raise ValueError('This deployed version already identifies a different MCP contract. Increment the RC or stable version before deployment.')
+    existing_pointer = read(data / 'mcp-runtime.json') if (data / 'mcp-runtime.json').is_file() else None
+    existing_host = read(data / 'ui-host.json') if (data / 'ui-host.json').is_file() else None
+    if existing_pointer and existing_host and runtime_command(existing_pointer) == runtime_command(runtime) and identity(existing_host, data):
+        probe = subprocess.run(runtime_command(runtime) + ['profiles', '--data-dir', str(data)], capture_output=True, timeout=8, creationflags=subprocess.CREATE_NO_WINDOW)
+        if probe.returncode == 0:
+            json.loads(probe.stdout)
+            write(data / 'mcp-contract.json', contract)
+            write(history_path, dict(history, **{contract['version']: contract['contractHash']}))
+            print(json.dumps({'published': False, 'alreadyCurrent': True, 'pid': existing_host['pid'], 'currentChatMcpQualified': False}))
+            return
     reports.mkdir(parents=True, exist_ok=True); data.mkdir(parents=True, exist_ok=True)
     transaction = reports / ('deployment-' + uuid.uuid4().hex); transaction.mkdir()
     check = transaction / 'preflight'; check.mkdir(); snapshot(data, check / 'before')
@@ -110,6 +129,8 @@ def publish(data, prepared, reports, show):
         old = read(backup / 'mcp-runtime.json') if (backup / 'mcp-runtime.json').exists() else {}
         if old.get('connectionId'): runtime['connectionId'] = old['connectionId']
         write(data / 'mcp-runtime.json', runtime)
+        write(data / 'mcp-contract.json', contract)
+        write(history_path, dict(history, **{contract['version']: contract['contractHash']}))
         write(metadata, dict(runtime, pid=started.pid, executable=runtime_command(runtime)[0], data=str(data), transaction=str(transaction)))
         write(report_metadata, read(metadata))
         write(transaction / 'result.json', {'healthy': True, 'rollbackSnapshot': str(backup), 'pid': started.pid})
@@ -117,10 +138,10 @@ def publish(data, prepared, reports, show):
         if started is not None: started.terminate(); started.wait(timeout=10)
         if backup_ready:
             with exclusive(data):
-                for name in ['relay.sqlite', 'relay.sqlite-wal', 'relay.sqlite-shm', 'mcp-runtime.json', 'connections']:
+                for name in ['relay.sqlite', 'relay.sqlite-wal', 'relay.sqlite-shm', 'mcp-runtime.json', 'mcp-contract.json', 'mcp-contract-history.json', 'connections']:
                     target = data / name
                     if target.exists(): target.replace(transaction / ('failed-' + name))
-                for name in ['relay.sqlite', 'mcp-runtime.json']:
+                for name in ['relay.sqlite', 'mcp-runtime.json', 'mcp-contract.json', 'mcp-contract-history.json']:
                     if (backup / name).exists(): shutil.copy2(backup / name, data / name)
                 if (backup / 'connections').exists(): shutil.copytree(backup / 'connections', data / 'connections')
         if was_running:

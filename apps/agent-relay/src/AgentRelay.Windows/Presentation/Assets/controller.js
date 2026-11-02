@@ -75,6 +75,8 @@
   else if(action==='close-detail'){ui.detail=null;$('#detail-layer').innerHTML='';}
   else if(action==='task-project')navigate('project',el.dataset.project);
   else if(action==='startup-toggle'||action==='startup-retry'){const state=data.startup||{enabled:data.startupEnabled};if(ui.startupPending||typeof state.enabled!=='boolean')return;ui.startupTarget=action==='startup-retry'?ui.startupTarget:!state.enabled;ui.startupPending=true;ui.startupError=null;render();host('startup-preference',{enabled:ui.startupTarget});}
+  else if(action==='close-mcp'){modal('Fermer cette connexion MCP ?',"<p>La requête engagée pourra se terminer. Aucun travail ne sera rejoué et les permissions restent conservées.</p><p>Le client peut nécessiter un rechargement explicite pour se reconnecter.</p>",C.button('Fermer la connexion','confirm-close-mcp',`data-id="${C.escape(id)}"`,'primary'));}
+  else if(action==='confirm-close-mcp'){$('#app-modal').innerHTML='';host('close-mcp',{id});}
   else if(action==='settings-scope'){ui.settingScope=value;render();}
   else if(action==='project-settings'){const project=el.dataset.project||ui.project;if(project)navigate('project',project,'settings');}
   else if(action==='manage-projects'){navigate('settings');ui.settingScope='projects';render();}
@@ -142,7 +144,7 @@
   Object.assign(ui,{generalFeed:parameters.feed||'tasks',advanced:false,messageFilter:'all'});
   if(parameters.project)navigate('project',parameters.project,parameters.tab||'summary');else if(parameters.view)navigate(parameters.view);else navigate('general');
   if(parameters.feed){ui.generalFeed=parameters.feed;render();}
-  if(parameters.scope&&['general','projects'].includes(parameters.scope)){ui.settingScope=parameters.scope;render();}
+  if(parameters.scope&&['general','projects','mcp'].includes(parameters.scope)){ui.settingScope=parameters.scope;render();}
   if(parameters.session){ui.sessionId=parameters.session;ui.tab='conversation';render();}
   if(parameters.detail)detail(parameters.detail,parameters.id);
  }};

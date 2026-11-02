@@ -156,7 +156,7 @@ def client_changes(paths, source, destination, runtime, default_connection):
         connection = arguments[arguments.index('--connection-id') + 1] if '--connection-id' in arguments else default_connection
         if not connection: raise ValueError('The scoped connection identity is missing')
         arguments = ['mcp', '--data-dir', str(destination), '--connection-id', connection]
-        fragment = '[mcp_servers.agent_relay]\ncommand = ' + json.dumps(runtime_command(runtime)[0]) + '\nargs = ' + json.dumps(arguments) + '\n'
+        fragment = '[mcp_servers.agent_relay]\ncommand = ' + json.dumps(runtime.get('mcpExecutable') or runtime_command(runtime)[0]) + '\nargs = ' + json.dumps(arguments) + '\n'
         updated = _registration.update(raw.decode('utf-8-sig'), fragment).encode()
         changes.append({'path': path, 'before': raw, 'after': updated, 'connection': connection})
     return changes
@@ -164,14 +164,7 @@ def client_changes(paths, source, destination, runtime, default_connection):
 
 def replace_config(change, reverse=False):
     expected, desired = (change['after'], change['before']) if reverse else (change['before'], change['after'])
-    path = change['path']
-    if path.read_bytes() != expected: raise RuntimeError('Client configuration changed concurrently; refusing overwrite: ' + str(path))
-    temporary = path.with_name('relay-migration-' + uuid.uuid4().hex + '.pending')
-    try:
-        with temporary.open('xb') as stream: stream.write(desired); stream.flush(); os.fsync(stream.fileno())
-        temporary.replace(path)
-    finally:
-        if temporary.exists(): temporary.unlink()
+    _registration.replace_if_unchanged(change['path'], expected, desired)
 
 
 def current_host(source, runtime):
@@ -226,7 +219,7 @@ def prepare(source, destination, runtime, plan):
 
 def qualify(runtime, data, root, reports, connection, expected):
     with (reports / 'mcp.stderr.log').open('a') as errors, RelayMcp(dict(runtime, connectionId=connection), data, root, errors) as client:
-        assert len(client.call('tools/list')['tools']) == 25
+        assert len(client.call('tools/list')['tools']) == 26
         guides = client.call('resources/list')['resources']; assert len(guides) == 5
         for guide in guides: assert client.call('resources/read', {'uri': guide['uri']})['contents'][0]['text']
         configuration = client.tool('list_projects')['configuration']
