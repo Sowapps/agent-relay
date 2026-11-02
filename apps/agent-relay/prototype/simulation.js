@@ -3,7 +3,7 @@ let fixture=structuredClone(window.PrototypeFixtures),failNext=false,timer=null;
 const listeners=[],emit=message=>listeners.forEach(fn=>fn({data:message}));
 const snapshot=()=>emit({type:'snapshot',data:structuredClone(fixture)});
 const report=text=>document.querySelector('#sim-result').textContent=text;
-const update=()=>{for(const c of fixture.mcpConnections)c.lastSeen=new Date().toISOString();fixture.observedAt=new Date().toISOString();snapshot();report('Données actualisées. Aucun travail réel exécuté.');};
+const update=()=>{fixture.mcpConnections.reverse();for(const c of fixture.mcpConnections)c.lastSeen=new Date().toISOString();fixture.observedAt=new Date().toISOString();snapshot();report('Données actualisées. Aucun travail réel exécuté.');};
 window.chrome||={};window.chrome.webview={addEventListener:(_,fn)=>listeners.push(fn),postMessage:message=>{
  if(message.action==='ready'){queueMicrotask(()=>{snapshot();window.RelayUI.route(Object.fromEntries(new URLSearchParams(location.search)));});return;}
  if(['stop-session','copy'].includes(message.action)){report(message.action==='copy'?'Copie simulée.':'Suivi fictif arrêté.');return;}
@@ -22,7 +22,9 @@ window.chrome||={};window.chrome.webview={addEventListener:(_,fn)=>listeners.pus
 document.querySelector('#sim-update').onclick=update;
 document.querySelector('#sim-conflict').onclick=()=>{failNext=true;report('La prochaine action échouera avec un conflit explicite.');};
 document.querySelector('#sim-auto').onclick=event=>{if(timer){clearInterval(timer);timer=null;}else timer=setInterval(update,2000);event.target.textContent='Actualisation continue : '+(timer?'oui':'non');};
-document.querySelector('#sim-reset').onclick=()=>{fixture=structuredClone(window.PrototypeFixtures);failNext=false;clearInterval(timer);timer=null;document.querySelector('#sim-auto').textContent='Actualisation continue : non';snapshot();window.RelayUI.route({view:'general'});report('Données fictives réinitialisées.');};
+document.querySelector('#sim-reset').onclick=()=>{fixture=structuredClone(window.PrototypeFixtures);window.CleanupPreview.reset();failNext=false;clearInterval(timer);timer=null;document.querySelector('#sim-auto').textContent='Actualisation continue : non';snapshot();window.RelayUI.route({view:'general'});report('Données fictives réinitialisées.');};
 document.querySelector('#sim-state').onchange=event=>{const explanations={declared:'Configuration déclarée. Aucun contrôle lancé.',ready:'Contrôle fictif réussi sur cet environnement uniquement.',stale:'Le dernier contrôle fictif est ancien. Sa disponibilité actuelle reste à vérifier.',unsupported:'Cet adaptateur ne fournit pas de contrôle de disponibilité.',failed:'Le contrôle fictif a échoué. Vérifiez la configuration avant de réessayer.'};fixture.connections[0].state=event.target.value;fixture.connections[0].explanation=explanations[event.target.value];snapshot();};
 document.querySelector('#sim-size').onchange=event=>document.querySelector('.prototype-frame .app-window').style.maxWidth=event.target.value+'px';
 document.querySelector('#toggle-tools').onclick=()=>{const tools=document.querySelector('.simulation-tools');tools.hidden=!tools.hidden;};
+
+document.querySelector('#sim-storage').onclick=()=>window.CleanupPreview.open();

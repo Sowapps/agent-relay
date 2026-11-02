@@ -37,7 +37,8 @@ public static class McpConnections
             }
             catch (Exception error) when (error is IOException or JsonException) { }
         }
-        return values;
+        // Heartbeat modification times select recent records; they must not reorder an open monitoring view.
+        return values.OrderBy(item=>item.Client,StringComparer.OrdinalIgnoreCase).ThenBy(item=>item.InstanceId).ToArray();
     }
     public static void RequestClose(string data, Guid instance)
     {
