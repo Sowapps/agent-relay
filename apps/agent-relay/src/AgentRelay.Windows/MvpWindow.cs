@@ -138,7 +138,7 @@ internal sealed class MvpWindow : Form
         messagePanel.Visible = !commandMode; startAgent.Visible = !commandMode; checkAgent.Visible = !commandMode;
         submit.Text = commandMode ? "Exécuter la commande" : "Envoyer le message";
         submit.Enabled = !commandMode || commands.Items.Count > 0;
-        destination.Text = $"{profile.Distribution}  ·  {profile.User}  ·  {(commandMode ? "Exécution directe" : profile.Client == "codex" ? "Agent Codex" : "Agent Claude")}";
+        destination.Text = $"Connexion : WSL · Distribution : {profile.Distribution} · Utilisateur : {profile.User} ·  {(commandMode ? "Exécution directe" : profile.Client == "codex" ? "Agent Codex" : "Agent Claude")}";
         modeHint.Text = commandMode ? "Exécution directe dans WSL, sans appel à un agent." : "Démarrez l’agent avant le premier envoi. Sa réponse sera conservée ci-dessous.";
         commandContext.Visible = commandMode; UpdateCommandContext();
     }
@@ -269,7 +269,7 @@ internal sealed class MvpWindow : Form
     {
         detailPinned = true; showSentMessage = false;
         status.Text = UserMessages.AgentState(agent.State); resultTitle.Text = $"État de l’agent · {profileNames.GetValueOrDefault(agent.ProfileId, agent.Client)}";
-        resultMeta.Text = $"{agent.Distribution} · {agent.User} · {agent.Workspace}";
+        resultMeta.Text = $"Connexion : WSL · Distribution : {agent.Distribution} · Utilisateur : {agent.User} · Workspace / Espace de travail : {agent.Workspace}";
         selectedDetail = agent; rawDetails = false; RenderDetail();
     }
 

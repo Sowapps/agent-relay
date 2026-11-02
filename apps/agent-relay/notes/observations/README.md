@@ -5,6 +5,8 @@
 
 ## Reports
 
+- [UI consistency corrections](2026-11-02-ui-consistency.md): prototype-first components, stable updates, clear diagnostics and scoped qualification/delivery.
+
 - [UI feedback audit](2026-11-02-ui-feedback-audit.md): confirmed rendering/refresh causes, diagnostic semantics, prototype drift and a prototype-first correction plan; no implementation.
 
 - [Shared stable Codex connection](2026-10-30-shared-stable-connection.md): actual user entry/runtime upgrade, preserved scope/rights/history, native Codex discovery and remaining standard-command gap.

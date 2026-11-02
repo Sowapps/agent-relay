@@ -14,7 +14,7 @@
  function renderDetail(){
   const scroll=$('.detail-body')?.scrollTop||0;
   const open=[...document.querySelectorAll('#detail-layer details[open]')].map(el=>el.id).filter(Boolean);
-  $('#detail-layer').innerHTML=R.detail()||'';
+  const layer=$('#detail-layer'),key=ui.detail?ui.detail.type+'|'+ui.detail.id:'';C.patch(layer,R.detail()||'',layer.dataset.detail!==key);layer.dataset.detail=key;
   if($('.detail-body'))$('.detail-body').scrollTop=scroll;
   open.forEach(id=>{const el=document.getElementById(id);if(el)el.open=true;});
  }
@@ -24,13 +24,16 @@
   const scroll=changed?0:content.scrollTop,focused=document.activeElement,focusId=focused?.id;
   const selection=focused instanceof HTMLInputElement?[focused.selectionStart,focused.selectionEnd]:null;
   const openDetails=[...document.querySelectorAll('details[open]')].map(el=>el.id).filter(Boolean);
-  $('#app-nav').innerHTML=R.nav();
+  C.patch($('#app-nav'),R.nav());
   const current=ui.view==='project'?data.projects.find(p=>p.id===ui.project)?.name:ui.view==='diagnostics'?'Diagnostic du relais':ui.view==='settings'?'Réglages':'Vue générale';
-  $('#app-topbar').innerHTML=`<div class="breadcrumb">${ui.view==='project'?'Projets':'Général'} <span> / </span><strong>${C.escape(current||'Projet indisponible')}</strong></div><div class="topbar-meta">Suivi local <i class="dot ${C.escape(data.relay)}"></i></div>`;
-  content.innerHTML=ui.view==='general'?R.general():ui.view==='project'?R.project():ui.view==='diagnostics'?R.diagnostics():R.settings();
+  const scope={general:'Général',projects:'Projets',mcp:'Connexions MCP'}[ui.settingScope];
+  const crumbs=ui.view==='project'?['Projets',current,{summary:'Synthèse',tasks:'Tâches',activity:'Activité',messages:'Messages',sessions:'Sessions',conversation:'Conversation',settings:'Réglages'}[ui.tab]]:ui.view==='settings'?['Réglages',scope]:[current];
+  C.patch($('#app-topbar'),`<div class="breadcrumb">${crumbs.filter(Boolean).map((text,index)=>`${index?'<span>/</span>':''}<strong>${C.escape(text)}</strong>`).join('')}</div><div class="topbar-meta">Suivi local <i class="dot ${C.escape(data.relay)}"></i></div>`);
+  C.patch(content,ui.view==='general'?R.general():ui.view==='project'?R.project():ui.view==='diagnostics'?R.diagnostics():R.settings(),changed);
   content.dataset.view=key;content.scrollTop=scroll;
   renderDetail();
   openDetails.forEach(id=>{const el=document.getElementById(id);if(el instanceof HTMLDetailsElement)el.open=true;});
+  if(!changed&&focused?.isConnected&&document.activeElement!==focused)focused.focus({preventScroll:true});
   if(focusId&&document.getElementById(focusId)){
    const el=document.getElementById(focusId);el.focus({preventScroll:true});
    if(selection&&el instanceof HTMLInputElement&&['text','search'].includes(el.type))el.setSelectionRange(...selection);
@@ -83,10 +86,10 @@
   else if(action==='project-state'){
    const project=data.projects.find(p=>p.id===el.dataset.project);if(!project||ui.projectChange)return;
    const archived=project.state==='archived',pending=project.archiveRequested,state=archived||pending?'active':'archived';
-   modal(pending?'Annuler l’archivage ?':archived?'Réactiver ce projet ?':'Archiver ce projet ?',`<p><strong>${C.escape(project.name)}</strong></p><p>${pending?'Les nouvelles actions seront de nouveau autorisées selon les permissions existantes. Aucun travail ne sera relancé.':archived?'Le projet réapparaîtra dans la navigation. Aucun travail ni aucune session ne sera relancé.':'Les nouvelles actions seront suspendues immédiatement. Le relais attendra la fin du travail engagé, puis archivera le projet automatiquement. Son historique et ses permissions seront conservés.'}</p>${archived||pending?'':'<p>Un résultat incertain ou une vérification impossible maintiendra la demande en attente avec un diagnostic. Aucune interruption ni approbation automatique. Vous pourrez annuler cette demande.</p>'}`,C.button(pending?'Annuler l’archivage':archived?'Réactiver':'Demander l’archivage','confirm-project-state',`data-project="${C.escape(project.id)}" data-value="${state}" data-expected="${archived?'archived':'active'}"`,'primary'));
+   modal(pending?'Annuler l’archivage ?':archived?'Réactiver ce projet ?':'Archiver ce projet ?',`<p><strong>${C.escape(project.name)}</strong></p><p>${pending?'Les nouvelles actions seront de nouveau autorisées selon les permissions existantes. Aucun travail ne sera relancé.':archived?'Le projet réapparaîtra dans la navigation. Aucun travail ni aucune session ne sera relancé.':'Les nouvelles actions seront suspendues immédiatement. Le relais attendra la fin du travail engagé, puis archivera le projet automatiquement. Son historique et ses permissions seront conservés.'}</p>${archived||pending?'':'<p>Un résultat incertain ou une vérification impossible maintiendra la demande en attente avec un diagnostic. Aucune interruption ni approbation automatique. Vous pourrez annuler cette demande.</p>'}`,C.button(pending?'Annuler l’archivage':archived?'Réactiver':'Demander l’archivage','confirm-project-state',`data-project="${C.escape(project.id)}" data-value="${state}" data-expected="${archived?'archived':'active'}" data-pending="${Boolean(pending)}"`,'primary'));
   }
   else if(action==='confirm-project-state'){
-   if(ui.projectChange)return;ui.projectChange={project:el.dataset.project,state:value,expectedState:el.dataset.expected};$('#app-modal').innerHTML='';render();host('project-state',ui.projectChange);
+   if(ui.projectChange)return;const current=data.projects.find(p=>p.id===el.dataset.project);if(!current||Boolean(current.archiveRequested)!==(el.dataset.pending==='true')||(current.state||'active')!==el.dataset.expected){modal('Le projet a changé','<p>Son état ou sa demande d’archivage a changé depuis votre ouverture. Actualisez avant de choisir une nouvelle action.</p>',C.button('Actualiser','project-state-refresh','','primary'));return;}ui.projectChange={project:el.dataset.project,state:value,expectedState:el.dataset.expected};$('#app-modal').innerHTML='';render();host('project-state',ui.projectChange);
   }
   else if(action==='project-state-refresh'){$('#app-modal').innerHTML='';host('refresh');}
   else if(action==='mark-reviewed'){const operation=data.operations.find(item=>item.id===id);if(operation)host('mark-reviewed',{id,project:operation.project,reviewToken:operation.reviewToken});}
@@ -97,7 +100,7 @@
    modal('Renommer la session',`<label for="session-name">Nom de la session</label><input id="session-name" maxlength="120" value="${C.escape(session.name)}">`,C.button('Renommer','confirm-rename',`data-id="${C.escape(id)}"`,'primary'));
    $('#session-name').focus();
   }
-  else if(action==='confirm-rename'){const name=$('#session-name').value.trim();if(name){host('session-control',{id,control:'rename:'+name});$('#app-modal').innerHTML='';}}
+  else if(action==='confirm-rename'){const name=$('#session-name').value.trim();if(name&&!ui.renamePending){ui.renamePending=true;host('session-control',{id,control:'rename:'+name});}}
   else if(action==='session-state'){const session=data.sessions.find(s=>s.id===id);if(session)host('session-control',{id,control:session.state==='closed'?'reopen':'close'});}
   else if(action==='interrupt')host('interrupt-operation',{id});
   else if(action==='inspect-session')host('inspect-session',{id});
@@ -115,6 +118,8 @@
   if(el.id==='compact-view'){document.body.classList.toggle('compact-rows',el.checked);try{localStorage.setItem('compact-rows',String(el.checked));}catch{} }
  });
  document.addEventListener('keydown',event=>{
+  const tab=event.target.closest('[role=tab]');if(tab&&['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){const items=[...tab.closest('[role=tablist]').querySelectorAll('[role=tab]')],i=items.indexOf(tab),n=event.key==='Home'?0:event.key==='End'?items.length-1:(i+(event.key==='ArrowLeft'?-1:1)+items.length)%items.length;event.preventDefault();items[n].click();document.getElementById(items[n].id)?.focus();return;}
+  if(event.key==='Tab'&&$('#app-modal').childElementCount){const fields=[...$('#app-modal').querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled),summary')];if(fields.length){const i=fields.indexOf(document.activeElement);if(event.shiftKey&&i<=0){event.preventDefault();fields.at(-1).focus();}else if(!event.shiftKey&&(i<0||i===fields.length-1)){event.preventDefault();fields[0].focus();}}}
   if(event.key==='Escape'){if($('#app-modal').childElementCount)$('#app-modal').innerHTML='';else{ui.detail=null;$('#detail-layer').innerHTML='';}}
  });
  function receive(message){
@@ -133,6 +138,8 @@
    ui.projectChange=null;const project=data?.projects.find(p=>p.id===message.project);if(project&&message.state){project.state=message.state;project.archiveRequested=Boolean(message.archiveRequested);}render();
    if(message.error)modal('Changement d’état non confirmé',`<p>${C.escape(message.error)}</p><p>Consultez l’état actuel avant de réessayer.</p>${message.diagnostic?`<details class="advanced"><summary>Détails techniques</summary><pre>${C.escape(message.diagnostic)}</pre></details>`:''}`,C.button('Actualiser','project-state-refresh','','primary'));
    else toast(message.archiveCancelled?'Archivage annulé. Les nouvelles actions sont de nouveau autorisées selon les permissions existantes.':message.archiveRequested?'Archivage demandé. Les nouveaux travaux sont suspendus pendant la fin du travail engagé.':message.state==='archived'?'Projet archivé. Son historique reste accessible dans Réglages → Projets.':'Projet réactivé. Aucun travail n’a été relancé.');
+  }else if(message.type==='action-result'){
+   ui.renamePending=false;if(message.success){$('#app-modal').innerHTML='';toast(message.text||'Action confirmée.');}else{const card=$('.app-modal-card');if(card){let alert=card.querySelector('[role=alert]');if(!alert){alert=document.createElement('p');alert.setAttribute('role','alert');card.insertBefore(alert,card.querySelector('.actions'));}alert.textContent=message.text;}else modal('Action non confirmée',`<p>${C.escape(message.text)}</p><p>Aucun nouvel essai automatique. Consultez l’état actuel avant de poursuivre.</p>` ,C.button('Actualiser','project-state-refresh','','primary'));}
   }else if(message.type==='operation'){
    const index=data?.operations.findIndex(o=>o.id===message.data?.id)??-1;
    if(index>=0){fullOperations.set(message.data.id,message.data);data.operations[index]=message.data;if(ui.detail?.type==='operation'&&ui.detail.id===message.data.id)renderDetail();}

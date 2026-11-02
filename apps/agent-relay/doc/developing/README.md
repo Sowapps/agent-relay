@@ -5,6 +5,8 @@
 
 ## References
 
+- [Navigable interface prototype](../../prototype/README.md): reproducible reference, simulation tools and prototype-first correction workflow.
+
 - [Runtime storage and migration](runtime-storage.md): installation-root var ownership, explicit developer outputs, private staging and guarded migration.
 
 - [Release workflow](releases.md): version source, autonomous runtime locks, extracted archive qualification, guarded tags and private publication.
