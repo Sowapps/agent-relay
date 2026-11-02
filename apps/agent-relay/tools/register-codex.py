@@ -22,19 +22,19 @@ def toml_value(value):
     raise ValueError('Unsupported existing MCP value; configuration was not changed')
 
 
-def update(original, fragment):
+def update(original, fragment, server_name='agent_relay'):
     before = tomllib.loads(original)
-    desired = tomllib.loads(fragment)['mcp_servers']['agent_relay']
-    existing = before.get('mcp_servers', {}).get('agent_relay', {})
+    desired = tomllib.loads(fragment)['mcp_servers'][server_name]
+    existing = before.get('mcp_servers', {}).get(server_name, {})
     if existing and all(existing.get(key) == value for key, value in desired.items()):
         return original
     replacement = dict(existing, **desired)
-    table = '[mcp_servers.agent_relay]\n' + ''.join(key + ' = ' + toml_value(value) + '\n' for key, value in replacement.items())
+    table = '[mcp_servers.' + json.dumps(server_name) + ']\n' + ''.join(key + ' = ' + toml_value(value) + '\n' for key, value in replacement.items())
     headers = list(re.finditer(r'(?m)^[ \t]*\[(?!\[)[^\r\n]+\][ \t]*(?:#[^\r\n]*)?\r?$', original))
     spans = []
     for index, header in enumerate(headers):
         parsed = tomllib.loads(header.group() + '\n__relay_probe__ = 1\n')
-        if 'agent_relay' in parsed.get('mcp_servers', {}):
+        if server_name in parsed.get('mcp_servers', {}):
             spans.append((header.start(), headers[index+1].start() if index+1 < len(headers) else len(original)))
     result = original
     if spans:
@@ -44,9 +44,9 @@ def update(original, fragment):
     else:
         result = original.rstrip() + '\n\n' + table
     after = tomllib.loads(result)
-    actual = after.get('mcp_servers', {}).pop('agent_relay')
+    actual = after.get('mcp_servers', {}).pop(server_name)
     baseline = tomllib.loads(original)
-    baseline.setdefault('mcp_servers', {}).pop('agent_relay', None)
+    baseline.setdefault('mcp_servers', {}).pop(server_name, None)
     assert after == baseline and actual == replacement, 'Unexpected configuration change; refusing update'
     return result
 

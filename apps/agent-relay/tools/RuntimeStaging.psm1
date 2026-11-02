@@ -4,7 +4,7 @@ function Get-StagedApplication {
     $files = @(Get-ChildItem -LiteralPath $source -Recurse -File | Sort-Object FullName | ForEach-Object {
         [pscustomobject]@{ Path = [IO.Path]::GetRelativePath($source, $_.FullName); Hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash }
     })
-    $identity = if($InstallationRoot){ @{Root=[IO.Path]::GetFullPath($InstallationRoot);Files=$files} | ConvertTo-Json -Depth 5 -Compress }else{$files | ConvertTo-Json -Compress}
+    $identity = if($InstallationRoot){ [ordered]@{Root=[IO.Path]::GetFullPath($InstallationRoot);Files=$files} | ConvertTo-Json -Depth 5 -Compress }else{$files | ConvertTo-Json -Compress}
     $bytes = [Text.Encoding]::UTF8.GetBytes($identity)
     $fingerprint = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bytes))
     $destination = Join-Path $RuntimeRoot $fingerprint
