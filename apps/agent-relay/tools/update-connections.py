@@ -23,26 +23,28 @@ def update(data, reports, paths, control_socket=None, thread=None):
     guide = Path(runtime['executable']).parent / 'documentation/agent-quickstart.md'
     expected['quickstartHash'] = hashlib.sha256(guide.read_text(encoding='utf-8-sig').replace('\r\n', '\n').encode()).hexdigest()
     changes = []
+    identities = set()
     for path in dict.fromkeys(path.resolve() for path in paths):
         if not path.is_file(): continue
-        raw = path.read_bytes(); table = tomllib.loads(raw.decode('utf-8-sig')).get('mcp_servers', {}).get('agent_relay')
-        if not table: continue
-        arguments = table.get('args', [])
-        if '--data-dir' not in arguments or '--connection-id' not in arguments: continue
-        existing_data = Path(arguments[arguments.index('--data-dir') + 1]).resolve()
-        if existing_data != data:
-            marker = existing_data / 'migrated-to.json'
-            if not marker.is_file() or Path(json.loads(marker.read_text(encoding='utf-8-sig'))['destination']).resolve() != data: continue
-        identity = arguments[arguments.index('--connection-id') + 1]; uuid.UUID(identity)
-        # Fail instead of falling back to another principal. Actual host authentication follows below.
-        if not (data / 'connections' / (uuid.UUID(identity).hex + '.bin')).is_file(): raise ValueError('The exact registered connection credential is missing; no settings changed')
-        desired_args = ['mcp', '--data-dir', str(data), '--connection-id', identity]
-        fragment = '[mcp_servers.agent_relay]\ncommand = ' + json.dumps(str(broker)) + '\nargs = ' + json.dumps(desired_args) + '\n'
-        updated = registration.update(raw.decode('utf-8-sig'), fragment).encode('utf-8')
-        changes.append((path, raw, updated, identity))
+        raw = path.read_bytes(); updated = raw.decode('utf-8-sig'); matches = []
+        for server_name, table in tomllib.loads(updated).get('mcp_servers', {}).items():
+            arguments = table.get('args', [])
+            if '--data-dir' not in arguments or '--connection-id' not in arguments: continue
+            if Path(table.get('command', '')).name.lower() != 'agentrelay.windows.exe': continue
+            existing_data = Path(arguments[arguments.index('--data-dir') + 1]).resolve()
+            if existing_data != data:
+                marker = existing_data / 'migrated-to.json'
+                if not marker.is_file() or Path(json.loads(marker.read_text(encoding='utf-8-sig'))['destination']).resolve() != data: continue
+            identity = arguments[arguments.index('--connection-id') + 1]; uuid.UUID(identity)
+            if not (data / 'connections' / (uuid.UUID(identity).hex + '.bin')).is_file(): raise ValueError('The exact registered connection credential is missing; no settings changed')
+            desired_args = ['mcp', '--data-dir', str(data), '--connection-id', identity]
+            fragment = '[mcp_servers.' + json.dumps(server_name) + ']\ncommand = ' + json.dumps(str(broker)) + '\nargs = ' + json.dumps(desired_args) + '\n'
+            updated = registration.update(updated, fragment, server_name)
+            matches.append(identity); identities.add(str(uuid.UUID(identity)))
+        if matches: changes.append((path, raw, updated.encode('utf-8'), matches))
     # Verify each preserved principal before writing any registration. No rights/default connection substitution.
     with (reports / 'fresh-connections.stderr.log').open('w', encoding='utf-8') as errors:
-        for identity in sorted({str(uuid.UUID(item[3])) for item in changes}):
+        for identity in sorted(identities):
             with RelayMcp(dict(runtime, executable=str(broker), connectionId=identity), data, root, errors) as client:
                 client.call('tools/list'); client.tool('list_projects'); status = client.tool('get_connection_status')
                 if uuid.UUID(status['host']['connectionId']) != uuid.UUID(identity): raise ValueError('The authenticated principal does not match the registered identity')
@@ -57,8 +59,8 @@ def update(data, reports, paths, control_socket=None, thread=None):
         for path, before, after in reversed(applied):
             if path.read_bytes() == after: registration.replace_if_unchanged(path, after, before)
         raise
-    expected['connectionIds'] = sorted({str(uuid.UUID(item[3])) for item in changes})
-    result = {'updated': len(applied), 'matchingConnections': len(changes), 'identitiesAndOtherSettingsPreserved': True,
+    expected['connectionIds'] = sorted(identities)
+    result = {'updated': len(applied), 'matchingConnections': sum(len(item[3]) for item in changes), 'identitiesAndOtherSettingsPreserved': True,
               'freshScopedConnectionsVerified': bool(changes), 'clientRefresh': CodexControlConnector(root, reports, control_socket, expected=expected).refresh(thread=thread), 'modelCalls': 0}
     (reports / 'update-result.json').write_text(json.dumps(result, indent=2), encoding='utf-8'); return result
 

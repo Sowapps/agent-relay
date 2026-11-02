@@ -75,7 +75,10 @@ def main(first_pointer, next_pointer):
             write(data / 'mcp-contract.json', before['host']['identity'])
             config = fixture / 'client.toml'
             config.write_text('model = "preserved"\n[mcp_servers.agent_relay]\ncommand = ' + json.dumps(exe) + '\nargs = ' + json.dumps(['mcp', '--data-dir', str(data), '--connection-id', context['connectionId']]) + '\nrequired = true\n', encoding='utf-8')
+            with config.open('a', encoding='utf-8') as stream:
+                stream.write('[mcp_servers.agent_relay_personal_assistant]\ncommand = ' + json.dumps(exe) + '\nargs = ' + json.dumps(['mcp', '--data-dir', str(data), '--connection-id', context['connectionId']]) + '\nrequired = false\n[mcp_servers.unrelated]\ncommand = "preserved"\n')
             one = update.update(data, reports / 'registration-first', [config], fixture / 'absent-socket')
+            assert one['matchingConnections'] == 2
             raw = config.read_bytes(); two = update.update(data, reports / 'registration-second', [config], fixture / 'absent-socket')
             assert one['updated'] == 1 and two['updated'] == 0 and config.read_bytes() == raw
             assert tomllib.loads(raw.decode())['model'] == 'preserved' and context['connectionId'] in raw.decode()

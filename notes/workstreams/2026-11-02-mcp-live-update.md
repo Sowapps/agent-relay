@@ -56,3 +56,8 @@ Travail interrompu immédiatement à sa demande. Implémentation et qualificatio
 ## Authorized delivery resumed — 02/11/2026
 Florent requested resuming delivery with minimal deployment checks, reusing passed qualifications. Objective: merge/push, standard deployment preserving scope, verification and message to Pilotage AP. Goal API still refuses a new objective because an unrelated historical goal remains unfinished; its counters are not attributed here.
 
+
+## Live delivery and final scoped corrections
+Integrated source commit766c034 deployed successfully as1.1.0-rc.1;7protected project/configuration/review/credential files unchanged. Both standard registrations updated and fresh exact bindings authenticated. AP binding26fb8d96-d776-4b6f-80a4-e8ce24c17cf2 independently authenticated with26tools/current contract and list_projects; no models called. Restricted shell initially lacked named-pipe access; same-Windows-account qualification passed with normal authorized process access. Existing desktop control remains unsupported; no automatic reload claimed.
+Final deployment inspection found two gaps: named AP registration retained the retired path because updater selected only agent_relay; and unordered PowerShell hash serialization could stage identical content twice. Updater now selects authenticated matching named native-relay registrations including verified migration, keeps each name/ID/options and writes each config once. Ordered staging fingerprint stabilizes reuse. Focused native fixture mcp-update-afc1cd02999041da9cd1ad3fce532049 passed named-alias updates, unrelated table preservation and idempotence. Final standard deployment/repeat follows; no release/tag.
+
