@@ -5,6 +5,8 @@
 
 ## Working documents
 
+- [Storage cleanup review surface](2026-11-03-storage-review.md): extended fictional summary/category/runtime checks, preview, drawer and precise simulated result.
+
 - [Manual cleanup inventory and design](2026-11-02-manual-cleanup.md): recent-day/active-data protection, storage owners, fictional UI and a separately gated implementation proposal.
 
 - [Interface conformity corrections](2026-10-29-interface-conformance-corrections.md): six operator captures, visual gap register, qualification-failure explanation and preparation of the correction plan; no implementation authorization.

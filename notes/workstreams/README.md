@@ -5,6 +5,8 @@
 
 ## Records
 
+- [Storage cleanup prototype refinement](2026-11-03-storage-prototype.md): mockup-only summary, safe runtime examples, preview/details/confirmation and fictional result.
+
 - [UI polish and cleanup design](2026-11-02-ui-polish-cleanup-design.md): three prototype-first corrections plus read-only inventory and fictional manual-cleanup design.
 
 - [UI consistency delivery](2026-11-02-ui-consistency.md): authorized prototype-first feedback corrections and targeted qualification.

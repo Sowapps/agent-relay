@@ -12,7 +12,7 @@ parser.add_argument('--output',type=Path,default=root/'local/apps/agent-relay/pr
 parser.add_argument('--record-reference',action='store_true')
 args=parser.parse_args()
 assets=args.assets.resolve()
-styles='\n'.join((assets/name).read_text(encoding='utf-8-sig') for name in ['tokens.css','presentation.css','desktop.css'])
+styles='\n'.join((assets/name).read_text(encoding='utf-8-sig') for name in ['tokens.css','presentation.css','desktop.css'])+'\n'+(folder/'cleanup-preview.css').read_text(encoding='utf-8')
 scripts='\n'.join((assets/name).read_text(encoding='utf-8-sig') for name in ['components.js','model.js','views.js','renderer.js'])+'\n'+(folder/'cleanup-preview.js').read_text(encoding='utf-8-sig')
 html=(folder/'shell.html').read_text(encoding='utf-8')
 fixture=json.loads((folder/'fixtures.json').read_text(encoding='utf-8'))

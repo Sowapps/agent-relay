@@ -28,3 +28,7 @@ document.querySelector('#sim-size').onchange=event=>document.querySelector('.pro
 document.querySelector('#toggle-tools').onclick=()=>{const tools=document.querySelector('.simulation-tools');tools.hidden=!tools.hidden;};
 
 document.querySelector('#sim-storage').onclick=()=>window.CleanupPreview.open();
+
+document.querySelector('#sim-runtime-used').onclick=()=>window.CleanupPreview.scenario('runtime-use');
+document.querySelector('#sim-runtime-unknown').onclick=()=>window.CleanupPreview.scenario('unknown');
+document.querySelector('#sim-clean-failure').onclick=()=>window.CleanupPreview.scenario('failure');
