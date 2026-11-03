@@ -1,5 +1,5 @@
 {
-  "sha256": "8c15f552cf722e6eed50d6b62818a87fd07939668929db85e4b63ce6fd62da27",
+  "sha256": "c2b3bf7750a8c548c09be5aa8e3bd9cfa5d44503b69c04aaeffafb4c7bdb1519",
   "source": "shared presentation + prototype shell/fixtures/simulation",
   "status": "qualified implementation reference; operator visual acceptance separate"
 }
