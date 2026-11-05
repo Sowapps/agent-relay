@@ -5,6 +5,11 @@
 
 ## Records
 
+- [Single knowledge owner](2026-11-05-single-knowledge-owner.md): shared rules have one authority across all levels.
+- [Responsibility layering](2026-11-05-responsibility-layering.md): coherent services and precise strategies without service proliferation.
+- [Targeted maintenance references](2026-11-05-maintenance-references.md): reciprocal coupled-operation links and selective @see usage.
+- [Context-independent continuity](2026-11-05-context-independent-recovery.md): persistent design, conventions and choices beyond conversation memory.
+
 - [Cleanup protected calendar days](2026-11-02-cleanup-protected-days.md): current local day always excluded; before02:00the previous day is also excluded.
 
 - [General and project settings separation](2026-11-01-project-settings-separation.md): full general project directory and dedicated project settings.

@@ -5,6 +5,8 @@
 
 ## Records
 
+- [Design guide audit](2026-11-05-design-guide-audit.md): authorized source/documentation audit and proposed correction lots, with no application edits or deployment.
+
 - [WSL session close correction](2026-11-05-wsl-session-close.md): current/legacy runtime ownership guard and model-free project-workspace lifecycle qualification.
 
 - [Storage cleanup prototype refinement](2026-11-03-storage-prototype.md): mockup-only summary, safe runtime examples, preview/details/confirmation and fictional result.
