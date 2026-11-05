@@ -5,9 +5,11 @@ import json
 from pathlib import Path
 import sqlite3
 import subprocess
+import uuid
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--data', type=Path, required=True)
+parser.add_argument('--session-id', type=uuid.UUID, action='append', help='Refresh only these retained session identities; repeat for an explicit set')
 args = parser.parse_args()
 application = Path(__file__).resolve().parents[1]
 root = application.parents[1]
@@ -17,6 +19,11 @@ with sqlite3.connect(data / 'relay.sqlite') as database:
     active = database.execute("SELECT count(*) FROM work WHERE json_extract(payload,'$.state') IN ('pending','running')").fetchone()[0]
     assert active == 0, 'Wait for active relay work before updating adapters'
     sessions = [json.loads(row[0]) for row in database.execute('SELECT payload FROM sessions')]
+if args.session_id:
+    selected = {str(value) for value in args.session_id}
+    sessions = [session for session in sessions if session['id'] in selected]
+    if {session['id'] for session in sessions} != selected:
+        raise ValueError('A selected session is absent; no adapter was updated')
 files = {path.name: base64.b64encode(path.read_bytes()).decode() for path in (application / 'wsl').glob('*.py')}
 script = '''
 import base64,json,os,pathlib,sys,uuid

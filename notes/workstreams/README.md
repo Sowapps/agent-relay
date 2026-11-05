@@ -5,6 +5,8 @@
 
 ## Records
 
+- [WSL session close correction](2026-11-05-wsl-session-close.md): current/legacy runtime ownership guard and model-free project-workspace lifecycle qualification.
+
 - [Storage cleanup prototype refinement](2026-11-03-storage-prototype.md): mockup-only summary, safe runtime examples, preview/details/confirmation and fictional result.
 
 - [UI polish and cleanup design](2026-11-02-ui-polish-cleanup-design.md): three prototype-first corrections plus read-only inventory and fictional manual-cleanup design.
