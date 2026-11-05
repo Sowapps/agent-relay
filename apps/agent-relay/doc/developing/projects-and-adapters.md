@@ -17,6 +17,10 @@ Core owns RelayApplication, ProjectPolicy, neutral scopes/artifacts/session/read
 
 Infrastructure translates MCP/pipe requests into those use cases and implements SQLite, protected credentials and adapters. ScopedSessions implements the first native-session adapter. wsl-agent, wsl-command and local-files are installed adapter bindings, not business roles. Another machine requires an implementation of the same ports plus its authentication and transport qualification; this architecture does not claim an SSH product is delivered.
 
+NativeAdapterComposition assembles the native capability graph once, shared by production and integration checks. ScopedSessions owns lifecycle/read operations; ScopedSessionContext owns retained scope and revocation checks; ScopedInbox owns bounded import and reply correlation; ScopedCommands owns direct dispatch and matching receipt recovery; ScopedWorkExecutor coordinates scoped message/file/command execution and recovery. FileTransferService owns stream integrity, publication and retained transfer receipts. These are capability boundaries, not a service per method; native execution remains in adapters, with the same Core ports.
+
+NativeLayout facades in C# and Python consume the single packaged native-layout.json definition. RuntimePaths delegates native calculations to it; provisioning, control, migration, sync and private transfer protection use that owner. OS ownership/symlink checks remain at their respective OS boundary. Shared corpus tests check producer/consumer agreement. SessionNames owns readable-name policy for Core, retained sessions and the MCP schema.
+
 Windows composes the runtime and provides ProjectWindow for monitoring/configuration. The legacy local echo and legacy profile coordinator remain regression/read-compatibility paths; production agent connections cannot use them to bypass project scope.
 
 The local monitoring frontend has a separate passive source adapter. Authenticated administrative observe_* routes expose bounded retained project facts without native side effects. Participant connections cannot enter those routes; their existing scoped MCP tools remain authoritative. Core monitoring projections know identities and states, while adapter-provided descriptors carry connector/environment labels and supported actions. See [Windows interface](windows-interface.md) for presentation and cursor ownership.
@@ -52,6 +56,8 @@ ProjectJournal applies project/endpoint/session/task/type/state/date filters in 
 ## Maintenance and qualification
 
 The publication tool stages and checks a copied configuration/database before stopping an exactly identified idle owned host. It retains an offline snapshot and failed migrated files, confirms the new authenticated pipe, and publishes the stable pointer only after health succeeds. Rollback restores the old database and protected credential set together; schema4 cannot simply be opened by an older runtime. Quiesce clients before replacing an old host: its active-work guard is an observation, not a cross-version transactional drain protocol.
+
+host_identity resolves stale process metadata only to a unique exact executable/command/data-scope tray owner, parsing the Windows argument vector rather than matching a path substring. Deployment revalidates that identity immediately before stopping it and retains host.lock as the authority. Missing or ambiguous ownership refuses safely. NativeFailures translates typed helper error envelopes; legacy untyped diagnostics remain wsl_error with uncertain effects. Stdio MCP and redirected worker streams explicitly use UTF-8.
 
 Build/tests, standalone MCP, actual native responses, current-desktop tool availability and visual acceptance are separate checks. None substitutes for another. Run-specific results and remaining qualification gaps belong in notes, never in a claim that compilation proves full acceptance.
 

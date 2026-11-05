@@ -9,7 +9,7 @@
 
 - [Runtime storage and migration](runtime-storage.md): installation-root var ownership, explicit developer outputs, private staging and guarded migration.
 
-- [Release workflow](releases.md): version source, autonomous runtime locks, extracted archive qualification, guarded tags and private publication.
+- [Release workflow](releases.md): version source, autonomous runtime locks, extracted archive qualification, guarded tags and authorized publication.
 
 - [Projects, participants and adapters](projects-and-adapters.md): production authorization, neutral use cases, native boundaries, recovery and protocol.
 

@@ -3,6 +3,10 @@
 **Utility:** tracks dated work and unresolved decisions without changing the product contract.  
 **Usage:** read when resuming the investigation or preparing the next authorization.
 
+## Reading this historical log
+
+The dated entries below preserve past status, not current delivery gates. Use the root notes/workstreams index for the active checkpoint, current doc for product behavior and notes/decisions for engineering reasons. Do not infer unfinished work from an old entry.
+
 ## 2026-10-28 — Documentation and WSL checks
 
 Latest status: [evening delivery](observations/2026-10-28-evening-mvp-v1.md) supersedes the outstanding-work statements in the older dated sections below. The18-tool version is published; actual current-chat MCP discovery and renewed Claude authentication remain open gates.

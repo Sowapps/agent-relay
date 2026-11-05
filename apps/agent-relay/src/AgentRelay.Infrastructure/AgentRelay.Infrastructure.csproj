@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup><TargetFramework>net10.0-windows</TargetFramework></PropertyGroup>
   <ItemGroup>
+    <EmbeddedResource Include="../../wsl/native-layout.json" LogicalName="AgentRelay.Infrastructure.native-layout.json" />
     <ProjectReference Include="../AgentRelay.Core/AgentRelay.Core.csproj" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
   </ItemGroup>

@@ -26,16 +26,10 @@ public sealed class SessionService
     public async Task<RelaySession> FindAsync(Guid id, CancellationToken token) =>
         await store.FindAsync(id, token) ?? throw new RelayException("not_found", "Unknown relay session.");
 
-    private static void ValidateName(string name)
-    {
-        if (string.IsNullOrWhiteSpace(name) || name.Length > 120 || name.Any(char.IsControl))
-            throw new RelayException("invalid_session", "A session needs a readable name of at most120 characters.");
-    }
-
+    /// <seealso cref="ControlAsync"/>
     public async Task<RelaySession> CreateAsync(Guid id, string name, string profileId, CancellationToken token, SessionDefinition? definition = null)
     {
-        ValidateName(name);
-        name = name.Trim();
+        name = SessionNames.Normalize(name);
         if (id == Guid.Empty) throw new RelayException("invalid_session", "A session identifier is required.");
         await creation.WaitAsync(token);
         try
@@ -106,11 +100,12 @@ public sealed class SessionService
 
     public async Task<RelaySession> RenameAsync(Guid id, string name, CancellationToken token)
     {
-        ValidateName(name); var session = await FindAsync(id, token);
+        name = SessionNames.Normalize(name); var session = await FindAsync(id, token);
         session = session with { Name = name.Trim(), UpdatedAt = DateTimeOffset.UtcNow };
         await store.SaveAsync(id, session, token); return session;
     }
 
+    /// <seealso cref="CreateAsync"/>
     public async Task<RelaySession> ControlAsync(Guid id, bool close, CancellationToken token)
     {
         var session = await FindAsync(id, token);

@@ -3,13 +3,16 @@ import argparse
 import base64
 import json
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'wsl'))
+from native_layout import load_layout, payload_files
 import subprocess
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--settings', required=True)
 args = parser.parse_args()
 settings = json.loads(Path(args.settings).read_text(encoding='utf-8-sig'))
-files = {path.name: base64.b64encode(path.read_bytes()).decode() for path in (Path(__file__).resolve().parents[1] / 'wsl').glob('*.py')}
+files = payload_files(Path(__file__).resolve().parents[1] / 'wsl')
 seen = set()
 for profile in settings['profiles']:
     key = (profile['distribution'], profile['user'], profile['root'])
@@ -17,9 +20,12 @@ for profile in settings['profiles']:
         continue
     seen.add(key)
     code = """import base64,json,pathlib,sys,os
-c=json.load(sys.stdin);p=pathlib.Path(c['root']);assert p.parent==pathlib.Path('/srv') and p.name.startswith('agent-relay-') and p.resolve()==p and p.stat().st_uid==os.getuid()
+c=json.load(sys.stdin);p=pathlib.Path(c['root'])
+namespace={};exec(base64.b64decode(c['files']['native_layout.py']),namespace)
+layout=namespace['layout_from_payload'](c['files'])
+assert layout.valid(p) and not layout.is_session(p) and p.resolve()==p and p.stat().st_uid==os.getuid()
 for name,value in c['files'].items():
- assert '/' not in name and name.endswith('.py')
+ assert '/' not in name and (name.endswith('.py') or name=='native-layout.json')
  (p/'install'/name).write_bytes(base64.b64decode(value))
 print(json.dumps({'updated':str(p),'modelPrompts':0}))
 """

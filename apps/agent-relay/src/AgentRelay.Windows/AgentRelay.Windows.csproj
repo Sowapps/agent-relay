@@ -12,6 +12,7 @@
   <ItemGroup><EmbeddedResource Include="Assets/agent-relay-logo.png" /></ItemGroup>
   <ItemGroup>
     <Content Include="../../wsl/*.py" Link="wsl/%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="../../wsl/native-layout.json" Link="wsl/native-layout.json" CopyToOutputDirectory="PreserveNewest" />
     <Content Include="../../tools/provision-wsl.py" Link="tools/provision-wsl.py" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
   <ItemGroup>

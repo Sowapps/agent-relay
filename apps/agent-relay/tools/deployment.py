@@ -13,6 +13,7 @@ import subprocess
 import time
 import uuid
 import re
+from host_identity import identity, resolve_host
 
 
 def read(path): return json.loads(path.read_text(encoding='utf-8-sig'))
@@ -47,16 +48,6 @@ def validate(runtime, root, development=False):
     validate_runtime(runtime, root, development)
 
 
-def identity(previous, data):
-    command = f'Get-CimInstance Win32_Process -Filter "ProcessId={int(previous["pid"])}" | Select-Object ExecutablePath,CommandLine | ConvertTo-Json -Compress'
-    result = subprocess.run(['pwsh', '-NoProfile', '-Command', command], capture_output=True, text=True, check=True, timeout=20)
-    if not result.stdout.strip(): return False
-    process = json.loads(result.stdout)
-    if os.path.normcase(process['ExecutablePath']) != os.path.normcase(runtime_command(previous)[0]) or not all(part in process['CommandLine'] for part in runtime_command(previous)) or ' tray ' not in process['CommandLine'] or str(data) not in process['CommandLine']:
-        raise RuntimeError('Recorded host identity changed; no process was stopped')
-    return True
-
-
 def launch(runtime, data, reports, show=False):
     identifier = uuid.uuid4().hex
     with (reports / (identifier + '.stdout.log')).open('wb') as output, (reports / (identifier + '.stderr.log')).open('wb') as errors:
@@ -89,13 +80,15 @@ def publish(data, prepared, reports, show):
         raise ValueError('This deployed version already identifies a different MCP contract. Increment the RC or stable version before deployment.')
     existing_pointer = read(data / 'mcp-runtime.json') if (data / 'mcp-runtime.json').is_file() else None
     existing_host = read(data / 'ui-host.json') if (data / 'ui-host.json').is_file() else None
-    if existing_pointer and existing_host and runtime_command(existing_pointer) == runtime_command(runtime) and identity(existing_host, data):
+    current_host = resolve_host(existing_host, data) if existing_pointer and existing_host and runtime_command(existing_pointer) == runtime_command(runtime) else None
+    if current_host is not None:
         probe = subprocess.run(runtime_command(runtime) + ['profiles', '--data-dir', str(data)], capture_output=True, timeout=8, creationflags=subprocess.CREATE_NO_WINDOW)
         if probe.returncode == 0:
             json.loads(probe.stdout)
             write(data / 'mcp-contract.json', contract)
             write(history_path, dict(history, **{contract['version']: contract['contractHash']}))
-            print(json.dumps({'published': False, 'alreadyCurrent': True, 'pid': existing_host['pid'], 'currentChatMcpQualified': False}))
+            write(data / 'ui-host.json', current_host)
+            print(json.dumps({'published': False, 'alreadyCurrent': True, 'pid': current_host['pid'], 'currentChatMcpQualified': False}))
             return
     reports.mkdir(parents=True, exist_ok=True); data.mkdir(parents=True, exist_ok=True)
     transaction = reports / ('deployment-' + uuid.uuid4().hex); transaction.mkdir()
@@ -108,12 +101,15 @@ def publish(data, prepared, reports, show):
     previous = read(metadata) if metadata.exists() else read(report_metadata) if report_metadata.exists() else None
     if previous is not None:
         validate(previous, root, development)
-    was_running = previous is not None and identity(previous, data)
+    previous = resolve_host(previous, data)
+    was_running = previous is not None
     if (data / 'relay.sqlite').exists():
         with closing(sqlite3.connect((data / 'relay.sqlite').as_uri() + '?mode=ro', uri=True)) as database:
             if database.execute("SELECT count(*) FROM work WHERE json_extract(payload,'$.state') IN ('pending','running')").fetchone()[0]:
                 raise RuntimeError('Active durable work exists; publication refused')
     if was_running:
+        if not identity(previous, data):
+            raise RuntimeError('Relay owner changed before shutdown; no process was stopped')
         os.kill(int(previous['pid']), signal.SIGTERM)
         for _ in range(50):
             try:

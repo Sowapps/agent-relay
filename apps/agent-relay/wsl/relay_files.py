@@ -5,15 +5,15 @@ import os
 from pathlib import Path
 import uuid
 import sqlite3
+from native_layout import load_layout
 
 
 def valid_root(value):
-    text = str(value)
-    return bool(re.fullmatch(r'/srv/agent-relay/var/apps/agent-relay/(sessions/[0-9a-f]{32}|profiles/[a-zA-Z0-9-]+)', text) or re.fullmatch(r'/srv/agent-relay-[a-zA-Z0-9-]+', text))
+    return load_layout().valid(value)
 
 
 def session_root(value):
-    return str(value).startswith('/srv/agent-relay/var/apps/agent-relay/sessions/') or Path(value).name.startswith('agent-relay-session-')
+    return load_layout().is_session(value)
 
 
 def root_path(value):

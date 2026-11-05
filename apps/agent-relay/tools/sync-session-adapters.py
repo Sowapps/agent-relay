@@ -3,6 +3,9 @@ import argparse
 import base64
 import json
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'wsl'))
+from native_layout import load_layout, payload_files
 import sqlite3
 import subprocess
 import uuid
@@ -24,11 +27,13 @@ if args.session_id:
     sessions = [session for session in sessions if session['id'] in selected]
     if {session['id'] for session in sessions} != selected:
         raise ValueError('A selected session is absent; no adapter was updated')
-files = {path.name: base64.b64encode(path.read_bytes()).decode() for path in (application / 'wsl').glob('*.py')}
+files = payload_files(application / 'wsl')
 script = '''
 import base64,json,os,pathlib,sys,uuid
 c=json.load(sys.stdin);s=c['session'];p=pathlib.Path(s['root'])
-assert (str(p)=='/srv/agent-relay/var/apps/agent-relay/sessions/'+uuid.UUID(s['id']).hex or str(p)=='/srv/agent-relay-session-'+uuid.UUID(s['id']).hex) and p.resolve()==p and p.stat().st_uid==os.getuid()
+namespace={};exec(base64.b64decode(c['files']['native_layout.py']),namespace)
+layout=namespace['layout_from_payload'](c['files'])
+assert layout.is_session(p,s['id']) and p.resolve()==p and p.stat().st_uid==os.getuid()
 assert json.loads((p/'provision-owner.json').read_text())=={'sessionId':s['id'],'user':s['template']['user']}
 install=p/'install';assert install.resolve()==install
 for name,value in c['files'].items():

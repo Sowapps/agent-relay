@@ -7,6 +7,8 @@
 
 This reference owns the deterministic local exchange path. Read [MVP architecture](mvp-architecture.md) for the external command/agent workflow used by the application window.
 
+For production project/session orchestration and its concrete capability owners, use [Projects, participants and adapters](projects-and-adapters.md). The local echo below is a deliberately retained demonstration/regression capability, not the production agent architecture.
+
 The core owns neutral message/reply contracts, route validation, correlation and idempotent exchange orchestration.
 Its persistence and responder ports contain no Windows, SQLite, pipe, WSL or AI-client types.
 Infrastructure owns SQLite and the current-user named-pipe protocol. Windows owns composition, tray/status UI and client commands.

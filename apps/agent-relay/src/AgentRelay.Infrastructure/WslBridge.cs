@@ -12,17 +12,8 @@ public sealed class WslBridge
         var result = await LocalProcess.RunAsync("wsl.exe", ["-d", profile.Distribution, "-u", profile.User, "--exec", "/usr/bin/python3",
             profile.Root + "/install/relay_bridge.py", action, profile.Root, profile.Client], RelayJson.Serialize(payload),
             timeout ?? TimeSpan.FromSeconds(action == "message" ? 135 : action == "start" ? 60 : action.StartsWith("transfer_", StringComparison.Ordinal) ? 180 : 20), token);
-        var text = result.Output;
-        if (result.ExitCode != 0)
-            {
-                try { using var parsed = JsonDocument.Parse(text); if (parsed.RootElement.TryGetProperty("error", out var failure)) text = failure.GetString() ?? text; }
-                catch (JsonException) { /* Preserve unstructured native diagnostics. */ }
-                var code = text.Contains("approval_required:", StringComparison.Ordinal) ? "approval_required" : text.Contains("destination_exists:", StringComparison.Ordinal) ? "destination_exists" :
-                    text.Contains("credential_reference_unavailable:", StringComparison.Ordinal) ? "credential_reference_unavailable" : text.Contains("authentication_required:", StringComparison.Ordinal) ? "agent_authentication_required" : text.Contains("unavailable:", StringComparison.Ordinal) ? "unavailable" :
-                    text.Contains("command_denied:", StringComparison.Ordinal) ? "command_denied" : "wsl_error";
-                throw new RelayException(code, string.IsNullOrWhiteSpace(text) ? result.Error[..Math.Min(2000, result.Error.Length)] : text[..Math.Min(4000, text.Length)]);
-            }
-            return RelayJson.Deserialize<JsonElement>(text);
+        if (result.ExitCode != 0) throw NativeFailures.Read(result.Output, result.Error);
+        return RelayJson.Deserialize<JsonElement>(result.Output);
     }
 }
 

@@ -1,6 +1,6 @@
 # Build and publish a release
 
-**Utility:** defines the repeatable portable-package, verification, tag and private publication process.  
+**Utility:** defines the repeatable portable-package, verification, tag and authorized publication process.  
 **Usage:** obtain explicit destination/version/publication authority, then use release.ps1 from a qualified source checkout.
 
 ## Version and build ownership
@@ -29,13 +29,13 @@ $releaseDirectory = '<exact RELEASE_DIRECTORY>'
 
 Verify extracts into a new directory containing spaces, checks every file hash and starts the actual packaged executable with nonexistent DOTNET_ROOT and PATH restricted to Windows System32. Windows initialization/MCP do not use PowerShell execution-policy exceptions. Scripted project-request generation alone uses the caller's already installed PowerShell7.2+, separately from end-user startup.
 
-The check adds two local-only projects through the packaged administrative route without dropping the first, exports a scoped connection, reads all five resources with actual stdio MCP, checks server SemVer and the24tool inventory, refuses foreign-project history and traversal resources, then restarts and tests duplicate-host ownership. It starts no WSL/native agent/model. Verification stops only its own child host, even on failure; it preserves artifacts and refuses overwriting a previous extraction.
+The check adds two local-only projects through the packaged administrative route without dropping the first, exports a scoped connection, reads all five resources with actual stdio MCP, checks server SemVer and the26tool inventory, refuses foreign-project history and traversal resources, then restarts and tests duplicate-host ownership. It starts no WSL/native agent/model. Verification stops only its own child host, even on failure; it preserves artifacts and refuses overwriting a previous extraction.
 
 Also launch the exact extracted app with --show, explicit test --data-dir and a unique --window-title. Capture only that returned application window, visually inspect actual rendering and quit the owned test instance. Store visual-verification.json beside verification.json with passed=true, matching archiveSha256, the observed window/capture identifier and inspected result. This file records a real observation, not a replacement for looking at the window. Locked desktop or capture refusal is a real gate: do not claim visual qualification without an actual successful render/capture.
 
 ## Tag and publish
 
-Review git status/diff, source file inventory and secret/data exclusion before the initial source push. .codex/, IDE settings, local/, bin/, obj/ and caches are ignored. The repository must already exist and be private; creation is a separate explicit authorized first-time action. Git credentials and organization permission are not provided by the script.
+Review git status/diff, source file inventory and secret/data exclusion before the initial source push. .codex/, IDE settings, local/, bin/, obj/ and caches are ignored. The repository must already exist with its explicitly selected visibility; creation or visibility changes are separately authorized actions. Git credentials and organization permission are not provided by the script. The current release.ps1 Publish action retains a legacy private-repository gate: public publication requires a separately authorized adjustment of that gate. Do not change repository visibility to satisfy it; local Package/Verify are unaffected.
 
 Commit the reviewed source and documentation. Then:
 

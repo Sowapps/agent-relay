@@ -38,6 +38,6 @@ Preserve the French and English terms in the [glossary](apps/agent-relay/doc/dev
 
 ## Development
 
-Follow the [workflow](doc/developing/workflow.md), [layout](doc/developing/workspace-layout.md) and [conventions](doc/developing/conventions.md).
+Follow the [design guide](doc/developing/design-guide.md), [workflow](doc/developing/workflow.md), [layout](doc/developing/workspace-layout.md) and [conventions](doc/developing/conventions.md). Locate the shared rule owner and complementary operations before changing behavior; preserve their invariants and targeted references.
 Qualify structural prerequisites before application implementation. Keep application rules and experiments inside their application.
 Do not interact with existing agent sessions, install software or create automatic startup mechanisms without authorization covering those actions.
