@@ -12,6 +12,17 @@ import native_clients
 
 
 class LifecycleGuardTests(unittest.TestCase):
+    def test_long_codex_prompt_is_pasted_then_submitted_once(self):
+        root = PurePosixPath('/owned/fixture')
+        prompt = 'Échange de qualification. ' * 90
+        buffer = 'relay-' + str(self.identifier)
+        with patch.object(native_clients, 'tmux') as tmux:
+            native_clients.submit_prompt(root, 'codex', str(self.identifier), prompt)
+        self.assertEqual([entry.args[1] for entry in tmux.call_args_list], ['load-buffer', 'paste-buffer', 'send-keys'])
+        self.assertEqual(tmux.call_args_list[0].kwargs['input_text'], prompt)
+        self.assertIn(buffer, tmux.call_args_list[1].args)
+        self.assertEqual(tmux.call_args_list[-1].args[-1], 'Enter')
+
     def setUp(self):
         self.identifier = uuid.uuid4()
         self.owner = {'sessionId': str(self.identifier), 'user': 'relay-test'}

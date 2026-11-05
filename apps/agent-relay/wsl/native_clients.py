@@ -59,9 +59,26 @@ def authentication(root, client):
     commit(cache,current);return current
 
 
-def tmux(root, *arguments, check=True):
+def tmux(root, *arguments, check=True, input_text=None):
     return subprocess.run(['tmux', '-S', str(root / 'tmux.sock'), '-f', str(root / 'tmux.conf'), *arguments],
-                          capture_output=True, text=True, check=check, timeout=10)
+                          input=input_text, capture_output=True, text=True, encoding='utf-8', check=check, timeout=10)
+
+
+def submit_prompt(root, client, identifier, prompt):
+    """Submit once after durable intent. @see send for correlation and no-replay semantics."""
+    if client == 'codex':
+        # Send one bracketed paste. A long burst of key events can consume Enter as part of the paste.
+        buffer = 'relay-' + str(uuid.UUID(identifier))
+        tmux(root, 'load-buffer', '-b', buffer, '-', input_text=prompt)
+        try:
+            tmux(root, 'paste-buffer', '-dpr', '-b', buffer, '-t', client)
+        except subprocess.CalledProcessError:
+            tmux(root, 'delete-buffer', '-b', buffer, check=False)
+            raise
+    else:
+        tmux(root, 'send-keys', '-l', '-t', client, prompt)
+        time.sleep(min(.5, .1 + len(prompt) / 2000))
+    tmux(root, 'send-keys', '-t', client, 'Enter')
 
 
 def start(root, client, allow_work=False, resume=False):
@@ -162,6 +179,7 @@ def status(root, client):
 
 
 def send(root, client, request):
+    """Retain intent before terminal input. @see submit_prompt for the single submission boundary."""
     launched = json.loads((root / client / 'launch-state.json').read_text()) if (root / client / 'launch-state.json').exists() else {'allowLocalWork': False}
     if launched['allowLocalWork'] != request.get('allowLocalWork', False):
         raise RuntimeError('unavailable: permissions changed; restart the dedicated session before sending')
@@ -185,9 +203,7 @@ def send(root, client, request):
         json.dump({'request': request, 'prompt': prompt}, stream)
         stream.flush()
         os.fsync(stream.fileno())
-    tmux(root, 'send-keys', '-l', '-t', client, prompt)
-    time.sleep(min(.5, .1 + len(prompt) / 2000))
-    tmux(root, 'send-keys', '-t', client, 'Enter')
+    submit_prompt(root, client, request['id'], prompt)
     deadline = time.monotonic() + 120
     checked = 0
     while time.monotonic() < deadline:
@@ -201,4 +217,4 @@ def send(root, client, request):
             if any(value in observed['pane'].lower() for value in AUTH_ATTENTION):
                 raise RuntimeError('execution_unknown: native login expired after dispatch; inspect effects and receipts before any new attempt')
         time.sleep(.5)
-    raise TimeoutError('unknown: reply not confirmed; prompt will not be replayed')
+    raise NativeFailure('reply_unconfirmed', 'No correlated native reply arrived before the deadline. Inspect the session before sending new work.')

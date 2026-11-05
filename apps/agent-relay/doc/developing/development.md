@@ -24,6 +24,8 @@ Old runtime versions are retained until explicitly cleaned after confirming no p
 
 ## Tests
 
+The Codex terminal adapter submits prompts as a bracketed paste followed by one Enter. A long burst of literal key events can leave text in the composer without creating a native turn. The durable intent marker still precedes terminal input and remains authoritative for no replay. A missing correlated reply keeps an uncertain outcome with code reply_unconfirmed. Inspect one retained request with tools/inspect-native-reply.py using explicit data, session and request IDs, and a private local output path. This reads the owned terminal and matching native transcript and receipt. It sends no terminal input.
+
 Design-foundation checks are model-free: tools/test-design-contracts.py exercises the shared layout corpus/package roundtrip, typed native errors and exact host-identity selection; tools/test-native-lifecycle.py checks admission before tmux. After the normal build, run AgentRelay.Tests.dll design-contracts with the absolute tests/AgentRelay.Tests/Fixtures/native-layout.json path for the C# side of the same corpus and MCP name-schema parity. No native agent or WSL is started by these checks.
 
 For actual stdio encoding qualification, seed a fresh explicit developer data directory using AgentRelay.Tests.dll design-fixture, then run tools/test-design-mcp.py with --runtime pointing to a prepared payload and --data to that fixture. It starts only its own relay host and MCP child, renames a retained closed fictitious session with Unicode through broker/worker/pipe, verifies exact retained text and shuts its children down. This is distinct from a real native lifecycle check and requires no model.
