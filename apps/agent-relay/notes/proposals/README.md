@@ -5,6 +5,8 @@
 
 ## Working documents
 
+- [Design guide audit and correction plan](2026-11-05-design-guide-audit.md): verified ownership/layering/reference/convention gaps, current strengths and dependency-ordered proposed lots; no source implementation.
+
 - [Storage cleanup review surface](2026-11-03-storage-review.md): extended fictional summary/category/runtime checks, preview, drawer and precise simulated result.
 
 - [Manual cleanup inventory and design](2026-11-02-manual-cleanup.md): recent-day/active-data protection, storage owners, fictional UI and a separately gated implementation proposal.
