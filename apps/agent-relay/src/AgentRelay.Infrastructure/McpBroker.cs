@@ -194,7 +194,10 @@ public sealed class McpBroker : IAsyncDisposable
         var runtime = Resolve(); var key = Key(runtime);
         if (selected == key && worker is { HasExited: false }) return;
         DropWorker(); data = runtime.Data;
-        var start = new ProcessStartInfo(runtime.Executable) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
+        var start = new ProcessStartInfo(runtime.Executable) { UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
+            StandardInputEncoding = new System.Text.UTF8Encoding(false), StandardOutputEncoding = System.Text.Encoding.UTF8,
+            StandardErrorEncoding = System.Text.Encoding.UTF8 };
         if (runtime.Assembly is not null) start.ArgumentList.Add(runtime.Assembly);
         start.ArgumentList.Add("mcp-worker"); start.ArgumentList.Add("--data-dir"); start.ArgumentList.Add(data);
         if (binding is { } id) { start.ArgumentList.Add("--connection-id"); start.ArgumentList.Add(id.ToString("D")); }

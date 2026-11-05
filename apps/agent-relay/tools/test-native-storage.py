@@ -7,6 +7,9 @@ import argparse
 import base64
 import json
 from pathlib import Path
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'wsl'))
+from native_layout import load_layout, payload_files
 import subprocess
 import uuid
 
@@ -75,7 +78,7 @@ if __name__ == '__main__':
     parser.add_argument('--distribution', required=True); parser.add_argument('--user', required=True); parser.add_argument('--report', required=True, type=Path)
     args = parser.parse_args(); application = Path(__file__).resolve().parents[1]
     payload = {'id': uuid.uuid4().hex, 'user': args.user, 'migration': Path(__file__).with_name('native-storage.py').read_text(),
-               'adapters': {path.name: base64.b64encode(path.read_bytes()).decode() for path in (application / 'wsl').glob('*.py')}}
+               'adapters': payload_files(application / 'wsl')}
     result = subprocess.run(['wsl.exe', '-d', args.distribution, '-u', 'root', '--exec', '/usr/bin/python3', '-c', SCRIPT],
                             input=json.dumps(payload).encode(), capture_output=True, timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
     if result.returncode:

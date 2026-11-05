@@ -1,0 +1,7 @@
+{
+  "id": "00112233-4455-6677-8899-aabbccddeeff",
+  "session": "/srv/agent-relay/var/apps/agent-relay/sessions/00112233445566778899aabbccddeeff",
+  "legacySession": "/srv/agent-relay-session-00112233445566778899aabbccddeeff",
+  "valid": ["/srv/agent-relay/var/apps/agent-relay/profiles/example", "/srv/agent-relay-example"],
+  "invalid": ["/home/example/project", "/srv/agent-relay/var/apps/agent-relay/sessions/../profiles/example", "/srv/agent-relay/var/apps/agent-relay/sessions/not-a-uuid", "/srv/agent-relay/var/apps/agent-relay/sessions/00112233445566778899aabbccddeeff\n"]
+}

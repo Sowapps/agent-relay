@@ -14,7 +14,10 @@ import sys
 def main():
     request = json.load(sys.stdin)
     account = pwd.getpwnam(request['user'])
-    base = Path('/srv/agent-relay/var/apps/agent-relay')
+    namespace = {}
+    exec(base64.b64decode(request['adapters']['native_layout.py']), namespace)
+    layout = namespace['layout_from_payload'](request['adapters'])
+    base = Path(layout.base)
     items = request['roots']
     action = request['action']
     assert action in ['probe', 'apply', 'commit', 'rollback']
@@ -23,8 +26,8 @@ def main():
     result = []
     for item in items:
         old, new = Path(item['source']), Path(item['destination'])
-        assert re.fullmatch('/srv/agent-relay-[a-zA-Z0-9-]+', str(old)), 'Source root must be an explicitly owned legacy relay root'
-        assert re.fullmatch('/srv/agent-relay/var/apps/agent-relay/(sessions/[0-9a-f]{32}|profiles/[a-zA-Z0-9-]+)', str(new))
+        assert layout.valid(old) and str(old).startswith(layout.legacy_prefix), 'Source root must be an explicitly owned legacy relay root'
+        assert layout.valid(new) and str(new).startswith(layout.base + '/')
         if action in ['probe', 'apply']:
             for parent in new.parents:
                 for name in ['CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md', '.claude/CLAUDE.md', '.claude/AGENTS.md']:
@@ -69,7 +72,7 @@ def main():
         result.append({'source': str(old), 'destination': str(new), 'bytes': total, 'ownerVerified': True, 'active': False})
         if action != 'apply': continue
         for parent in reversed([new.parent, *new.parent.parents]):
-            if str(parent).startswith('/srv/agent-relay'):
+            if parent==Path(layout.base) or Path(layout.base).is_relative_to(parent) and str(parent) not in ['/','/srv']:
                 if parent.exists(): assert parent.resolve() == parent and parent.stat().st_uid in [0, account.pw_uid]
                 else: parent.mkdir(mode=0o700); os.chown(parent, account.pw_uid, account.pw_gid)
         def ignore(folder, names):
@@ -93,7 +96,7 @@ def main():
                 file.write_text(text)
         install = new / 'install'; install.mkdir(exist_ok=True)
         for name, value in request['adapters'].items():
-            assert Path(name).name == name and name.endswith('.py')
+            assert Path(name).name == name and (name.endswith('.py') or name=='native-layout.json')
             (install / name).write_bytes(base64.b64decode(value))
         for path in [new, *new.rglob('*')]: os.chown(path, account.pw_uid, account.pw_gid, follow_symlinks=False)
         os.chmod(new, 0o700)

@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "base": "/srv/agent-relay/var/apps/agent-relay",
+  "sessions": "sessions",
+  "profiles": "profiles",
+  "legacyPrefix": "/srv/agent-relay-",
+  "legacySessionPrefix": "/srv/agent-relay-session-",
+  "protectedRoot": "/srv/agent-relay/var"
+}

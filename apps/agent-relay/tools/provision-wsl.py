@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import subprocess
 import uuid
+import sys
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--output', required=True)
@@ -17,12 +18,18 @@ parser.add_argument('--binding')
 parser.add_argument('--executable')
 args = parser.parse_args()
 application = Path(__file__).resolve().parents[1]
-root = '/srv/agent-relay/var/apps/agent-relay/sessions/' + args.session_id.hex if args.session_id else '/srv/agent-relay/var/apps/agent-relay/profiles/' + uuid.uuid4().hex
-files = {path.name: base64.b64encode(path.read_bytes()).decode() for path in (application / 'wsl').glob('*.py')}
+sys.path.insert(0, str(application / 'wsl'))
+from native_layout import load_layout, payload_files
+layout = load_layout()
+root = layout.session(args.session_id) if args.session_id else layout.profile(uuid.uuid4().hex)
+files = payload_files(application / 'wsl')
 setup = r'''
 import base64,json,os,pathlib,pwd,sys,re
-c=json.load(sys.stdin);p=pathlib.Path(c['root']);assert re.fullmatch('/srv/agent-relay/var/apps/agent-relay/(sessions/[0-9a-f]{32}|profiles/[0-9a-f]{32})',str(p)) and not p.is_symlink()
-assert p.name==c['sessionId'].replace('-','') if c.get('sessionId') else p.parent.name=='profiles'
+c=json.load(sys.stdin)
+namespace={};exec(base64.b64decode(c['files']['native_layout.py']),namespace)
+layout=namespace['layout_from_payload'](c['files'])
+p=pathlib.Path(c['root']);assert layout.valid(p) and str(p).startswith(layout.base+'/') and not p.is_symlink()
+assert str(p)==layout.session(c['sessionId']) if c.get('sessionId') else str(p).startswith(layout.profiles)
 account=pwd.getpwnam(c['user'])
 if p.exists():
  marker=json.loads((p/'provision-owner.json').read_text());assert c.get('sessionId') and marker=={'sessionId':c['sessionId'],'user':c['user']} and p.stat().st_uid==account.pw_uid
@@ -35,7 +42,7 @@ for parent in [p.parent,*p.parent.parents]:
  for name in ['CLAUDE.md','CLAUDE.local.md','AGENTS.md','.claude/CLAUDE.md','.claude/AGENTS.md']:
   assert not (parent/name).exists(), 'Inherited instruction file'
 for parent in reversed([p.parent,*p.parent.parents]):
- if str(parent).startswith('/srv/agent-relay'):
+ if parent==pathlib.Path(layout.base) or pathlib.Path(layout.base).is_relative_to(parent) and str(parent) not in ['/','/srv']:
   if parent.exists():assert not parent.is_symlink() and parent.stat().st_uid in [0,account.pw_uid]
   else:parent.mkdir(mode=0o700);os.chown(parent,account.pw_uid,account.pw_gid)
 p.mkdir(mode=0o700);(p/'install').mkdir();(p/'tmux.conf').write_text('set -g remain-on-exit on\nset -g history-limit 8000\n')

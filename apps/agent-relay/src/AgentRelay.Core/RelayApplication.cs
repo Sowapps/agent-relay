@@ -69,6 +69,8 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
         return await (hosts ?? throw new RelayException("adapter_unavailable", "No host-inspection adapter is installed.")).InspectAsync(endpoint, token);
     }
 
+    /// <summary>Open an authorized conversation using the shared session identity.</summary>
+    /// <seealso cref="ControlSessionAsync"/>
     public async Task<SessionSnapshot> OpenSessionAsync(CallerIdentity caller, Guid projectId, Guid endpointId, Guid workspaceId,
         Guid sessionId, string name, CancellationToken token)
     {
@@ -85,9 +87,9 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
         {
             policy.LocalWork(caller, projectId, workspaceId, endpointId);
         }
-        if (sessionId == Guid.Empty || string.IsNullOrWhiteSpace(name) || name.Length > 120 || name.Any(char.IsControl))
+        if (sessionId == Guid.Empty)
             throw new RelayException("invalid_session", "A stable session identifier and readable name are required.");
-        return await sessions.OpenAsync(new(sessionId, name.Trim(), scope, endpoint, workspace, localWork), token);
+        return await sessions.OpenAsync(new(sessionId, SessionNames.Normalize(name), scope, endpoint, workspace, localWork), token);
     }
 
     public async Task<SessionSnapshot> SessionAsync(CallerIdentity caller, Guid id, CancellationToken token)
@@ -107,6 +109,8 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
         return await sessions.ListAsync(query, caller.EndpointId, token);
     }
 
+    /// <summary>Control the same owned conversation opened by OpenSessionAsync; never substitute identity.</summary>
+    /// <seealso cref="OpenSessionAsync"/>
     public async Task<SessionSnapshot> ControlSessionAsync(CallerIdentity caller, Guid id, string action, CancellationToken token)
     {
         using var projectLease = Admission.Enter((await sessions.GetAsync(id, token)).Scope.ProjectId);
@@ -117,8 +121,7 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
             throw new RelayException("project_draining", "New session changes are suspended during archival; closing or interrupting existing work remains available.");
         if (action is not ("start" or "reopen" or "close" or "interrupt") && !action.StartsWith("rename:", StringComparison.Ordinal))
             throw new RelayException("invalid_operation", "Unknown session action.");
-        if (action.StartsWith("rename:", StringComparison.Ordinal) && (string.IsNullOrWhiteSpace(action[7..]) || action.Length > 127 || action.Any(char.IsControl)))
-            throw new RelayException("invalid_session", "A readable session name is required.");
+        if (action.StartsWith("rename:", StringComparison.Ordinal)) action = "rename:" + SessionNames.Normalize(action[7..]);
         if (action == "close" && work.IsSessionActive(id)) throw new RelayException("busy", "Inspect or interrupt the active operation before closing the session.");
         var result = await sessions.ControlAsync(session.Id, action, token);
         if (action == "interrupt") await work.InterruptSessionAsync(id, token);

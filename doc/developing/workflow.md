@@ -10,8 +10,14 @@ Present a concise scope and wait for explicit GO. Information does not authorize
 For work that can span compaction, retain the scoped GO, decisions, artifact locations and current checkpoint in a dated workstream record under `notes/workstreams/`.
 Update the checkpoint after material progress so a resumed agent can continue without repeating paid calls or expanding the authorization.
 
+If the goal tool refuses a new objective because an unrelated historic objective is unfinished, record that diagnostic and track this scope/timing in the workstream. Never falsely complete the unrelated objective or claim its consumption. Resume normal goal tracking when available; report unavailable metrics truthfully.
+
+The handoff checkpoint contains authorization/limits, objective, branch and last delivered commit, decisions and their owners, completed checks with retained output locations, unresolved risks and the exact next action. Before resuming, read AGENTS, the design guide and the relevant application decision/workstream, then inspect repository and objective state. An old GO or old test is not new authorization or fresh evidence.
+
 Before coding, identify the nominal scenario, important failure, ownership boundaries and structural prerequisites.
 Compare meaningful alternatives, make routine technical choices and record their reasons. Ask the operator about product choices or authorization, not unfamiliar technical details.
+
+For a significant design choice, use a dated application notes/decisions record: context, status, decision, alternatives, consequences, current owner and supersession. Reference operator evidence instead of copying it. Keep proposals separate from accepted decisions and link current docs to the owner only where useful.
 
 Qualify unfamiliar infrastructure with an isolated example in persistent local storage. A build cannot prove interactive debugging or an external integration.
 If a prerequisite is absent, record it, continue independent authorized work and prepare the next step. Do not silently install software or cross the gate.

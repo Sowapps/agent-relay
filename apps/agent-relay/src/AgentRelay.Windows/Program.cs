@@ -11,6 +11,11 @@ internal static class Program
         try
         {
             var options = LaunchOptions.Parse(arguments);
+            if (options.Mode is "mcp" or "mcp-worker")
+            {
+                Console.InputEncoding = new System.Text.UTF8Encoding(false);
+                Console.OutputEncoding = new System.Text.UTF8Encoding(false);
+            }
             return options.Mode == "tray" ? RunTray(options) : RunClientAsync(options).GetAwaiter().GetResult();
         }
         catch (Exception error)

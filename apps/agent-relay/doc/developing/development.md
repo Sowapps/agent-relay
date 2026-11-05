@@ -24,6 +24,12 @@ Old runtime versions are retained until explicitly cleaned after confirming no p
 
 ## Tests
 
+Design-foundation checks are model-free: tools/test-design-contracts.py exercises the shared layout corpus/package roundtrip, typed native errors and exact host-identity selection; tools/test-native-lifecycle.py checks admission before tmux. After the normal build, run AgentRelay.Tests.dll design-contracts with the absolute tests/AgentRelay.Tests/Fixtures/native-layout.json path for the C# side of the same corpus and MCP name-schema parity. No native agent or WSL is started by these checks.
+
+For actual stdio encoding qualification, seed a fresh explicit developer data directory using AgentRelay.Tests.dll design-fixture, then run tools/test-design-mcp.py with --runtime pointing to a prepared payload and --data to that fixture. It starts only its own relay host and MCP child, renames a retained closed fictitious session with Unicode through broker/worker/pipe, verifies exact retained text and shuts its children down. This is distinct from a real native lifecycle check and requires no model.
+
+With explicit native-test authorization, tools/test-design-native.py uses a separately seeded fresh design-fixture, --runtime, --data, --distribution and --user. It prepares a uniquely marked private qualification workspace under the native layout, performs open/ready/close through MCP without a prompt, retains the result and never enters user projects. Use a new fixture after a failed attempt; inspect uncertainty before any native retry.
+
 The integration executable reuses the actual core, SQLite store and Windows named pipes. It covers the nominal exchange, duplicate/conflicting identity,
 invalid input, denied route, absent record, malformed frame and listener recovery, restart persistence, second-host refusal and a busy use case.
 The small paused responder only controls concurrency in that last case; it does not replace the persistence or transport tests.

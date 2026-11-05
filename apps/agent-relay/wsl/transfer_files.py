@@ -2,6 +2,7 @@
 import hashlib
 import fcntl
 import os
+from native_layout import load_layout
 from pathlib import Path, PurePosixPath
 import uuid
 from relay_files import commit, workspace as assigned_workspace, session_root
@@ -34,7 +35,7 @@ def paths(root, client, request, create=False):
     target = workspace / relative
     if not target.resolve().is_relative_to(workspace):
         raise PermissionError('Path escaped the workspace')
-    protected = [Path('/srv/agent-relay/var'), root / 'install', *(root / name / 'data' for name in ['codex', 'claude', 'command'])]
+    protected = [Path(load_layout().protected_root), root / 'install', *(root / name / 'data' for name in ['codex', 'claude', 'command'])]
     if any(target == folder or target.is_relative_to(folder) for folder in protected):
         raise PermissionError('Private relay storage cannot be a transfer source or destination')
     private = root / client / 'data/staging/transfers'

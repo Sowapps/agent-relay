@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.RegularExpressions;
 
 namespace AgentRelay.Infrastructure;
 
@@ -45,6 +44,6 @@ public static class RuntimePaths
         if (File.Exists(Path.Combine(data, "migrated-to.json"))) throw new AgentRelay.Core.RelayException("relay_migrated", "Cette instance a été migrée. Rechargez la connexion MCP et utilisez le nouveau lanceur ; aucun nouveau journal ne sera créé ici.", effectsPossible: false);
     }
 
-    public static bool IsNativeRoot(string root) => Regex.IsMatch(root, "^/srv/agent-relay/var/apps/agent-relay/(sessions/[a-f0-9]{32}|profiles/[a-zA-Z0-9-]+)$") || Regex.IsMatch(root, "^/srv/agent-relay-[a-zA-Z0-9-]+$");
-    public static string NativeSession(Guid session) => "/srv/agent-relay/var/apps/agent-relay/sessions/" + session.ToString("N");
+    public static bool IsNativeRoot(string root) => NativeLayout.IsRoot(root);
+    public static string NativeSession(Guid session) => NativeLayout.Session(session);
 }

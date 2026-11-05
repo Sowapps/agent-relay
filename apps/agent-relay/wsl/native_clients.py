@@ -7,6 +7,8 @@ import time
 import shutil
 import uuid
 from relay_files import commit, messages, context, workspace, find_reply, root_path
+from native_layout import load_layout
+from native_errors import NativeFailure
 
 MESSAGE_POLICY = ('When useful while doing an authorized task, proactively send a short progress, clarification, or blocker message '
                   'using relay.send_message without in_reply_to. Do not wait for the human to name tools. '
@@ -63,6 +65,7 @@ def tmux(root, *arguments, check=True):
 
 
 def start(root, client, allow_work=False, resume=False):
+    """Start without a model; @see control for the complementary owned-runtime lifecycle."""
     folder = root / client
     assigned = workspace(root, client)
     binding = context(root, client)
@@ -116,17 +119,16 @@ def start(root, client, allow_work=False, resume=False):
 
 
 def control(root, client, stop=False):
+    """Close/interrupt only an owned session; @see start and provision-wsl.py for identity creation."""
     import pwd
     root = root_path(root)
     marker = root / 'provision-owner.json'
     if marker.is_symlink() or marker.stat().st_uid != os.getuid():
-        raise PermissionError('Lifecycle control requires a relay-owned session marker')
+        raise NativeFailure('capability_denied', 'Lifecycle control requires a relay-owned session marker', False)
     owner = json.loads(marker.read_text(encoding='utf-8'))
     identifier = uuid.UUID(owner.get('sessionId') or '')
-    allowed = ['/srv/agent-relay/var/apps/agent-relay/sessions/' + identifier.hex,
-               '/srv/agent-relay-session-' + identifier.hex]
-    if str(root) not in allowed or owner != {'sessionId': str(identifier), 'user': pwd.getpwuid(os.getuid()).pw_name}:
-        raise PermissionError('Lifecycle control is restricted to relay-created session roots')
+    if not load_layout().is_session(root, identifier) or owner != {'sessionId': str(identifier), 'user': pwd.getpwuid(os.getuid()).pw_name}:
+        raise NativeFailure('capability_denied', 'Lifecycle control is restricted to relay-created session roots', False)
     if tmux(root, 'has-session', '-t', client, check=False).returncode:
         return {'available': False, 'alreadyStopped': True}
     tmux(root, 'kill-session' if stop else 'send-keys', '-t', client, *([] if stop else ['C-c']))

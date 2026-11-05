@@ -5,6 +5,8 @@
 
 ## Records
 
+- [Design foundations implementation](2026-11-05-design-foundations.md): authorized five-lot design, factorization, boundary reliability and delivery work.
+
 - [Design guide audit](2026-11-05-design-guide-audit.md): authorized source/documentation audit and proposed correction lots, with no application edits or deployment.
 
 - [WSL session close correction](2026-11-05-wsl-session-close.md): current/legacy runtime ownership guard and model-free project-workspace lifecycle qualification.

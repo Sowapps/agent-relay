@@ -27,10 +27,12 @@ public sealed class ProjectCoordinator : IAsyncDisposable
         observation = new(database);
         var technical = new SettingsStore(dataDirectory);
         WorkService? activity = null;
-        adapter = new(dataDirectory, technical, Settings, store, id => activity?.IsSessionActive(id) ?? false);
-        Work = new(store, adapter, () => Settings.Load().Endpoints.Select(endpoint => new WorkCapability(endpoint.Id.ToString("D"), true, true, true)).ToArray(), technical.Load().MaximumConcurrency);
+        var native = NativeAdapterComposition.Create(dataDirectory, technical, Settings, store, id => activity?.IsSessionActive(id) ?? false);
+        adapter = native.Sessions;
+        var executor = native.Executor;
+        Work = new(store, executor, () => Settings.Load().Endpoints.Select(endpoint => new WorkCapability(endpoint.Id.ToString("D"), true, true, true)).ToArray(), technical.Load().MaximumConcurrency);
         activity = Work;
-        Application = new(new(Settings), Work, adapter, new ProjectJournal(database), new EndpointDiagnostics(technical), adapter, adapter, Settings);
+        Application = new(new(Settings), Work, adapter, new ProjectJournal(database), new EndpointDiagnostics(technical), executor, executor, Settings);
         archiveLoop = Task.Run(async () =>
         {
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(2));

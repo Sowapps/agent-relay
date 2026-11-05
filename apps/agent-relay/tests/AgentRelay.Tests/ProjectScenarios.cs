@@ -48,7 +48,7 @@ internal static class ProjectScenarios
         await workStore.SaveAsync(uncertain, CancellationToken.None);
         var receipts = new SqliteDocuments<TransferReceipt>(database, "transfers");
         await receipts.SaveAsync(operation.Id, new(operation.Id, operation.SessionId!.Value, new("upload", "a.bin", "b.bin"), new("file", "verified"), transfer, scope), CancellationToken.None);
-        var adapter = new ScopedSessions(data, new(data), store, workStore, _ => false);
+        var adapter = NativeAdapterComposition.Create(data, new(data), store, workStore, _ => false).Executor;
         if ((await adapter.ReconcileAsync(uncertain, CancellationToken.None)).State != "completed") throw new Exception("Durable scoped transfer receipt was not recovered.");
         var mismatch = uncertain with { Request = operation with { Scope = scope with { ProjectId = projectB } } };
         if ((await adapter.ReconcileAsync(mismatch, CancellationToken.None)).State != "unknown") throw new Exception("Foreign receipt was accepted.");

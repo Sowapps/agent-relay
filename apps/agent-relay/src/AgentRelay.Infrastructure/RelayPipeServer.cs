@@ -68,7 +68,9 @@ public sealed class RelayPipeServer : IDisposable
                     var authenticated = connections is null ? null : await connections.AuthenticateAsync(request.AccessToken, deadline.Token);
                     if (dataDirectory is not null && File.Exists(Path.Combine(dataDirectory, "maintenance.json")))
                     {
-                        var passive = request.Operation is "configuration" or "history" or "result" or "read" or "show_window" ||
+                        // McpFacade needs this authenticated read-only handshake before scoped reads during migration.
+                        // Keep handshake availability coupled to migration.qualify; it grants no work admission.
+                        var passive = request.Operation is "mcp_handshake" or "configuration" or "history" or "result" or "read" or "show_window" ||
                             request.Operation == "project" && request.ProjectAction is { } action &&
                             (action.Name is "configuration" or "describe_endpoints" or "list_sessions" or "list_results" or "list_events" or "get_result" || action.Name.StartsWith("observe_", StringComparison.Ordinal));
                         if (!passive) throw new RelayException("maintenance", "La migration est en cours. Les nouvelles opérations restent bloquées jusqu’à sa validation.");

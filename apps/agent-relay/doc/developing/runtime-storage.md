@@ -5,6 +5,8 @@
 
 ## Ownership and resolution
 
+Native layout facts have one packaged owner, wsl/native-layout.json, consumed by C# NativeLayout/RuntimePaths and Python native_layout. Provisioning, lifecycle, migration and helper synchronization must consume that owner. Preserve the definition with the helpers; do not infer a session solely from a basename prefix. Root recognition does not replace OS ownership and identity-marker validation.
+
 The operating installation root owns `var/apps/agent-relay/`. It is not `apps/agent-relay/var/` inside the source application. A portable installation at `C:\Tools\AgentRelay` defaults to `C:\Tools\AgentRelay\var\apps\agent-relay\default`. The checkout uses the same root-relative layout. Direct EXE launch, supplied CMD launchers and default development launch resolve the same scope; the working directory does not select storage.
 
 `installation.json` beside the binary declares `{ "version": 1, "root": ".." }` in an extracted package. Source staging supplies the relative path from its immutable binary directory to the checkout root. A missing descriptor requires an explicit `--data-dir`; no user-profile or local/ fallback is invented. `--data-dir` remains an exact operator choice, including an explicitly selected developer fixture. Initialization creates the runtime pointer; the first host/admin operation creates the durable store.

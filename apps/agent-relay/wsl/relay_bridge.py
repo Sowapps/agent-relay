@@ -7,6 +7,7 @@ import uuid
 from relay_files import commit, messages, root_path, context, message_page, workspace
 import native_clients
 from transfer_files import transfer
+from native_errors import envelope
 
 
 def main():
@@ -65,5 +66,5 @@ if __name__ == '__main__':
     try:
         print(json.dumps(main(), ensure_ascii=False))
     except Exception as error:
-        print(json.dumps({'error': str(error), 'type': type(error).__name__}))
+        print(json.dumps(envelope(error), ensure_ascii=True))
         raise SystemExit(1)

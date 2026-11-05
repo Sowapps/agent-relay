@@ -10,6 +10,9 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'wsl'))
+from native_layout import load_layout, payload_files
 import re
 import shutil
 import signal
@@ -21,6 +24,7 @@ import tomllib
 import uuid
 import winreg
 from deployment import exclusive, launch
+from host_identity import resolve_host
 import importlib.util
 _spec=importlib.util.spec_from_file_location('relay_register',Path(__file__).with_name('register-codex.py'))
 _registration=importlib.util.module_from_spec(_spec);_spec.loader.exec_module(_registration)
@@ -86,11 +90,9 @@ def plans(source, destination):
     dispatches = documents(source, 'dispatches'); native = {}; windows = []
     def profile(value, session=None):
         old = value['root']
-        if old.startswith('/srv/agent-relay/var/'): return old
-        if not re.fullmatch('/srv/agent-relay-[a-zA-Z0-9-]+', old): raise ValueError('Unqualified native root')
-        suffix = old.removeprefix('/srv/agent-relay-session-')
-        relative = 'sessions/' + suffix if re.fullmatch('[0-9a-f]{32}', suffix) else 'profiles/' + old.removeprefix('/srv/')
-        new = '/srv/agent-relay/var/apps/agent-relay/' + relative
+        layout=load_layout()
+        new=layout.current(old)
+        if new==old: return old
         key = (value['distribution'], value['user']); mappings = native.setdefault(key, {})
         item = {'source': old, 'destination': new}
         if session: item['sessionId'] = session
@@ -132,7 +134,7 @@ def plans(source, destination):
 
 
 def native_call(group, action, transaction):
-    adapters = {path.name: base64.b64encode(path.read_bytes()).decode() for path in Path(__file__).parents[1].joinpath('wsl').glob('*.py')}
+    adapters = payload_files(Path(__file__).parents[1] / 'wsl')
     payload = dict(group, action=action, transaction=transaction, adapters=adapters)
     result = subprocess.run(['wsl.exe', '-d', group['distribution'], '-u', 'root', '--exec', '/usr/bin/python3', '-c',
                              Path(__file__).with_name('native-storage.py').read_text()],
@@ -168,16 +170,9 @@ def replace_config(change, reverse=False):
 
 
 def current_host(source, runtime):
-    # Inventory only Agent Relay host candidates. Never identify a process from PID metadata alone.
-    command = "Get-CimInstance Win32_Process -Filter \"Name='AgentRelay.Windows.exe' OR Name='dotnet.exe'\" | Select-Object ProcessId,ExecutablePath,CommandLine | ConvertTo-Json -Compress"
-    response = subprocess.run(['pwsh', '-NoProfile', '-Command', command], capture_output=True, text=True, check=True, timeout=20)
-    values = json.loads(response.stdout) if response.stdout.strip() else []
-    if isinstance(values, dict): values = [values]
-    matches = [value for value in values if value.get('CommandLine') and str(source) in value['CommandLine'] and ' tray ' in value['CommandLine']
-               and os.path.normcase(value.get('ExecutablePath') or '') == os.path.normcase(runtime_command(runtime)[0])
-               and all(part in value['CommandLine'] for part in runtime_command(runtime))]
-    if len(matches) > 1: raise RuntimeError('Multiple source owners; migration refused')
-    return matches[0] if matches else None
+    """@see deployment.publish: migration shares the exact owned-host identity rules."""
+    owner = resolve_host(runtime, source)
+    return {'ProcessId': owner['pid']} if owner is not None else None
 
 
 def copy_owned(source, target):

@@ -44,6 +44,8 @@ public sealed class FileTransferService(SessionService sessions, WslBridge bridg
         return target;
     }
 
+    /// <summary>Confirm the exact published transfer; absence is uncertainty, never permission to replay.</summary>
+    /// <seealso cref="ExecuteAsync"/>
     public async Task<WorkResult?> ReceiptAsync(WorkRequest request, CancellationToken token)
     {
         var receipt = await receipts.FindAsync(request.Id, token);
@@ -67,6 +69,7 @@ public sealed class FileTransferService(SessionService sessions, WslBridge bridg
         return new(request.Id, destination, bytes, exists, remove && exists);
     }
 
+    /// <seealso cref="ReceiptAsync"/>
     public async Task<WorkResult> ExecuteAsync(WorkRequest request, CancellationToken token, WslProfile? selectedProfile = null, string? localWorkspace = null, bool uploadAuthorized = false)
     {
         var session = await sessions.FindAsync(request.SessionId!.Value, token);
