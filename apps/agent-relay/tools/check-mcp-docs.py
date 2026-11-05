@@ -2,6 +2,7 @@
 import argparse
 import ast
 import json
+from itertools import takewhile
 from pathlib import Path
 import re
 import sys
@@ -29,8 +30,9 @@ with (output/'facade.stderr.log').open('w',encoding='utf-8') as errors:
         assert 'agent-relay://docs/quickstart' in client.initialization['instructions']
         tools={tool['name']:tool['inputSchema'] for tool in client.call('tools/list')['tools']}
         table=guides['agent-relay://docs/tools']
-        rows=[line.split('|')[1:4] for line in table.splitlines() if line.startswith('| ') and line.split('|')[1].strip() in tools]
-        assert {cells[0].strip() for cells in rows}==set(tools),'Guide tool inventory differs from live schema'
+        inventory=table.split('| Tool | Required arguments | Optional arguments / effect |', 1)[1].strip().splitlines()
+        rows=[line.split('|')[1:4] for line in takewhile(lambda line: line.startswith('|'), inventory[1:])]
+        assert sorted(cells[0].strip() for cells in rows)==sorted(tools),'Guide tool inventory differs from live schema'
         for name,required,_ in rows:
             required=required.strip()
             assert ([] if required=='none' else [x.strip() for x in required.split(',')])==tools[name.strip()]['required'],name

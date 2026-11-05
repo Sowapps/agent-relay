@@ -49,6 +49,8 @@ Full configuration/technical-binding changes acquire an exclusive admission barr
 
 ## Protocol and retrieval
 
+McpToolCatalog owns each advertised tool's schema, argument validation and translation to a host action. Compatibility aliases reuse their canonical route. The authenticated facade owns connection checks and transport, while ProjectCoordinator owns execution and project policy. Check the live reference and route tests when changing a registration.
+
 The stdio facade identifies itself as agent-relay with the packaged application SemVer and implements JSON-RPC2.0 with protocol2025-11-25. Unsupported methods/arguments fail explicitly. Input is read in bounded chunks and checked against a1MiB UTF-8 frame budget; named pipes use the same byte ceiling. MCP schemas require explicit project/session/artifact identities and reject unknown fields. Large full details can be refused; filtered previews remain available.
 
 ProjectJournal applies project/endpoint/session/task/type/state/date filters in SQL, with content/label search rather than accidental raw JSON matches. Pages have stable row cursors, count limits and a400KiB payload budget for Unicode expansion. Native inbox imports use per-session SQLite cursors, deduplication and rotating bounded session batches. One consumer does not mark messages globally read. Native WSL capability remains messages only; received text never becomes a Windows command.

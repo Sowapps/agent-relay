@@ -5,6 +5,8 @@
 
 ## Records
 
+- [A05 MCP tool registry](2026-11-05-mcp-tool-registry.md): schema, validation and dispatch consistency.
+
 - [AP missing native reply](2026-11-05-ap-missing-reply.md): authorized no-replay diagnosis/correction and one minimal read-only model proof.
 
 - [Design foundations implementation](2026-11-05-design-foundations.md): authorized five-lot design, factorization, boundary reliability and delivery work.
