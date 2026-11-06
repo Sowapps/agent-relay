@@ -5,6 +5,8 @@
 
 ## Records
 
+- [Application journey coverage](2026-11-06-application-coverage.md): retained observations, qualification gaps and release priorities.
+
 - [A01–A11 final design audit handoff](2026-11-06-design-audit-handoff.md): decisions, verification, installed baseline and next authorization boundary.
 
 - [A08–A10 audit closure](2026-11-06-audit-a08-a10.md): retained native lifecycle proof, code convention correction and exact host path regression.
