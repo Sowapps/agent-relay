@@ -4,7 +4,7 @@ Utility: Build, verify or publish the versioned portable Windows release.
 Usage: Package, then Verify with -Directory from package output; Publish requires a clean tagged source tree and that exact verified archive. External publication requires explicit authorization.
 #>
 [CmdletBinding()]
-param([Parameter(Mandatory)][ValidateSet('Lock','Package','Verify','Tag','PlanPublish','Publish')][string]$Action, [string]$Directory, [string]$Repository)
+param([Parameter(Mandatory)][ValidateSet('Lock','Package','Verify','Tag','PlanPublish','Publish')][string]$Action, [string]$Directory, [string]$Repository,[switch]$Offline)
 $ErrorActionPreference='Stop'
 $PSNativeCommandUseErrorActionPreference=$false
 $root=Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent
@@ -26,7 +26,13 @@ if($Action -in @('Lock','Package')){
     $Directory=Join-Path $root ('local/apps/agent-relay/releases/'+$tag+'/'+[guid]::NewGuid().ToString('N'))
     $payload=Join-Path $Directory 'payload';$binary=Join-Path $payload 'app'
     New-Item -ItemType Directory -Path $binary -Force | Out-Null
-    Invoke-AppDotnet $context (@('publish','src/AgentRelay.Windows/AgentRelay.Windows.csproj','-c','Release','-r','win-x64','--self-contained','true','--disable-build-servers','-p:RestoreLockedMode=true','-p:UseSharedCompilation=false','-p:DebugType=None','-p:DebugSymbols=false','-o',$binary)+$releaseProperties)
+    $publish=@('publish','src/AgentRelay.Windows/AgentRelay.Windows.csproj','-c','Release','-r','win-x64','--self-contained','true','--disable-build-servers','-p:RestoreLockedMode=true','-p:UseSharedCompilation=false','-p:DebugType=None','-p:DebugSymbols=false','-o',$binary)+$releaseProperties
+    if($Offline){
+        $configuration=Join-Path $Directory 'offline.NuGet.Config'
+        '<configuration><packageSources><clear /></packageSources></configuration>' | Set-Content -LiteralPath $configuration -Encoding utf8
+        $publish+=@('--configfile',$configuration,'-p:NuGetAudit=false')
+    }
+    Invoke-AppDotnet $context $publish
     Copy-Item -Path (Join-Path $app 'packaging/*') -Destination $payload -Recurse
     New-Item -ItemType Directory -Path (Join-Path $payload 'tools') -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $app 'doc/using/examples/new-project-request.ps1') -Destination (Join-Path $payload 'tools/new-project-request.ps1')

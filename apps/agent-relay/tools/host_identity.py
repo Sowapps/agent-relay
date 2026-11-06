@@ -53,9 +53,14 @@ def matches(process, runtime, data):
 def processes(runtime):
     executable = runtime_command(runtime)[0]
     name = Path(executable).name.replace("'", "''")
-    script = "Get-CimInstance Win32_Process -Filter \"Name='" + name + "'\" | Select-Object ProcessId,ExecutablePath,CommandLine | ConvertTo-Json -Compress"
-    result = subprocess.run(['pwsh', '-NoProfile', '-Command', script], capture_output=True, text=True,
-                            encoding='utf-8', check=True, timeout=20, creationflags=subprocess.CREATE_NO_WINDOW)
+    script = ("[Console]::OutputEncoding=[Text.UTF8Encoding]::new(); "
+              "Get-CimInstance Win32_Process -ErrorAction Stop -Filter \"Name='" + name + "'\" | "
+              "Select-Object ProcessId,ExecutablePath,CommandLine | ConvertTo-Json -Compress")
+    result = subprocess.run(['pwsh', '-NoProfile', '-Command', script], capture_output=True,
+                            text=True, encoding='utf-8', errors='replace', timeout=20,
+                            creationflags=subprocess.CREATE_NO_WINDOW)
+    if result.returncode:
+        raise RuntimeError(f'Cannot verify host identity through Windows process inventory (exit {result.returncode})')
     value = json.loads(result.stdout) if result.stdout.strip() else []
     return value if isinstance(value, list) else [value]
 

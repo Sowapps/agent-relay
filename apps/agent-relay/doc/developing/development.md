@@ -62,6 +62,21 @@ Process inspection must use the execution context that owns or can inspect the l
 Python's SQLite connection context commits/rolls back a transaction but does not close the connection. Publication uses contextlib.closing explicitly: a lingering read connection can prevent Windows from archiving a failed database during rollback. Snapshot the protected credential files together with their hashed database bindings so a copied preflight or restored database can authenticate correctly.
 Native startup can stop at a login-expired or update-selection screen even after the message MCP initialized. Classify it as attention-required. Disable Codex startup update checks only in the relay-managed invocation; do not install/update global clients while trying to reconnect a conversation.
 
+## Isolated delivery
+
+Use `python -B apps/agent-relay/tools/isolated-delivery.py <action>` from the checkout.
+
+| Action | Effect |
+| --- | --- |
+| `build`, `test` | Offline development build or repeatable integration suite using the local qualified toolchain. |
+| `run` | Build and launch a fresh development instance with a synthetic project and a scoped `agent_relay_dev` MCP fragment. The phase log records both paths. Quit it from the application. Rerun for a fresh scope. The fragment is an export and never changes client settings. |
+| `qualify` | Package the current clean RC commit offline and run the portable verifier on the exact ZIP. |
+| `rehearse --receipt <absolute-result.json>` | Recheck commit and ZIP checksum. Exercise the actual deployment transaction and injected rollback on synthetic data from the verified archive. Use only the installed baseline binary, never its data or credentials. |
+
+Every invocation reports its result under `var/apps/agent-relay/isolated-delivery/`, with phase logs, durations, attempts, Git identity, disk space before/after and candidate size and checksum when applicable. Automated checks use zero model calls. Manual activity during a development run is not measured by the wrapper. Current account consumption and optional per-process CPU/memory are separate measurements and are not inferred from elapsed time. A retained development scope can be examined independently of subsequent runs.
+
+Pilotage AP currently uses the protected `var/apps/agent-relay/v1-qualification` scope. Development and candidate commands observe its identity and selected configuration hashes without writing to it. The local deployment transaction refuses that scope and overlapping paths. A stable deployment needs an explicit authorization and a separate promotion entry point. The portable verifier covers packaged startup and scoped MCP without model or WSL calls. Use the coverage matrix to plan separate native, GUI and fault checks before accepting a release.
+
 ## Current limits
 
 The local echo is a deterministic regression adapter. The application uses the [MVP command/agent workflow](mvp-architecture.md), with native clients and a separate inbound message capability.
