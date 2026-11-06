@@ -4,7 +4,6 @@ from contextlib import closing
 import importlib.util
 import json
 from pathlib import Path
-import queue
 import shutil
 import sqlite3
 import subprocess
@@ -16,7 +15,16 @@ from relay_mcp import RelayMcp
 from runtime_layout import runtime_command
 
 
-def main(first_pointer, next_pointer):
+class ObservedMcp(RelayMcp):
+    def __init__(self, *arguments):
+        self.notifications = []
+        super().__init__(*arguments)
+
+    def notification_received(self, message):
+        self.notifications.append(message['method'])
+
+
+def main(first_pointer, next_pointer, broker_pointer=None):
     root = Path(__file__).resolve().parents[3]
     identifier = uuid.uuid4().hex
     fixture = root / 'local/apps/agent-relay/qualification' / ('mcp-update-' + identifier); fixture.mkdir(parents=True)
@@ -37,13 +45,15 @@ def main(first_pointer, next_pointer):
     for name in ['configure-project.request.json', 'connection.request.json']: run([exe, 'admin', '--data-dir', data, '--input', request / name])
     run([exe, 'initialize', '--data-dir', data, '--connection-id', context['connectionId']])
     exported = json.loads((data / 'mcp-runtime.json').read_text(encoding='utf-8'))
-    broker = exported['mcpExecutable']; first['connectionId'] = context['connectionId']; second['connectionId'] = context['connectionId']
+    broker = exported['mcpExecutable']
+    active_broker = runtime_command(json.loads(broker_pointer.read_text(encoding='utf-8-sig')))[0] if broker_pointer else broker
+    first['connectionId'] = context['connectionId']; second['connectionId'] = context['connectionId']
     host = launch(first, data, reports)
     result = {'modelCalls': 0, 'nativeAgentCalls': 0, 'fixture': str(fixture)}
     client = None
     try:
         with (reports / 'mcp.stderr.log').open('w', encoding='utf-8') as errors:
-            client = RelayMcp(dict(first, executable=broker), data, root, errors)
+            client = ObservedMcp(dict(first, executable=active_broker), data, root, errors)
             assert len(client.inventory) == 26
             before = client.tool('get_connection_status'); result['initialVersion'] = before['version']
             assert not before['clientRefreshRequired']
@@ -83,26 +93,31 @@ def main(first_pointer, next_pointer):
             assert one['updated'] == 1 and two['updated'] == 0 and config.read_bytes() == raw
             assert tomllib.loads(raw.decode())['model'] == 'preserved' and context['connectionId'] in raw.decode()
             assert one['clientRefresh']['state'] == 'unsupported' and one['clientRefresh']['sameClientVerified'] is False
+            assert one['hostVerification']['freshScopedConnectionsVerified']
+            assert one['existingChatVerification'] == 'unconfirmed'
             result['idempotentRegistrationAndUnsupportedClient'] = True
             # Keep the original outer stdio process alive while host/runtime/contract change.
             original_pid = client.process.pid
-            host.terminate(); host.wait(timeout=10)
+            # Change the pointer and send the next request without waiting for a monitor tick.
             write(data / 'mcp-runtime.json', dict(second, mcpExecutable=broker))
+            mismatch = client.call('tools/call', {'name': 'list_projects', 'arguments': {}})
+            error = mismatch['structuredContent']['error']
+            assert mismatch['isError'] and error['code'] == 'runtime_contract_mismatch'
+            assert error['recovery'] == 'inspect_relay_runtime' and error['execution'] == 'not_started'
+            host.terminate(); host.wait(timeout=10)
             host = launch(second, data, reports)
-            time.sleep(1.2)
-            notices = []
-            while True:
-                try: notices.append(client.incoming.get_nowait())
-                except queue.Empty: break
-            assert any(item and item.get('method') == 'notifications/tools/list_changed' for item in notices)
+            assert client.notifications.count('notifications/tools/list_changed') == 1
+            assert client.notifications.count('notifications/resources/list_changed') == 1
             changed = client.tool('get_connection_status'); result['updatedVersion'] = changed['version']
             assert changed['version'] != before['version'] and changed['contractHash'] != before['contractHash'] and changed['clientRefreshRequired']
             blocked = client.call('tools/call', {'name': 'execute_command', 'arguments': {'project_id': context['projectId'], 'endpoint_id': context['peerId'], 'workspace_id': context['peerWorkspaceId'], 'command_id': 'not-executed'}})
-            assert blocked['isError'] and blocked['structuredContent']['error']['code'] == 'connection_outdated'
-            assert blocked['structuredContent']['error']['execution'] == 'not_started'
+            error = blocked['structuredContent']['error']
+            assert blocked['isError'] and error['code'] == 'client_catalog_outdated'
+            assert error['recovery'] == 'reload_client_connection' and error['execution'] == 'not_started'
             assert client.process.pid == original_pid
             client.call('tools/list')
             assert not client.tool('get_connection_status')['clientRefreshRequired']
+            assert client.tool('list_projects')['configuration']['projects'][0]['id'] == context['projectId']
             guide = client.call('resources/read', {'uri': 'agent-relay://docs/bootstrap'})['contents'][0]['text']
             assert guide.replace('\r\n', '\n') == (Path(second['executable']).parent / 'documentation/bootstrap.md').read_text(encoding='utf-8-sig').replace('\r\n', '\n')
             # A contract version cannot be reused, even when a host is currently running.
@@ -134,4 +149,5 @@ def main(first_pointer, next_pointer):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--runtime-pointer', required=True, type=Path); parser.add_argument('--next-runtime-pointer', required=True, type=Path)
-    args = parser.parse_args(); main(args.runtime_pointer.resolve(), args.next_runtime_pointer.resolve())
+    parser.add_argument('--broker-pointer', type=Path, help='Use the candidate as the retained stdio broker')
+    args = parser.parse_args(); main(args.runtime_pointer.resolve(), args.next_runtime_pointer.resolve(), args.broker_pointer)

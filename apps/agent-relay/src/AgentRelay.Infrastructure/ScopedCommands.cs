@@ -13,12 +13,17 @@ public sealed class ScopedCommands(string data, SettingsStore technical, Project
     public async Task<WorkResult> ExecuteAsync(CallerIdentity caller, WorkRequest request, CancellationToken token)
     {
         var scope = request.Scope!;
-        var configuration = projects.Load();
         var policy = new ProjectPolicy(projects);
-        var member = policy.Demand(caller, scope.ProjectId, RelayCapabilities.RunCommand);
-        if (!(member.CommandIds ?? []).Contains(request.CommandId)) throw new RelayException("command_denied", "The command grant was revoked.");
-        var workspace = policy.Workspace(caller, scope.ProjectId, scope.WorkspaceId!.Value, false, scope.RecipientId);
-        var endpoint = configuration.Endpoints.Single(item => item.Id == scope.RecipientId);
+        RelayWorkspace workspace;
+        RelayEndpoint endpoint;
+        using (policy.Pin())
+        {
+            var member = policy.Demand(caller, scope.ProjectId, RelayCapabilities.RunCommand);
+            if (!(member.CommandIds ?? []).Contains(request.CommandId))
+                throw new RelayException("command_denied", "The command grant was revoked.");
+            workspace = policy.Workspace(caller, scope.ProjectId, scope.WorkspaceId!.Value, false, scope.RecipientId);
+            endpoint = policy.Configuration().Endpoints.Single(item => item.Id == scope.RecipientId);
+        }
         var binding = technical.Load().Profiles.SingleOrDefault(item => item.Id == endpoint.BindingId && item.Client == "command")
             ?? throw new RelayException("adapter_unavailable", "A configured direct-command adapter is required.");
         var command = binding.Commands.SingleOrDefault(item => item.Id == request.CommandId) ?? throw new RelayException("command_denied", "Command is not configured.");

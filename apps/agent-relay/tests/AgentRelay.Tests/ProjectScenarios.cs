@@ -25,6 +25,13 @@ internal static class ProjectScenarios
             { Capabilities = member.Capabilities.Append(RelayCapabilities.LocalWork).ToArray(), Workspaces = [new(workspace, true, true)] } : member).ToArray() };
         store.Save(nativeConfiguration); policy.LocalWork(caller, projectA, workspace, secondary);
         Refused(() => policy.Transfer(caller, projectA, new(new(secondary, workspace, "source"), new(secondary, workspace, "destination"))));
+        var draining = nativeConfiguration with { Projects = [new(projectA, "A", ArchiveRequested: true), new(projectB, "B")] };
+        store.Save(draining);
+        Refused(() => policy.LocalWork(caller, projectA, workspace, secondary), "project_draining");
+        policy.RetainedLocalWork(caller, projectA, workspace, secondary);
+        store.Save(draining with { Memberships = draining.Memberships.Select(member => member.EndpointId == secondary
+            ? member with { Workspaces = [new(workspace, true)] } : member).ToArray() });
+        Refused(() => policy.RetainedLocalWork(caller, projectA, workspace, secondary));
         store.Save(configuration); store.SetEnabled(projectA, false, true);
         Refused(() => policy.Message(caller, projectA, secondary), "project_archived");
         Console.WriteLine("PASS: neutral two-project membership, sender/recipient scope, role-independent grants and revocation");

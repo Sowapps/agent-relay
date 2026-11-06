@@ -5,6 +5,8 @@
 
 ## Records
 
+- [MCP refresh, design review and RC promotion rehearsal](2026-11-06-mcp-catalog-review.md): authorized lots 1–4 and resume gates.
+
 - [Post-audit tool cleanup](2026-11-06-audit-tooling-polish.md): bounded code cleanup, release evidence and read-only report lookup.
 
 - [Isolated Agent Relay delivery](2026-11-06-isolated-delivery.md): dev/RC isolation, measured qualification and stable protection.

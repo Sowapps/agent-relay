@@ -86,7 +86,7 @@ public static class McpFacade
             if (handshake.ConnectionId != connectionId.Value) throw new RelayException("authentication_required", "The credential does not match this explicitly selected connection identity.", false);
             var identity = McpIdentity.Current;
             if (handshake.Identity.ContractHash != identity.ContractHash || handshake.Identity.Version != identity.Version)
-                throw new RelayException("connection_outdated", "The MCP worker and host use different versions/contracts. Reconnect to the selected deployment.", effectsPossible: false);
+                throw new RelayException("runtime_contract_mismatch", "The MCP worker and relay host use different versions or contracts. Check the selected runtime.", effectsPossible: false);
             var catalog = parameters.TryGetProperty("_meta", out var meta) && meta.TryGetProperty("agentRelayContract", out var provided) ? provided.GetString() : null;
             if (tool.Route is null)
             {
@@ -96,7 +96,7 @@ public static class McpFacade
                 return new { structuredContent = status, content = new[] { new { type = "text", text = RelayJson.Serialize(status) } } };
             }
             if (parameters.TryGetProperty("_meta", out var brokerMeta) && brokerMeta.TryGetProperty("agentRelayContract", out _) && catalog != identity.ContractHash && !tool.AllowStaleCatalog)
-                throw new RelayException("connection_outdated", "This client still advertises an old relay contract. Reload its MCP tools before submitting work.", effectsPossible: false);
+                throw new RelayException("client_catalog_outdated", "This client has not loaded the current relay tools. Reload its MCP connection before submitting work.", effectsPossible: false);
             var action = tool.Route(new(arguments));
             var response = (await client.RequestRawAsync(new("project", ProjectAction: action, AccessToken: secret), CancellationToken.None)).GetProperty("project").Clone();
             return new { structuredContent = response, content = new[] { new { type = "text", text = RelayJson.Serialize(response) } } };

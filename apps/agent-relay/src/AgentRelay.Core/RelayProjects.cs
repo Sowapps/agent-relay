@@ -80,14 +80,20 @@ public sealed class ProjectPolicy(IProjectConfigurationStore configuration)
     public ProjectMembership Demand(CallerIdentity caller, Guid projectId, string capability)
     {
         var value = Configuration();
+        var member = DemandGrant(value, caller, projectId, capability);
+        var project = value.Projects.Single(project => project.Id == projectId);
+        if (!project.Enabled && capability is not (RelayCapabilities.ReadHistory or RelayCapabilities.ManageProject or RelayCapabilities.ReceiveMessage))
+            throw new RelayException("project_archived", "This project is archived. Its retained history is readable; reactivate it before new operations.");
+        if (project.ArchiveRequested && capability is not (RelayCapabilities.ReadHistory or RelayCapabilities.ReceiveMessage or RelayCapabilities.ManageProject or RelayCapabilities.ManageSession))
+            throw new RelayException("project_draining", "Archival is pending. New work is suspended while existing work finishes.");
+        return member;
+    }
+
+    private static ProjectMembership DemandGrant(ProjectConfiguration value, CallerIdentity caller, Guid projectId, string capability)
+    {
         if (!caller.ProjectIds.Contains(projectId) || !value.Projects.Any(project => project.Id == projectId)) Denied();
         var member = value.Memberships.SingleOrDefault(item => item.ProjectId == projectId && item.EndpointId == caller.EndpointId);
         if (member is null || !member.Capabilities.Contains(capability, StringComparer.Ordinal)) Denied();
-        if (!value.Projects.Single(project => project.Id == projectId).Enabled && capability is not (RelayCapabilities.ReadHistory or RelayCapabilities.ManageProject or RelayCapabilities.ReceiveMessage))
-            throw new RelayException("project_archived", "This project is archived. Its retained history is readable; reactivate it before new operations.");
-        var project = value.Projects.Single(project => project.Id == projectId);
-        if (project.ArchiveRequested && capability is not (RelayCapabilities.ReadHistory or RelayCapabilities.ReceiveMessage or RelayCapabilities.ManageProject or RelayCapabilities.ManageSession))
-            throw new RelayException("project_draining", "Archival is pending. New work is suspended while existing work finishes.");
         return member!;
     }
 
@@ -119,8 +125,25 @@ public sealed class ProjectPolicy(IProjectConfigurationStore configuration)
 
     public void LocalWork(CallerIdentity caller, Guid projectId, Guid workspaceId, Guid recipientId)
     {
+        using var lease = Pin();
         var sender = Demand(caller, projectId, RelayCapabilities.LocalWork);
-        var value = Configuration(); var workspace = value.Workspaces.SingleOrDefault(item => item.Id == workspaceId && item.EndpointId == recipientId);
+        DemandLocalWorkspace(Configuration(), sender, projectId, workspaceId, recipientId);
+    }
+
+    /// <summary>Revalidate native grants while an active project drains previously admitted work.</summary>
+    /// <seealso cref="LocalWork"/>
+    public void RetainedLocalWork(CallerIdentity caller, Guid projectId, Guid workspaceId, Guid recipientId)
+    {
+        var value = Configuration();
+        var sender = DemandGrant(value, caller, projectId, RelayCapabilities.LocalWork);
+        if (!value.Projects.Single(project => project.Id == projectId).Enabled)
+            throw new RelayException("project_archived", "The selected project's native session is archived.");
+        DemandLocalWorkspace(value, sender, projectId, workspaceId, recipientId);
+    }
+
+    private static void DemandLocalWorkspace(ProjectConfiguration value, ProjectMembership sender, Guid projectId, Guid workspaceId, Guid recipientId)
+    {
+        var workspace = value.Workspaces.SingleOrDefault(item => item.Id == workspaceId && item.EndpointId == recipientId);
         var receiver = value.Memberships.SingleOrDefault(item => item.ProjectId == projectId && item.EndpointId == recipientId);
         bool Writes(ProjectMembership member) => member.Workspaces.Any(access => access.WorkspaceId == workspaceId && access.Read && access.Write);
         if (workspace is null || receiver is null || !receiver.Capabilities.Contains(RelayCapabilities.LocalWork) || !Writes(sender) || !Writes(receiver)) Denied();

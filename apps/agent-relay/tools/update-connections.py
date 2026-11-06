@@ -48,6 +48,9 @@ def update(data, reports, paths, control_socket=None, thread=None):
             with RelayMcp(dict(runtime, executable=str(broker), connectionId=identity), data, root, errors) as client:
                 client.call('tools/list'); client.tool('list_projects'); status = client.tool('get_connection_status')
                 if uuid.UUID(status['host']['connectionId']) != uuid.UUID(identity): raise ValueError('The authenticated principal does not match the registered identity')
+                if (status['clientRefreshRequired'] or status['version'] != expected['version']
+                        or status['contractHash'] != expected['contractHash']):
+                    raise ValueError('Fresh scoped connection does not match the selected host contract')
     backup = reports / ('registrations-' + uuid.uuid4().hex); backup.mkdir(); applied = []
     try:
         for index, (path, before, after, identity) in enumerate(changes):
@@ -60,8 +63,13 @@ def update(data, reports, paths, control_socket=None, thread=None):
             if path.read_bytes() == after: registration.replace_if_unchanged(path, after, before)
         raise
     expected['connectionIds'] = sorted(identities)
-    result = {'updated': len(applied), 'matchingConnections': sum(len(item[3]) for item in changes), 'identitiesAndOtherSettingsPreserved': True,
-              'freshScopedConnectionsVerified': bool(changes), 'clientRefresh': CodexControlConnector(root, reports, control_socket, expected=expected).refresh(thread=thread), 'modelCalls': 0}
+    refresh = CodexControlConnector(root, reports, control_socket, expected=expected).refresh(thread=thread)
+    result = {'updated': len(applied), 'matchingConnections': sum(len(item[3]) for item in changes),
+              'identitiesAndOtherSettingsPreserved': True,
+              'hostVerification': {'version': expected['version'], 'contractHash': expected['contractHash'],
+                                   'freshScopedConnectionsVerified': bool(changes)},
+              'existingChatVerification': 'confirmed' if refresh['sameClientVerified'] else 'unconfirmed',
+              'freshScopedConnectionsVerified': bool(changes), 'clientRefresh': refresh, 'modelCalls': 0}
     (reports / 'update-result.json').write_text(json.dumps(result, indent=2), encoding='utf-8'); return result
 
 

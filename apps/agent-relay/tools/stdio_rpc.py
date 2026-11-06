@@ -28,6 +28,9 @@ class StdioRpc:
         self.process.stdin.write(json.dumps(value) + '\n')
         self.process.stdin.flush()
 
+    def notification_received(self, message):
+        """Observe notifications consumed while waiting for a request response."""
+
     def call(self, method, parameters=None, timeout=45):
         self.identifier += 1
         self._write({'id': self.identifier, 'method': method, 'params': parameters})
@@ -41,6 +44,8 @@ class StdioRpc:
                 raise RuntimeError('Native Codex exited or returned malformed output')
             if 'method' in response and 'id' in response:
                 self._write({'id': response['id'], 'error': {'code': -32601, 'message': 'Diagnostics never approve server requests'}})
+            elif 'method' in response:
+                self.notification_received(response)
             elif response.get('id') == self.identifier:
                 if 'error' in response:
                     raise RuntimeError(response['error'])

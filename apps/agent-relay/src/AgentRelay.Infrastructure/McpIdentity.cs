@@ -59,6 +59,12 @@ public static class McpErrors
             "internal_error" => "The relay request could not be completed. Inspect the local diagnostic before retrying; completion is not confirmed.",
             _ => error is RelayException ? error.Message : "The relay request could not be completed."
         };
-        return new { isError = true, structuredContent = new McpFailureEnvelope(new(code, message, code == "connection_outdated" || code == "relay_migrated" ? "reload_client_connection" : "inspect_before_retry", error is RelayException { EffectsPossible: false } ? "not_started" : "unconfirmed", diagnosticId)), content = new[] { new { type = "text", text = message + " [" + code + "]" } } };
+        var recovery = code switch
+        {
+            "client_catalog_outdated" or "connection_outdated" or "relay_migrated" => "reload_client_connection",
+            "runtime_contract_mismatch" => "inspect_relay_runtime",
+            _ => "inspect_before_retry"
+        };
+        return new { isError = true, structuredContent = new McpFailureEnvelope(new(code, message, recovery, error is RelayException { EffectsPossible: false } ? "not_started" : "unconfirmed", diagnosticId)), content = new[] { new { type = "text", text = message + " [" + code + "]" } } };
     }
 }
