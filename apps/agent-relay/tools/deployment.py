@@ -1,5 +1,5 @@
 """Guarded local publication; prepare on a copy before replacing an owned host."""
-from runtime_layout import runtime_command, validate_runtime, app_var
+from runtime_layout import runtime_command, validate_runtime, app_var, reject_pilotage_paths
 import argparse
 from contextlib import contextmanager, closing
 import ctypes
@@ -67,6 +67,7 @@ def launch(runtime, data, reports, show=False):
 
 def publish(data, prepared, reports, show):
     root = Path(__file__).resolve().parents[3]; data, prepared, reports = data.resolve(), prepared.resolve(), reports.resolve()
+    reject_pilotage_paths(root, data, prepared, reports)
     for path in [data, prepared, reports]:
         if not any(path.is_relative_to(base) for base in [app_var(root), root / 'local/apps/agent-relay']): raise ValueError('Deployment paths escaped the declared application roots')
     runtime = read(prepared / 'mcp-runtime.json'); development=data.is_relative_to(root / 'local/apps/agent-relay'); validate(runtime, root, development)

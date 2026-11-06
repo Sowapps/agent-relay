@@ -7,6 +7,18 @@ def app_var(root):
     return Path(root).resolve() / 'var/apps/agent-relay'
 
 
+def pilotage_scope(root):
+    return app_var(root) / 'v1-qualification'
+
+
+def reject_pilotage_paths(root, *paths):
+    stable = pilotage_scope(root).resolve()
+    for path in paths:
+        target = Path(path).resolve()
+        if target.is_relative_to(stable) or stable.is_relative_to(target):
+            raise ValueError('Pilotage AP requires a separately authorized stable deployment')
+
+
 def validate_runtime(runtime, root, development=False):
     binary = Path(runtime.get('assembly') or runtime['executable']).resolve()
     allowed = [app_var(root) / 'run']

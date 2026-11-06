@@ -70,21 +70,42 @@ function Test-App {
 }
 
 function Start-App {
-    param($Context, [switch] $Offline)
+    param($Context, [switch] $Offline, [int] $LifetimeMilliseconds = 0)
     Build-App $Context -Offline:$Offline
     $assembly = Get-AppAssembly $Context $Context.Application.Manifest.RunProject
-    $assembly = Get-StagedApplication $assembly (Join-Path $Context.RepositoryRoot 'var/apps/agent-relay/run') $Context.RepositoryRoot
+    $data = New-RelayDevelopmentScope $Context.RepositoryRoot
+    $assembly = Get-StagedApplication $assembly (Join-Path $data 'runtime')
     $start = [Diagnostics.ProcessStartInfo]::new($Context.Status.DotnetPath)
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
-    foreach ($argument in @($assembly, 'tray', '--data-dir', $Context.DataDirectory, '--show')) { $start.ArgumentList.Add($argument) }
+    $arguments = @($assembly, 'tray', '--data-dir', $data)
+    if ($LifetimeMilliseconds -gt 0) {
+        $arguments += @('--lifetime-ms', $LifetimeMilliseconds.ToString([Globalization.CultureInfo]::InvariantCulture))
+    } else {
+        $arguments += '--show'
+    }
+    foreach ($argument in $arguments) { $start.ArgumentList.Add($argument) }
     $process = Invoke-IsolatedToolchain $Context.Status.DotnetPath $Context.CacheRoot { [Diagnostics.Process]::Start($start) }
     try {
-        Write-Output "Agent Relay running (PID $($process.Id)); use Quitter to exit; data: $($Context.DataDirectory)"
+        Write-Output "Agent Relay dev running (PID $($process.Id)); data: $data"
         $process.WaitForExit()
         if ($process.ExitCode -ne 0) { throw "Agent Relay exited with code $($process.ExitCode)." }
     }
     finally { $process.Dispose() }
+}
+
+function New-RelayDevelopmentScope {
+    param([string] $RepositoryRoot)
+    $base = Get-Item -LiteralPath $RepositoryRoot
+    foreach ($segment in @('var', 'apps', 'agent-relay', 'isolated-delivery', 'dev')) {
+        $path = Join-Path $base.FullName $segment
+        if (-not (Test-Path -LiteralPath $path)) { New-Item -ItemType Directory -Path $path | Out-Null }
+        $base = Get-Item -LiteralPath $path -Force
+        if (-not $base.PSIsContainer -or ($base.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "Dev scope requires an ordinary directory: $path"
+        }
+    }
+    (New-Item -ItemType Directory -Path (Join-Path $base.FullName ([guid]::NewGuid().ToString('N')))).FullName
 }
 
 Export-ModuleMember -Function New-AppCommandContext, Invoke-AppDotnet, Get-AppAssembly, Build-App, Test-App, Start-App

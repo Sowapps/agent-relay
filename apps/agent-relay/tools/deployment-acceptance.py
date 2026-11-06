@@ -9,15 +9,29 @@ import sqlite3
 import uuid
 import deployment
 
-parser = argparse.ArgumentParser(description=__doc__); parser.add_argument('--prepared', type=Path, required=True); args = parser.parse_args()
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--prepared', type=Path, required=True)
+parser.add_argument('--previous-prepared', type=Path)
+parser.add_argument('--fixture', type=Path)
+args = parser.parse_args()
 root = Path(__file__).resolve().parents[3]
 case = root / 'local/apps/agent-relay/tests' / ('deployment-' + uuid.uuid4().hex)
-data = case / 'data'; reports = case / 'reports'; data.mkdir(parents=True)
+data = case / 'data'; reports = case / 'reports'; case.mkdir(parents=True)
 runtime = deployment.read(args.prepared.resolve() / 'mcp-runtime.json'); deployment.validate(runtime, root)
-data.joinpath('relay-config.json').write_text(json.dumps({'version': 1, 'profiles': []}), encoding='utf-8')
+if args.fixture:
+    deployment.reject_pilotage_paths(root, args.fixture)
+    deployment.snapshot(args.fixture, data)
+    for name in ['mcp-runtime.json', 'mcp-contract.json', 'mcp-contract-history.json']:
+        (data / name).unlink(missing_ok=True)
+else:
+    data.mkdir()
+if not (data / 'relay-config.json').exists():
+    data.joinpath('relay-config.json').write_text(json.dumps({'version': 1, 'profiles': []}), encoding='utf-8')
+protected = [path for path in [data / 'relay-projects.json', *(data / 'connections').glob('*')] if path.is_file()]
+expected = {path: path.read_bytes() for path in protected}
 result = {'modelPrompts': 0, 'passed': False}
 try:
-    deployment.publish(data, args.prepared.resolve(), reports, False)
+    deployment.publish(data, (args.previous_prepared or args.prepared).resolve(), reports, False)
     old = deployment.read(reports / 'host.json'); pointer = deployment.read(data / 'mcp-runtime.json')
     original = deployment.launch
     injected = False
@@ -41,9 +55,11 @@ try:
     restored = deployment.read(reports / 'host.json')
     assert restored['pid'] != old['pid'] and deployment.identity(restored, data)
     assert deployment.read(data / 'mcp-runtime.json') == pointer
+    assert all(path.read_bytes() == content for path, content in expected.items())
     with closing(sqlite3.connect(data / 'relay.sqlite')) as connection:
         assert connection.execute("SELECT count(*) FROM sqlite_master WHERE name='injected_failure'").fetchone()[0] == 0
     result['rollbackAfterMigration'] = True
+    result['projectAndCredentialFilesPreserved'] = len(expected)
     # A malformed copied configuration must fail before the restored host is touched.
     original_configuration = (data / 'relay-config.json').read_bytes()
     (data / 'relay-config.json').write_text('{"version":999,"profiles":[]}', encoding='utf-8')
