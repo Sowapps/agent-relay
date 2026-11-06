@@ -6,18 +6,27 @@ $fixture=Join-Path $root ('local/apps/agent-relay/publication-test-'+[guid]::New
 $tools=Join-Path $fixture 'apps/agent-relay/tools'
 $package=Join-Path $fixture 'local/apps/agent-relay/releases/fixture'
 New-Item -ItemType Directory -Path $tools,(Join-Path $package 'payload') -Force | Out-Null
-Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'release.ps1') -Destination $tools
+Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'release.ps1'),(Join-Path $PSScriptRoot 'release_artifact.py') -Destination $tools
 $release=Join-Path $tools 'release.ps1'
 $version='1.2.3-rc.1'
 $tag='v'+$version
 $commit='a'*40
 '<Project><PropertyGroup><Version>1.2.3-rc.1</Version></PropertyGroup></Project>' | Set-Content (Join-Path $tools '../Version.props')
+$sourceName='apps/agent-relay/provenance.txt'
+$source=Join-Path $fixture $sourceName
+'Original source' | Set-Content -LiteralPath $source
+$sourceInputs=@{}
+$sourceInputs[$sourceName]=(Get-FileHash -LiteralPath $source).Hash.ToLowerInvariant()
+$manifest=Join-Path $package 'payload/release-manifest.json'
+@{version=$version;sourceInputs=$sourceInputs} | ConvertTo-Json | Set-Content -LiteralPath $manifest
 $archive=Join-Path $package ('agent-relay-'+$version+'-win-x64.zip')
-'Simulated archive for publication guard tests' | Set-Content $archive
+[IO.Compression.ZipFile]::CreateFromDirectory((Join-Path $package 'payload'),$archive)
 $hash=(Get-FileHash $archive).Hash.ToLowerInvariant()
+$checksums=Join-Path $package 'SHA256SUMS.txt'
+$checksumLine=$hash+'  '+[IO.Path]::GetFileName($archive)
+$checksumLine | Set-Content -LiteralPath $checksums
 @{version=$version;passed=$true;archiveSha256=$hash} | ConvertTo-Json | Set-Content (Join-Path $package 'verification.json')
 @{passed=$true;archiveSha256=$hash} | ConvertTo-Json | Set-Content (Join-Path $package 'visual-verification.json')
-@{version=$version;sourceInputs=@{}} | ConvertTo-Json | Set-Content (Join-Path $package 'payload/release-manifest.json')
 $target='sowapps/agent-relay'
 $canonical='https://github.com/'+$target
 $state=@{pushUrls=@($canonical+'.git');metadata=@{isPrivate=$false;nameWithOwner=$target;url=$canonical};releaseStatus=404;pushFails=$false}
@@ -63,6 +72,14 @@ $plan=& $release -Action PlanPublish -Directory $package -Repository $target | C
 if($plan.repository -ne $target -or $plan.isPrivate -ne $false -or $plan.tag -ne $tag -or $writes.Count){throw 'Public publication plan was incorrect.'}
 Assert-Refusal 'Select the authorized publication target' 'unrelated/project'
 Assert-Refusal 'Select the authorized publication target' ''
+'0'*64+'  '+[IO.Path]::GetFileName($archive) | Set-Content -LiteralPath $checksums
+Assert-Refusal 'Checksum file does not match archive verification'
+$checksumLine | Set-Content -LiteralPath $checksums
+'Changed source' | Set-Content -LiteralPath $source
+$sourceInputs[$sourceName]=(Get-FileHash -LiteralPath $source).Hash.ToLowerInvariant()
+@{version=$version;sourceInputs=$sourceInputs} | ConvertTo-Json | Set-Content -LiteralPath $manifest
+Assert-Refusal 'Source changed after packaging'
+'Original source' | Set-Content -LiteralPath $source
 $state.pushUrls=@('https://github.com/unrelated/project.git')
 Assert-Refusal 'single origin push target'
 $state.pushUrls=@($canonical+'.git',$canonical+'.git')

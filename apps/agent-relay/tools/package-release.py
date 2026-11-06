@@ -1,8 +1,9 @@
 """Utility: package an explicit self-contained payload with notices, file hashes and stable ZIP ordering.
 Usage: called by release.ps1 Package; never includes local application data or uploads anything.
 """
-import argparse, hashlib, json, shutil, zipfile, subprocess
+import argparse, json, shutil, zipfile, subprocess
 from pathlib import Path
+from release_artifact import MANIFEST_FILE, archive_path, sha256
 p=argparse.ArgumentParser(description=__doc__)
 for name in ['payload','output','cache','sdk']:p.add_argument('--'+name,type=Path,required=True)
 p.add_argument('--version',required=True);a=p.parse_args()
@@ -46,19 +47,22 @@ assert (payload/'app/AgentRelay.Windows.exe').is_file()
 contract=subprocess.run([str(payload/'app/AgentRelay.Windows.exe'),'mcp-contract','--data-dir',str(payload/'contract-preparation-unused')],capture_output=True,text=True,encoding='utf-8',check=True,timeout=20,creationflags=subprocess.CREATE_NO_WINDOW)
 identity=json.loads(contract.stdout);assert identity['version']==a.version
 (payload/'app/mcp-contract.json').write_text(json.dumps(identity),encoding='utf-8')
-files={file.relative_to(payload).as_posix():hashlib.sha256(file.read_bytes()).hexdigest() for file in sorted(payload.rglob('*')) if file.is_file()}
+files={file.relative_to(payload).as_posix():sha256(file) for file in sorted(payload.rglob('*')) if file.is_file()}
 assert not any(any(part in {'var','local','data','connections','presentation-cache','.codex','.git','bin','obj'} for part in Path(name).parts) for name in files)
 inputs=[file for folder in ['src','packaging','wsl','doc/using'] for file in (app/folder).rglob('*') if file.is_file() and not {'bin','obj','__pycache__'}.intersection(file.relative_to(app).parts)]
-inputs += list(app.glob('*.props')) + [root/'README.md',root/'README.fr.md',app/'NuGet.Config'] + [app/'tools'/name for name in ['release.ps1','package-release.py','verify-release.py','provision-wsl.py','test-startup.ps1']]
-source_inputs={file.relative_to(root).as_posix():hashlib.sha256(file.read_bytes()).hexdigest() for file in sorted(inputs)}
+release_tools = ['release.ps1', 'package-release.py', 'verify-release.py', 'release_artifact.py',
+                 'relay_mcp.py', 'stdio_rpc.py', 'runtime_layout.py', 'provision-wsl.py', 'test-startup.ps1']
+inputs += list(app.glob('*.props')) + [root/'README.md',root/'README.fr.md',app/'NuGet.Config']
+inputs += [app/'tools'/name for name in release_tools]
+source_inputs={file.relative_to(root).as_posix():sha256(file) for file in sorted(inputs)}
 manifest={'version':a.version,'platform':'win-x64','selfContained':True,'sourceInputs':source_inputs,'files':files}
-(payload/'release-manifest.json').write_text(json.dumps(manifest,indent=2),encoding='utf-8')
-archive=a.output/('agent-relay-'+a.version+'-win-x64.zip')
+(payload/MANIFEST_FILE).write_text(json.dumps(manifest,indent=2),encoding='utf-8')
+archive=archive_path(a.output,a.version)
 with zipfile.ZipFile(archive,'x',compression=zipfile.ZIP_DEFLATED,compresslevel=6) as target:
  for file in sorted(payload.rglob('*')):
   if file.is_file():
    info=zipfile.ZipInfo(file.relative_to(payload).as_posix(),date_time=(2020,1,1,0,0,0));info.compress_type=zipfile.ZIP_DEFLATED
    target.writestr(info,file.read_bytes())
-digest=hashlib.sha256(archive.read_bytes()).hexdigest()
+digest=sha256(archive)
 (a.output/'SHA256SUMS.txt').write_text(digest+'  '+archive.name+'\n',encoding='utf-8')
 print(json.dumps({'archive':str(archive),'bytes':archive.stat().st_size,'expandedBytes':sum(f.stat().st_size for f in payload.rglob('*') if f.is_file()),'sha256':digest,'files':len(files)}))

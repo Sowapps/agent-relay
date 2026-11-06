@@ -1,107 +1,181 @@
-"""Fault-inject local publication in a new owned data directory; no WSL or model."""
+"""Exercise an update and rollback on new synthetic data without calling WSL or models.
+
+@see isolated-delivery.py for the normal caller and verified candidate evidence.
+"""
+
 import argparse
 from contextlib import closing
 import json
-import os
 from pathlib import Path
-import signal
 import sqlite3
 import time
+from unittest.mock import patch
 import uuid
+
 import deployment
 from relay_mcp import RelayMcp
-
-parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--prepared', type=Path, required=True)
-parser.add_argument('--previous-prepared', type=Path)
-parser.add_argument('--fixture', type=Path)
-parser.add_argument('--binding', type=Path)
-args = parser.parse_args()
-root = Path(__file__).resolve().parents[3]
-case = root / 'local/apps/agent-relay/tests' / ('deployment-' + uuid.uuid4().hex)
-data = case / 'data'; reports = case / 'reports'; case.mkdir(parents=True)
-runtime = deployment.read(args.prepared.resolve() / 'mcp-runtime.json'); deployment.validate(runtime, root)
-if args.fixture:
-    deployment.reject_pilotage_paths(root, args.fixture)
-    deployment.snapshot(args.fixture, data)
-    for name in ['mcp-runtime.json', 'mcp-contract.json', 'mcp-contract-history.json']:
-        (data / name).unlink(missing_ok=True)
-else:
-    data.mkdir()
-if not (data / 'relay-config.json').exists():
-    data.joinpath('relay-config.json').write_text(json.dumps({'version': 1, 'profiles': []}), encoding='utf-8')
-protected = [path for path in [data / 'relay-projects.json', *(data / 'connections').glob('*')] if path.is_file()]
-expected = {path: path.read_bytes() for path in protected}
-result = {'modelPrompts': 0, 'passed': False}
+from release_artifact import ordinary_directory, ordinary_file
+from runtime_layout import reject_pilotage_paths, runtime_command
 
 
-def verify_binding():
-    if not args.binding:
+class InjectedFailure(RuntimeError):
+    """The test host was started and a durable change was made before failure."""
+
+
+def require(condition, message):
+    if not condition:
+        raise RuntimeError(message)
+
+
+def prepare_data(data, fixture):
+    if fixture:
+        deployment.snapshot(ordinary_directory(fixture), data)
+        for name in ('mcp-runtime.json', 'mcp-contract.json', 'mcp-contract-history.json'):
+            (data / name).unlink(missing_ok=True)
+    else:
+        data.mkdir()
+    settings = data / 'relay-config.json'
+    if not settings.exists():
+        deployment.write(settings, {'version': 1, 'profiles': []})
+    protected = [data / 'relay-projects.json', *(data / 'connections').glob('*.json')]
+    return {path: path.read_bytes() for path in protected if path.is_file()}
+
+
+def verify_binding(case, data, binding, root):
+    if binding is None:
         return
-    binding = deployment.read(args.binding)
     pointer = deployment.read(data / 'mcp-runtime.json')
     with (case / 'mcp.stderr.log').open('a', encoding='utf-8') as errors:
-        with RelayMcp(dict(pointer, connectionId=binding['connectionId']), data, root, errors) as mcp:
-            projects = mcp.tool('list_projects')['configuration']['projects']
-            assert [project['id'] for project in projects] == [binding['projectId']]
+        with RelayMcp(dict(pointer, connectionId=binding['connectionId']), data, root, errors) as client:
+            projects = client.tool('list_projects')['configuration']['projects']
+            require([project['id'] for project in projects] == [binding['projectId']],
+                    'Fresh MCP connection did not retain the expected project scope')
 
 
-try:
-    deployment.publish(data, (args.previous_prepared or args.prepared).resolve(), reports, False)
-    verify_binding()
-    old = deployment.read(reports / 'host.json'); pointer = deployment.read(data / 'mcp-runtime.json')
-    original = deployment.launch
-    injected = False
+def verify_preserved(expected):
+    for path, content in expected.items():
+        require(path.read_bytes() == content, f'Rehearsal changed protected fixture file: {path.name}')
 
-    def failing_candidate(value, target, logs, show=False):
-        global injected
-        process = original(value, target, logs, show)
-        if target == data and not injected:
-            injected = True
-            with closing(sqlite3.connect(data / 'relay.sqlite')) as connection: connection.execute('CREATE TABLE injected_failure(marker TEXT)'); connection.commit()
-            process.terminate(); process.wait(timeout=10)
-            raise RuntimeError('Controlled candidate failure after migration, before publication')
+
+def verify_bad_preflight(candidate, data, reports, restored):
+    settings = data / 'relay-config.json'
+    original = settings.read_bytes()
+    try:
+        deployment.write(settings, {'version': 999, 'profiles': []})
+        try:
+            deployment.publish(data, candidate, reports, False)
+        except RuntimeError as error:
+            if 'Candidate host exited' not in str(error):
+                raise
+        else:
+            raise RuntimeError('Invalid preparation was accepted')
+    finally:
+        settings.write_bytes(original)
+    require(deployment.identity(restored, data), 'Failed preflight displaced the restored host')
+
+
+def exercise_update(args, root, case, result):
+    data = case / 'data'
+    reports = case / 'reports'
+    reject_pilotage_paths(root, args.prepared, args.previous_prepared, *(path for path in (args.fixture, args.binding) if path))
+    runtime = deployment.read(ordinary_file(args.prepared / 'mcp-runtime.json'))
+    previous = deployment.read(ordinary_file(args.previous_prepared / 'mcp-runtime.json'))
+    for pointer in (runtime, previous):
+        deployment.validate(pointer, root, development=True)
+    require(runtime_command(previous) != runtime_command(runtime),
+            'Rehearsal requires distinct candidate and baseline runtime paths')
+    expected = prepare_data(data, args.fixture)
+    binding = deployment.read(ordinary_file(args.binding)) if args.binding else None
+    launch = deployment.launch
+    children = []
+    inject = False
+
+    def owned_launch(pointer, target, logs, show=False):
+        nonlocal inject
+        process = launch(pointer, target, logs, show)
+        children.append(process)
+        if target == data and inject:
+            inject = False
+            try:
+                with closing(sqlite3.connect(data / 'relay.sqlite')) as connection:
+                    connection.execute('CREATE TABLE injected_failure(marker TEXT)')
+                    connection.commit()
+            finally:
+                process.terminate()
+                process.wait(timeout=10)
+            raise InjectedFailure('Controlled candidate failure after migration, before publication')
         return process
 
-    deployment.launch = failing_candidate
-    started = time.monotonic()
     try:
-        deployment.publish(data, args.prepared.resolve(), reports, False)
-        raise AssertionError('Injected failure was not observed')
-    except RuntimeError as error: assert str(error).startswith('Controlled candidate failure'), error
-    finally: deployment.launch = original
-    restored = deployment.read(reports / 'host.json')
-    assert restored['pid'] != old['pid'] and deployment.identity(restored, data)
-    assert deployment.read(data / 'mcp-runtime.json') == pointer
-    assert all(path.read_bytes() == content for path, content in expected.items())
-    verify_binding()
-    with closing(sqlite3.connect(data / 'relay.sqlite')) as connection:
-        assert connection.execute("SELECT count(*) FROM sqlite_master WHERE name='injected_failure'").fetchone()[0] == 0
-    result['rollbackAfterMigration'] = True
-    result['failedUpdateAndRecoverySeconds'] = round(time.monotonic() - started, 3)
-    result['projectAndCredentialFilesPreserved'] = len(expected)
-    # A malformed copied configuration must fail before the restored host is touched.
-    original_configuration = (data / 'relay-config.json').read_bytes()
-    (data / 'relay-config.json').write_text('{"version":999,"profiles":[]}', encoding='utf-8')
+        with patch.object(deployment, 'launch', owned_launch):
+            deployment.publish(data, args.previous_prepared, reports, False)
+            verify_binding(case, data, binding, root)
+            old = deployment.read(reports / 'host.json')
+            pointer = deployment.read(data / 'mcp-runtime.json')
+            started = time.monotonic()
+            inject = True
+            try:
+                deployment.publish(data, args.prepared, reports, False)
+            except InjectedFailure:
+                pass
+            else:
+                raise RuntimeError('Injected failure was not observed')
+            restored = deployment.read(reports / 'host.json')
+            require(restored['pid'] != old['pid'] and deployment.identity(restored, data),
+                    'Rollback did not restore a running baseline host')
+            require(deployment.read(data / 'mcp-runtime.json') == pointer,
+                    'Rollback did not restore the previous runtime pointer')
+            verify_preserved(expected)
+            verify_binding(case, data, binding, root)
+            with closing(sqlite3.connect(data / 'relay.sqlite')) as connection:
+                marker = connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE name='injected_failure'").fetchone()
+            require(marker is None, 'Rollback retained the injected database change')
+            result.update(rollbackAfterMigration=True, failedUpdateAndRecoverySeconds=round(time.monotonic() - started, 3))
+            verify_bad_preflight(args.prepared, data, reports, restored)
+
+            started = time.monotonic()
+            deployment.publish(data, args.prepared, reports, False)
+            verify_binding(case, data, binding, root)
+            verify_preserved(expected)
+            require(runtime_command(deployment.read(data / 'mcp-runtime.json')) == runtime_command(runtime),
+                    'Successful rehearsal did not select the candidate runtime')
+            result.update(failedPreparationPreservesHost=True, projectAndCredentialFilesPreserved=len(expected),
+                          healthyUpdateSeconds=round(time.monotonic() - started, 3),
+                          scopedMcpAfterUpdateAndRollback=binding is not None)
+    finally:
+        # Only handles returned by our own launch calls are eligible for cleanup.
+        for process in reversed(children):
+            if process.poll() is None:
+                process.terminate()
+            process.wait(timeout=10)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--prepared', type=Path, required=True)
+    parser.add_argument('--previous-prepared', type=Path, required=True)
+    parser.add_argument('--fixture', type=Path)
+    parser.add_argument('--binding', type=Path)
+    args = parser.parse_args()
+    if args.binding and not args.fixture:
+        parser.error('--binding requires --fixture')
+    root = Path(__file__).resolve().parents[3]
+    cases = ordinary_directory(root / 'local/apps/agent-relay/tests')
+    case = cases / ('deployment-' + uuid.uuid4().hex)
+    case.mkdir(parents=True)
+    receipt = case / 'result.json'
+    result = {'modelPrompts': 0, 'passed': False}
     try:
-        deployment.publish(data, args.prepared.resolve(), reports, False)
-        raise AssertionError('Invalid preparation was accepted')
-    except RuntimeError as error: assert 'Candidate host exited' in str(error), error
-    finally: (data / 'relay-config.json').write_bytes(original_configuration)
-    assert deployment.identity(restored, data)
-    if args.previous_prepared:
-        started = time.monotonic()
-        deployment.publish(data, args.prepared.resolve(), reports, False)
-        verify_binding()
-        assert all(path.read_bytes() == content for path, content in expected.items())
-        assert deployment.runtime_command(deployment.read(data / 'mcp-runtime.json')) == deployment.runtime_command(runtime)
-        result['healthyUpdateSeconds'] = round(time.monotonic() - started, 3)
-        result['scopedMcpAfterUpdateAndRollback'] = bool(args.binding)
-    result.update(failedPreparationPreservesHost=True, passed=True)
-finally:
-    metadata = reports / 'host.json'
-    if metadata.exists():
-        owned = deployment.read(metadata)
-        if deployment.identity(owned, data): os.kill(int(owned['pid']), signal.SIGTERM)
-    (case / 'result.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
-print(json.dumps({'passed': result['passed'], 'report': str(case / 'result.json')}))
+        exercise_update(args, root, case, result)
+        result['passed'] = True
+    except (Exception, KeyboardInterrupt) as error:
+        result['error'] = str(error) or type(error).__name__
+        raise
+    finally:
+        deployment.write(receipt, result)
+        print(json.dumps({'passed': result['passed'], 'report': str(receipt)}), flush=True)
+
+
+if __name__ == '__main__':
+    main()
