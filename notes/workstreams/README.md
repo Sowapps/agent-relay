@@ -5,6 +5,8 @@
 
 ## Records
 
+- [A08–A10 audit closure](2026-11-06-audit-a08-a10.md): retained native lifecycle proof, code convention correction and exact host path regression.
+
 - [A06/A07 follow-up](2026-11-06-mcp-errors-publication.md): structured MCP outcomes and explicit public repository publication checks.
 
 - [A05 MCP tool registry](2026-11-05-mcp-tool-registry.md): schema, validation and dispatch consistency.
