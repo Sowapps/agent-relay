@@ -37,8 +37,8 @@ def prepare_data(data, fixture):
     settings = data / 'relay-config.json'
     if not settings.exists():
         deployment.write(settings, {'version': 1, 'profiles': []})
-    protected = [data / 'relay-projects.json', *(data / 'connections').glob('*.json')]
-    return {path: path.read_bytes() for path in protected if path.is_file()}
+    protected = [data / 'relay-projects.json', *(data / 'connections').glob('*')]
+    return {path: ordinary_file(path).read_bytes() for path in protected if path.is_file()}
 
 
 def verify_binding(case, data, binding, root):
@@ -86,6 +86,9 @@ def exercise_update(args, root, case, result):
             'Rehearsal requires distinct candidate and baseline runtime paths')
     expected = prepare_data(data, args.fixture)
     binding = deployment.read(ordinary_file(args.binding)) if args.binding else None
+    if binding is not None:
+        require(any(path.parent == data / 'connections' for path in expected),
+                'Scoped rehearsal fixture has no credential files to verify')
     launch = deployment.launch
     children = []
     inject = False

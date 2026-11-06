@@ -56,9 +56,9 @@ def stable_snapshot():
     names = ['mcp-runtime.json', 'mcp-contract.json', 'relay-projects.json',
              'relay-config.json', 'mcp.codex.toml', 'mcp.windows.json']
     files = {name: sha256(STABLE / name) for name in names}
-    for credential in ordinary_directory(STABLE / 'connections').glob('*.json'):
+    for credential in ordinary_directory(STABLE / 'connections').glob('*'):
         if credential.is_file():
-            files[credential.relative_to(STABLE).as_posix()] = sha256(credential)
+            files[credential.relative_to(STABLE).as_posix()] = sha256(ordinary_file(credential))
     runtime = read(STABLE / 'mcp-runtime.json')
     host = resolve_host(runtime, STABLE)
     if host:
