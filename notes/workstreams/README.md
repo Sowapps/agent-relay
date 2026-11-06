@@ -5,6 +5,8 @@
 
 ## Records
 
+- [A06/A07 follow-up](2026-11-06-mcp-errors-publication.md): structured MCP outcomes and explicit public repository publication checks.
+
 - [A05 MCP tool registry](2026-11-05-mcp-tool-registry.md): schema, validation and dispatch consistency.
 
 - [AP missing native reply](2026-11-05-ap-missing-reply.md): authorized no-replay diagnosis/correction and one minimal read-only model proof.

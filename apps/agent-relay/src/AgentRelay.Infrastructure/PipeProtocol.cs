@@ -9,7 +9,7 @@ public sealed record PipeRequest(string Operation, RelayMessage? Message = null,
     Guid? SessionId = null, string? Name = null, JournalQuery? Query = null, ProjectAction? ProjectAction = null, string? AccessToken = null,
     ProjectConfiguration? ProjectsConfiguration = null, ConnectionRequest? Connection = null);
 public sealed record ConnectionRequest(Guid Id, Guid EndpointId, Guid[] ProjectIds, bool Revoke = false);
-public sealed record RelayFailure(string Code, string Message);
+public sealed record RelayFailure(string Code, string Message, bool? EffectsPossible = null);
 public sealed record PipeResponse(RelayExchange? Exchange = null, RelayFailure? Error = null, WorkRecord? Work = null,
     IReadOnlyList<WorkSummary>? History = null, IReadOnlyList<InboxMessage>? Inbox = null, RelaySettings? Configuration = null,
     IReadOnlyList<string>? Warnings = null, AgentStatus? Agent = null,

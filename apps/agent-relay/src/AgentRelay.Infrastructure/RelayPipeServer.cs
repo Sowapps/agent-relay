@@ -117,7 +117,7 @@ public sealed class RelayPipeServer : IDisposable
                     }
                 }
                 catch (SqliteException error) { reportError(error); response = new(Error: new("storage_unavailable", "Relay storage is unavailable. Inspect the local diagnostic; no replacement database or permission change was attempted.")); }
-                catch (RelayException error) { response = new(null, new(error.Code, error.Message)); }
+                catch (RelayException error) { response = new(null, new(error.Code, error.Message, error.EffectsPossible)); }
                 catch (Exception error) when (error is JsonException or InvalidDataException)
                 { response = new(null, new("invalid_frame", "The local request is malformed.")); }
                 catch (Exception error) when (error is not OperationCanceledException and not IOException)

@@ -4,6 +4,7 @@ using System.IO.Pipes;
 
 if (args.Length == 2 && args[0] == "design-contracts") { DesignScenarios.Contracts(Path.GetFullPath(args[1])); return; }
 if (args.Length == 2 && args[0] == "design-fixture") { await DesignScenarios.Seed(Path.GetFullPath(args[1])); return; }
+if (args.Length == 2 && args[0] == "design-error-fixture") { await DesignScenarios.Seed(Path.GetFullPath(args[1]), includeFailures: true); return; }
 
 if (args.Length == 4 && args[0] == "monitor-polish") { await UiRenderScenarios.Polish(Path.GetFullPath(args[1]),Path.GetFullPath(args[2]),Path.GetFullPath(args[3])); Console.WriteLine("NATIVE_UI_POLISH=PASS"); return; }
 

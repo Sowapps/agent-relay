@@ -35,18 +35,21 @@ Also launch the exact extracted app with --show, explicit test --data-dir and a 
 
 ## Tag and publish
 
-Review git status/diff, source file inventory and secret/data exclusion before the initial source push. .codex/, IDE settings, local/, bin/, obj/ and caches are ignored. The repository must already exist with its explicitly selected visibility; creation or visibility changes are separately authorized actions. Git credentials and organization permission are not provided by the script. The current release.ps1 Publish action retains a legacy private-repository gate: public publication requires a separately authorized adjustment of that gate. Do not change repository visibility to satisfy it; local Package/Verify are unaffected.
+Review git status/diff, source file inventory and secret/data exclusion before the initial source push. .codex/, IDE settings, local/, bin/, obj/ and caches are ignored. The existing GitHub repository `sowapps/agent-relay` is the explicit target. The script accepts either public or private visibility and reports the verified value. Creation and visibility changes are separately authorized actions. Git credentials and organization permission are not provided by the script.
 
 Commit the reviewed source and documentation. Then:
 
 ```powershell
 ./apps/agent-relay/tools/release.ps1 -Action Tag -Directory $releaseDirectory
+./apps/agent-relay/tools/release.ps1 -Action PlanPublish -Directory $releaseDirectory -Repository sowapps/agent-relay
 ./apps/agent-relay/tools/release.ps1 -Action Publish -Directory $releaseDirectory -Repository sowapps/agent-relay
 ```
 
-Tag verifies clean source, matching version/source-input hashes and both exact-archive checks; it is idempotent only if an existing tag already points to HEAD. Publish additionally verifies repository privacy, pushes main and the exact tag, then creates a GitHub release with ZIP/checksums and the reviewed release-notes.md body. A version containing a prerelease suffix uses --prerelease; a final version without that suffix uses --latest and is not marked as a prerelease. No force push, tag replacement or silent published-asset overwrite is used. On an unknown upload outcome, inspect the existing remote release and hashes before deciding on recovery; do not blindly recreate it.
+Tag verifies clean source, matching version/source-input hashes and both exact-archive checks. An existing tag must already point to HEAD. PlanPublish verifies the same preconditions as Publish, including the exact GitHub identity, the single Git push target, the main/tag commit and the absence of the remote release. It reports the destination, visibility, tag, commit and archive checksum using read-only commands. `test-release-publication.ps1` runs this entry point against local command stubs.
 
-Download the published asset into a separate local verification folder and compare its SHA256 with the qualified archive. Confirm repository privacy, tag commit, prerelease state and asset names. Keep dated measurements in notes/observations and runtime artifacts in local/. Publication outcome may be recorded in a later documentation-only commit; the release tag stays on the qualified source commit.
+Publish atomically pushes main and the exact tag, then creates the GitHub release with ZIP/checksums and the reviewed release-notes.md body. RC versions use --prerelease and stable versions use --latest. On an unknown upload outcome, inspect the existing remote release and hashes before deciding on recovery.
+
+Download the published asset into a separate local verification folder and compare its SHA256 with the qualified archive. Confirm repository visibility, tag commit, prerelease state and asset names. Keep dated measurements in notes/observations and runtime artifacts in local/. Publication outcome may be recorded in a later documentation-only commit; the release tag stays on the qualified source commit.
 
 ## Contract version discipline
 

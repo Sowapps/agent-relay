@@ -43,6 +43,20 @@ def main():
                 assert retained['name'] == text and retained['state'] == 'closed', retained
                 result = {'passed': True, 'unicodeRequestAndResponse': True, 'closedSessionPreserved': True,
                           'nativeAgentCalls': 0, 'modelCalls': 0, 'desktopWindows': 0}
+                if fixture.get('errors'):
+                    denied = client.call('tools/call', {'name': 'send_session_message', 'arguments': {
+                        'session_id': fixture['session'], 'text': ' '}})
+                    failure = denied['structuredContent']['error']
+                    assert denied['isError'] and failure['code'] == 'invalid_work' and failure['execution'] == 'not_started', failure
+                    for code, state in [('approval_required', 'awaiting_approval'), ('reply_unconfirmed', 'unknown')]:
+                        request_id = fixture['errors'][code]
+                        operation = client.tool('get_result', {'request_id': request_id})['operation']
+                        assert operation['state'] == state and operation['errorCode'] == code, operation
+                        if state == 'unknown':
+                            retained = client.tool('send_session_message', {'session_id': fixture['session'], 'request_id': request_id,
+                                                                          'text': 'fixture'})['operation']
+                            assert retained == operation, retained
+                    result.update(preExecutionRefusal=True, approvalDistinct=True, uncertainWithoutReplay=True)
                 (data / 'design-mcp-result.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
                 print(json.dumps(result))
     finally:

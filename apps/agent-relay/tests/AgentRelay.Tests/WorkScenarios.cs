@@ -62,6 +62,16 @@ internal static class WorkScenarios
         public async Task<WorkResult> ExecuteAsync(WorkRequest request, CancellationToken token)
         { Interlocked.Increment(ref Count); Entered.TrySetResult(); await Release.Task.WaitAsync(token); return new("fixture", "confirmed"); }
     }
+    internal static async Task RetainNativeFailureAsync(SqliteWorkStore store, WorkRequest request, string nativeEnvelope)
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var executor = new FailingExecutor(NativeFailures.Read(nativeEnvelope, ""));
+        await using var work = new WorkService(store, executor, () => [new(request.ProfileId, true, true)]);
+        await work.SubmitAsync(request, deadline.Token);
+        while ((await work.ReadAsync(request.Id, deadline.Token)).State is "pending" or "running")
+            await Task.Delay(10, deadline.Token);
+    }
+
     private sealed class FailingExecutor(Exception error) : IWorkExecutor
     { public Task<WorkResult> ExecuteAsync(WorkRequest request, CancellationToken token) => Task.FromException<WorkResult>(error); }
 }
