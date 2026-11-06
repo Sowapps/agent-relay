@@ -53,18 +53,10 @@ if($Action -eq 'Verify'){
 if($Action -in @('PlanPublish','Publish') -and $Repository -ne 'sowapps/agent-relay'){
     throw 'Select the authorized publication target explicitly with -Repository sowapps/agent-relay.'
 }
-$verification=Get-Content -LiteralPath (Join-Path $Directory 'verification.json') -Raw | ConvertFrom-Json
-$archive=Join-Path $Directory ('agent-relay-'+$version+'-win-x64.zip')
-if(-not $verification.passed -or (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $verification.archiveSha256){throw 'Exact archive is not verified.'}
-$visualPath=Join-Path $Directory 'visual-verification.json'
-if(-not (Test-Path -LiteralPath $visualPath)){throw 'Record actual extracted application visual verification before publication.'}
-$visual=Get-Content -LiteralPath $visualPath -Raw | ConvertFrom-Json
-if(-not $visual.passed -or $visual.archiveSha256 -ne $verification.archiveSha256){throw 'Visual verification does not match the archive.'}
-$manifest=Get-Content -LiteralPath (Join-Path $Directory 'payload/release-manifest.json') -Raw | ConvertFrom-Json
-if($manifest.version -ne $version -or $verification.version -ne $version){throw 'Package version differs from the source version.'}
-foreach($inputFile in $manifest.sourceInputs.PSObject.Properties){
-    if((Get-FileHash -LiteralPath (Join-Path $root $inputFile.Name) -Algorithm SHA256).Hash.ToLowerInvariant() -ne $inputFile.Value){throw ('Source changed after packaging: '+$inputFile.Name)}
-}
+$evidenceOutput = & $python -X utf8 -B (Join-Path $PSScriptRoot 'release_artifact.py') --publication-evidence $Directory --version $version --source $root 2>&1
+if ($LASTEXITCODE -ne 0) { throw ($evidenceOutput -join [Environment]::NewLine) }
+$evidence = $evidenceOutput | ConvertFrom-Json
+$archive = $evidence.archive
 Push-Location -LiteralPath $root
 try{
     $dirty=& git status --porcelain
@@ -105,7 +97,7 @@ try{
     $releaseArguments=@('release','create',$tag,$archive,(Join-Path $Directory 'SHA256SUMS.txt'),'--repo',('github.com/'+$Repository),'--verify-tag','--title',('Agent Relay '+$tag),'--notes-file',(Join-Path $app 'packaging/release-notes.md'))
     if($version.Contains('-')){$releaseArguments+='--prerelease'}else{$releaseArguments+='--latest'}
     if($Action -eq 'PlanPublish'){
-        [pscustomobject]@{repository=$repo.nameWithOwner;isPrivate=$repo.isPrivate;tag=$tag;commit=$head;archive=$archive;sha256=$verification.archiveSha256;prerelease=$version.Contains('-')} | ConvertTo-Json
+        [pscustomobject]@{repository=$repo.nameWithOwner;isPrivate=$repo.isPrivate;tag=$tag;commit=$head;archive=$archive;sha256=$evidence.sha256;prerelease=$version.Contains('-')} | ConvertTo-Json
         return
     }
     & git push --atomic origin ('refs/heads/main:refs/heads/main') ('refs/tags/'+$tag+':refs/tags/'+$tag)

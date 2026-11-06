@@ -5,6 +5,8 @@
 
 ## Records
 
+- [Post-audit tool cleanup](2026-11-06-audit-tooling-polish.md): bounded code cleanup, release evidence and read-only report lookup.
+
 - [Isolated Agent Relay delivery](2026-11-06-isolated-delivery.md): dev/RC isolation, measured qualification and stable protection.
 
 - [Application journey coverage](2026-11-06-application-coverage.md): retained observations, qualification gaps and release priorities.
