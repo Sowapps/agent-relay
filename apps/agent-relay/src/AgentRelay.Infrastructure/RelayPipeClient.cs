@@ -1,6 +1,6 @@
 using System.IO.Pipes;
-using AgentRelay.Core;
 using System.Text.Json;
+using AgentRelay.Core;
 
 namespace AgentRelay.Infrastructure;
 
@@ -13,7 +13,8 @@ public sealed class RelayPipeClient(string dataDirectory, Guid? connectionId = n
         => (await RequestAsync(request, token)).Exchange ?? throw new InvalidDataException("The host returned no exchange.");
 
     public async Task<PipeResponse> RequestAsync(PipeRequest request, CancellationToken token)
-        => (await RequestRawAsync(request, token)).Deserialize<PipeResponse>(RelayJson.Options)!;
+        => (await RequestRawAsync(request, token)).Deserialize<PipeResponse>(RelayJson.Options)
+            ?? throw new JsonException("The host returned no response envelope.");
 
     public async Task<JsonElement> RequestRawAsync(PipeRequest request, CancellationToken token)
     {
@@ -22,20 +23,26 @@ public sealed class RelayPipeClient(string dataDirectory, Guid? connectionId = n
         deadline.CancelAfter(PipeDeadlines.For(request.Operation) + TimeSpan.FromSeconds(2));
         try
         {
-        await using var pipe = new NamedPipeClientStream(".", RelayLocation.PipeName(dataDirectory), PipeDirection.InOut,
-            PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
-        await pipe.ConnectAsync(deadline.Token).ConfigureAwait(false);
-        await PipeFrames.WriteAsync(pipe, request, deadline.Token).ConfigureAwait(false);
-        var response = await PipeFrames.ReadAsync<JsonElement>(pipe, deadline.Token).ConfigureAwait(false);
-        if (response.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object)
+            await using var pipe = new NamedPipeClientStream(".", RelayLocation.PipeName(dataDirectory), PipeDirection.InOut,
+                PipeOptions.Asynchronous | PipeOptions.CurrentUserOnly);
+            await pipe.ConnectAsync(deadline.Token).ConfigureAwait(false);
+            await PipeFrames.WriteAsync(pipe, request, deadline.Token).ConfigureAwait(false);
+            var response = await PipeFrames.ReadAsync<JsonElement>(pipe, deadline.Token).ConfigureAwait(false);
+            if (response.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object)
+            {
+                var failure = error.Deserialize<RelayFailure>(RelayJson.Options)
+                    ?? throw new JsonException("The host returned no failure envelope.");
+                throw new RelayException(failure.Code, failure.Message, failure.EffectsPossible);
+            }
+            return response;
+        }
+        catch (IOException)
         {
-            var failure = error.Deserialize<RelayFailure>(RelayJson.Options)!;
-            throw new RelayException(failure.Code, failure.Message, failure.EffectsPossible);
+            throw new RelayException("relay_unavailable", "The relay connection was lost. Inspect retained results before resubmitting work.", effectsPossible: true);
         }
-        return response;
-        }
-        catch (IOException) { throw new RelayException("relay_unavailable", "The relay connection was lost. Inspect retained results before resubmitting work.", effectsPossible: true); }
         catch (OperationCanceledException) when (!token.IsCancellationRequested)
-        { throw new RelayException("relay_timeout", "The relay wait limit expired. Completion may still be pending; inspect the operation or agent status before retrying."); }
+        {
+            throw new RelayException("relay_timeout", "The relay wait limit expired. Completion may still be pending; inspect the operation or agent status before retrying.");
+        }
     }
 }

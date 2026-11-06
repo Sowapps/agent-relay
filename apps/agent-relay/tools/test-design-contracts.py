@@ -1,7 +1,9 @@
 """Portable layout/error checks plus exact host-identity tests; no agents, model or WSL."""
-import json
 import ast
+import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 import unittest
 from unittest.mock import patch
@@ -59,6 +61,18 @@ class DesignContractTests(unittest.TestCase):
                 host_identity.resolve_host(runtime, data, [process, dict(process, ProcessId=8)])
         with patch.object(host_identity, 'command_parts', return_value=[executable, 'mcp-worker', '--data-dir', data]):
             self.assertIsNone(host_identity.resolve_host(runtime, data, [process]))
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows process argument parsing')
+    def test_quoted_absolute_owner_and_relative_scope(self):
+        relative_data = Path('local/design fixture/data')
+        data = relative_data.resolve()
+        executable = str(data.parent / 'AgentRelay.Windows.exe')
+        runtime = {'executable': executable, 'pid': 1}
+        process = {'ProcessId': 7, 'ExecutablePath': executable}
+        process['CommandLine'] = subprocess.list2cmdline([executable, 'tray', '--data-dir', str(data)])
+        self.assertEqual(host_identity.resolve_host(runtime, data, [process])['pid'], 7)
+        process['CommandLine'] = subprocess.list2cmdline([executable, 'tray', '--data-dir', str(relative_data)])
+        self.assertIsNone(host_identity.resolve_host(runtime, data, [process]))
 
 
 if __name__ == '__main__':

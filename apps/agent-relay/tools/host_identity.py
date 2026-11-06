@@ -27,22 +27,27 @@ def command_parts(command):
         kernel.LocalFree(ctypes.cast(pointer, ctypes.c_void_p))
 
 
-def normalized(value):
-    return os.path.normcase(os.path.abspath(value))
+def same_absolute_path(actual, expected):
+    # The observed process may have a different working directory or drive context.
+    return (bool(actual) and Path(actual).is_absolute() and Path(expected).is_absolute()
+            and os.path.normcase(os.path.normpath(actual)) == os.path.normcase(os.path.normpath(expected)))
 
 
 def matches(process, runtime, data):
     expected = runtime_command(runtime)
-    if not process.get('ExecutablePath') or normalized(process['ExecutablePath']) != normalized(expected[0]):
+    if not same_absolute_path(process.get('ExecutablePath'), expected[0]):
         return False
-    parts = command_parts(process.get('CommandLine') or '')
-    if len(parts) <= len(expected) or any(normalized(actual) != normalized(wanted) for actual, wanted in zip(parts, expected)):
+    command = process.get('CommandLine')
+    if not command:
+        return False
+    parts = command_parts(command)
+    if len(parts) <= len(expected) or any(not same_absolute_path(actual, wanted) for actual, wanted in zip(parts, expected)):
         return False
     tail = parts[len(expected):]
     if tail[0] != 'tray' or tail.count('--data-dir') != 1:
         return False
     index = tail.index('--data-dir')
-    return index + 1 < len(tail) and normalized(tail[index + 1]) == normalized(data)
+    return index + 1 < len(tail) and same_absolute_path(tail[index + 1], data)
 
 
 def processes(runtime):
