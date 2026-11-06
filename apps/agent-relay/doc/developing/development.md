@@ -69,7 +69,7 @@ Use `python -B apps/agent-relay/tools/isolated-delivery.py <action>` from the ch
 | Action | Effect |
 | --- | --- |
 | `build`, `test` | Offline development build or repeatable integration suite using the local qualified toolchain. |
-| `run` | Build and launch a fresh development instance. The output records its data directory. Quit it from the application. Rerun for a fresh scope. |
+| `run` | Build and launch a fresh development instance with a synthetic project and a scoped `agent_relay_dev` MCP fragment. The phase log records both paths. Quit it from the application. Rerun for a fresh scope. The fragment is an export and never changes client settings. |
 | `qualify` | Package the current clean RC commit offline and run the portable verifier on the exact ZIP. |
 | `rehearse --receipt <absolute-result.json>` | Recheck commit and ZIP checksum. Exercise the actual deployment transaction and injected rollback on synthetic data from the verified archive. Use only the installed baseline binary, never its data or credentials. |
 
