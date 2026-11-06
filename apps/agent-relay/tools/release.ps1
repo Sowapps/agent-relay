@@ -4,8 +4,9 @@ Utility: Build, verify or publish the versioned portable Windows release.
 Usage: Package, then Verify with -Directory from package output; Publish requires a clean tagged source tree and that exact verified archive. External publication requires explicit authorization.
 #>
 [CmdletBinding()]
-param([Parameter(Mandatory)][ValidateSet('Lock','Package','Verify','Tag','Publish')][string]$Action, [string]$Directory, [string]$Repository='sowapps/agent-relay')
+param([Parameter(Mandatory)][ValidateSet('Lock','Package','Verify','Tag','PlanPublish','Publish')][string]$Action, [string]$Directory, [string]$Repository)
 $ErrorActionPreference='Stop'
+$PSNativeCommandUseErrorActionPreference=$false
 $root=Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent
 $app=Split-Path $PSScriptRoot -Parent
 $version=([xml](Get-Content -LiteralPath (Join-Path $app 'Version.props') -Raw)).Project.PropertyGroup.Version
@@ -43,7 +44,9 @@ if($Action -eq 'Verify'){
     if($LASTEXITCODE -ne 0){throw 'Extracted archive verification failed.'}
     return
 }
-if($Repository -ne 'sowapps/agent-relay'){throw 'This publication is authorized only for sowapps/agent-relay.'}
+if($Action -in @('PlanPublish','Publish') -and $Repository -ne 'sowapps/agent-relay'){
+    throw 'Select the authorized publication target explicitly with -Repository sowapps/agent-relay.'
+}
 $verification=Get-Content -LiteralPath (Join-Path $Directory 'verification.json') -Raw | ConvertFrom-Json
 $archive=Join-Path $Directory ('agent-relay-'+$version+'-win-x64.zip')
 if(-not $verification.passed -or (Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $verification.archiveSha256){throw 'Exact archive is not verified.'}
@@ -74,13 +77,33 @@ try{
         return
     }
     $tagCommit=& git rev-parse ($tag+'^{commit}');if($LASTEXITCODE -ne 0 -or $tagCommit -ne $head){throw 'Create/review the release tag at HEAD before publishing.'}
-    $repo=& gh repo view $Repository --json isPrivate,nameWithOwner,url | ConvertFrom-Json
-    if($LASTEXITCODE -ne 0 -or -not $repo.isPrivate){throw 'Repository must exist and remain private.'}
-    & git push origin main ('refs/tags/'+$tag);if($LASTEXITCODE -ne 0){throw 'Source/tag push failed.'}
-    & gh release view $tag --repo $Repository --json url 2>$null
+    $main=& git rev-parse refs/heads/main
+    if($LASTEXITCODE -ne 0 -or $main -ne $head){throw 'Publication requires main and the release tag to identify the reviewed commit.'}
+    $url='https://github.com/'+$Repository
+    $pushUrls=@(& git remote get-url --push --all origin)
+    $expectedPushUrl='\A(?:https://github\.com/|git@github\.com:)' + [regex]::Escape($Repository) + '(?:\.git)?\z'
+    if($LASTEXITCODE -ne 0 -or $pushUrls.Count -ne 1 -or $pushUrls[0] -notmatch $expectedPushUrl){
+        throw 'The single origin push target must match the selected GitHub repository.'
+    }
+    $repoJson=& gh repo view $url --json isPrivate,nameWithOwner,url
+    if($LASTEXITCODE -ne 0){throw 'Cannot verify the selected GitHub repository.'}
+    $repo=$repoJson | ConvertFrom-Json
+    if($repo.nameWithOwner -ne $Repository -or $repo.url -ne $url -or $repo.isPrivate -isnot [bool]){
+        throw 'GitHub returned a different repository or unknown visibility.'
+    }
+    $existingRelease=@(& gh api --include --hostname github.com ('repos/'+$Repository+'/releases/tags/'+$tag) 2>$null)
     if($LASTEXITCODE -eq 0){throw 'Release already exists; never overwrite published assets silently.'}
-    $releaseArguments=@('release','create',$tag,$archive,(Join-Path $Directory 'SHA256SUMS.txt'),'--repo',$Repository,'--verify-tag','--title',('Agent Relay '+$tag),'--notes-file',(Join-Path $app 'packaging/release-notes.md'))
+    if($existingRelease.Count -eq 0 -or $existingRelease[0] -notmatch '^HTTP/\S+ 404(?:\s|$)'){
+        throw 'Could not verify that the release is absent.'
+    }
+    $releaseArguments=@('release','create',$tag,$archive,(Join-Path $Directory 'SHA256SUMS.txt'),'--repo',('github.com/'+$Repository),'--verify-tag','--title',('Agent Relay '+$tag),'--notes-file',(Join-Path $app 'packaging/release-notes.md'))
     if($version.Contains('-')){$releaseArguments+='--prerelease'}else{$releaseArguments+='--latest'}
+    if($Action -eq 'PlanPublish'){
+        [pscustomobject]@{repository=$repo.nameWithOwner;isPrivate=$repo.isPrivate;tag=$tag;commit=$head;archive=$archive;sha256=$verification.archiveSha256;prerelease=$version.Contains('-')} | ConvertTo-Json
+        return
+    }
+    & git push --atomic origin ('refs/heads/main:refs/heads/main') ('refs/tags/'+$tag+':refs/tags/'+$tag)
+    if($LASTEXITCODE -ne 0){throw 'Source/tag push failed.'}
     & gh @releaseArguments
     if($LASTEXITCODE -ne 0){throw 'Release creation failed; inspect remote state before retrying.'}
 }finally{Pop-Location}

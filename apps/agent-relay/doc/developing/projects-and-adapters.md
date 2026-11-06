@@ -49,6 +49,8 @@ Full configuration/technical-binding changes acquire an exclusive admission barr
 
 ## Protocol and retrieval
 
+The local pipe preserves the optional effects marker on typed failures. An explicit false becomes `execution: not_started` in a rejected MCP call. Missing or uncertain information becomes `unconfirmed`. Once accepted, work exposes its durable outcome through `get_result`: approval has its own state, and an unconfirmed reply stays `unknown` under its original request identity. The `design-error-fixture` mode and `tools/test-design-mcp.py` exercise these distinctions through a real broker and host using a deterministic failing executor.
+
 McpToolCatalog owns each advertised tool's schema, argument validation and translation to a host action. Compatibility aliases reuse their canonical route. The authenticated facade owns connection checks and transport, while ProjectCoordinator owns execution and project policy. Check the live reference and route tests when changing a registration.
 
 The stdio facade identifies itself as agent-relay with the packaged application SemVer and implements JSON-RPC2.0 with protocol2025-11-25. Unsupported methods/arguments fail explicitly. Input is read in bounded chunks and checked against a1MiB UTF-8 frame budget; named pipes use the same byte ceiling. MCP schemas require explicit project/session/artifact identities and reject unknown fields. Large full details can be refused; filtered previews remain available.

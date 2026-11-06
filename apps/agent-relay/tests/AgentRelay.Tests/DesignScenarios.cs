@@ -80,7 +80,7 @@ internal static class DesignScenarios
         catch (RelayException error) when (error.Code == "invalid_request") { }
     }
 
-    public static async Task Seed(string data)
+    public static async Task Seed(string data, bool includeFailures = false)
     {
         if (Directory.Exists(data)) throw new IOException("Use a fresh explicit fixture directory.");
         Directory.CreateDirectory(data);
@@ -103,7 +103,20 @@ internal static class DesignScenarios
         await new SqliteDocuments<RelaySession>(new(data), "sessions").SaveAsync(session,
             new(session, definition.Name, "fixture", template, template.Root, "closed", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, Definition: definition), CancellationToken.None);
         await new ConnectionStore(data).CreateAsync(connection, owner, [project], false, CancellationToken.None);
-        await File.WriteAllTextAsync(Path.Combine(data, "design-fixture.json"), RelayJson.Serialize(new { project, session, connection, nativeCalls = 0 }));
+        var errors = new Dictionary<string, Guid>();
+        if (includeFailures)
+        {
+            var store = new SqliteWorkStore(new RelayDatabase(data));
+            foreach (var (code, effects) in new (string, bool?)[] { ("approval_required", null), ("reply_unconfirmed", true) })
+            {
+                var requestId = Guid.NewGuid();
+                errors.Add(code, requestId);
+                var request = new WorkRequest(requestId, peer.ToString("D"), "message", "fixture", SessionId: session,
+                    Scope: definition.Scope, TaskId: requestId, AttemptId: requestId);
+                await WorkScenarios.RetainNativeFailureAsync(store, request, RelayJson.Serialize(new { error = "Fixture failure", code, effectsPossible = effects }));
+            }
+        }
+        await File.WriteAllTextAsync(Path.Combine(data, "design-fixture.json"), RelayJson.Serialize(new { project, session, connection, errors, nativeCalls = 0 }));
         Console.WriteLine("DESIGN_FIXTURE=PASS");
     }
 

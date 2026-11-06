@@ -60,7 +60,7 @@ public sealed class WorkService : IAsyncDisposable
             request.Text.Any(character => char.IsControl(character) && character is not ('\n' or '\r' or '\t')) ||
             request.Kind is not ("command" or "message" or "transfer") || (request.Kind == "message" && string.IsNullOrWhiteSpace(request.Text)) ||
             (request.Kind == "transfer" && (request.SessionId is null || (request.Transfer is null && request.Artifact is null))))
-            throw new RelayException("invalid_work", "The operation, identifier or message is invalid.");
+            throw new RelayException("invalid_work", "The operation, identifier or message is invalid.", effectsPossible: false);
         var capability = capabilities().SingleOrDefault(item => item.ProfileId == request.ProfileId);
         if (capability is null || !(request.Kind switch { "command" => capability.Commands, "message" => capability.Messages, _ => capability.Files }))
             throw new RelayException("capability_denied", "This profile does not permit the requested operation.");

@@ -27,7 +27,11 @@ public sealed class RelayPipeClient(string dataDirectory, Guid? connectionId = n
         await pipe.ConnectAsync(deadline.Token).ConfigureAwait(false);
         await PipeFrames.WriteAsync(pipe, request, deadline.Token).ConfigureAwait(false);
         var response = await PipeFrames.ReadAsync<JsonElement>(pipe, deadline.Token).ConfigureAwait(false);
-        if (response.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object) throw new RelayException(error.GetProperty("code").GetString()!, error.GetProperty("message").GetString()!);
+        if (response.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object)
+        {
+            var failure = error.Deserialize<RelayFailure>(RelayJson.Options)!;
+            throw new RelayException(failure.Code, failure.Message, failure.EffectsPossible);
+        }
         return response;
         }
         catch (IOException) { throw new RelayException("relay_unavailable", "The relay connection was lost. Inspect retained results before resubmitting work.", effectsPossible: true); }
