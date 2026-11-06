@@ -6,13 +6,16 @@ import os
 from pathlib import Path
 import signal
 import sqlite3
+import time
 import uuid
 import deployment
+from relay_mcp import RelayMcp
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--prepared', type=Path, required=True)
 parser.add_argument('--previous-prepared', type=Path)
 parser.add_argument('--fixture', type=Path)
+parser.add_argument('--binding', type=Path)
 args = parser.parse_args()
 root = Path(__file__).resolve().parents[3]
 case = root / 'local/apps/agent-relay/tests' / ('deployment-' + uuid.uuid4().hex)
@@ -30,8 +33,22 @@ if not (data / 'relay-config.json').exists():
 protected = [path for path in [data / 'relay-projects.json', *(data / 'connections').glob('*')] if path.is_file()]
 expected = {path: path.read_bytes() for path in protected}
 result = {'modelPrompts': 0, 'passed': False}
+
+
+def verify_binding():
+    if not args.binding:
+        return
+    binding = deployment.read(args.binding)
+    pointer = deployment.read(data / 'mcp-runtime.json')
+    with (case / 'mcp.stderr.log').open('a', encoding='utf-8') as errors:
+        with RelayMcp(dict(pointer, connectionId=binding['connectionId']), data, root, errors) as mcp:
+            projects = mcp.tool('list_projects')['configuration']['projects']
+            assert [project['id'] for project in projects] == [binding['projectId']]
+
+
 try:
     deployment.publish(data, (args.previous_prepared or args.prepared).resolve(), reports, False)
+    verify_binding()
     old = deployment.read(reports / 'host.json'); pointer = deployment.read(data / 'mcp-runtime.json')
     original = deployment.launch
     injected = False
@@ -47,6 +64,7 @@ try:
         return process
 
     deployment.launch = failing_candidate
+    started = time.monotonic()
     try:
         deployment.publish(data, args.prepared.resolve(), reports, False)
         raise AssertionError('Injected failure was not observed')
@@ -56,9 +74,11 @@ try:
     assert restored['pid'] != old['pid'] and deployment.identity(restored, data)
     assert deployment.read(data / 'mcp-runtime.json') == pointer
     assert all(path.read_bytes() == content for path, content in expected.items())
+    verify_binding()
     with closing(sqlite3.connect(data / 'relay.sqlite')) as connection:
         assert connection.execute("SELECT count(*) FROM sqlite_master WHERE name='injected_failure'").fetchone()[0] == 0
     result['rollbackAfterMigration'] = True
+    result['failedUpdateAndRecoverySeconds'] = round(time.monotonic() - started, 3)
     result['projectAndCredentialFilesPreserved'] = len(expected)
     # A malformed copied configuration must fail before the restored host is touched.
     original_configuration = (data / 'relay-config.json').read_bytes()
@@ -69,6 +89,14 @@ try:
     except RuntimeError as error: assert 'Candidate host exited' in str(error), error
     finally: (data / 'relay-config.json').write_bytes(original_configuration)
     assert deployment.identity(restored, data)
+    if args.previous_prepared:
+        started = time.monotonic()
+        deployment.publish(data, args.prepared.resolve(), reports, False)
+        verify_binding()
+        assert all(path.read_bytes() == content for path, content in expected.items())
+        assert deployment.runtime_command(deployment.read(data / 'mcp-runtime.json')) == deployment.runtime_command(runtime)
+        result['healthyUpdateSeconds'] = round(time.monotonic() - started, 3)
+        result['scopedMcpAfterUpdateAndRollback'] = bool(args.binding)
     result.update(failedPreparationPreservesHost=True, passed=True)
 finally:
     metadata = reports / 'host.json'

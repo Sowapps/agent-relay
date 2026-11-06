@@ -158,8 +158,10 @@ def rehearse(report, folder, receipt):
     if not fixture.is_relative_to(archive.parent):
         raise ValueError('Fixture is outside the verified extraction')
     reject_pilotage_paths(ROOT, fixture)
+    binding = Path(verification['extracted']) / 'requests-0/example-context.json'
     phase(report, folder, 'rollback', python_script('deployment-acceptance.py', '--prepared', folder,
-                                                    '--previous-prepared', previous, '--fixture', fixture))
+                                                    '--previous-prepared', previous, '--fixture', fixture,
+                                                    '--binding', binding))
     report['candidate'] = candidate
 
 
