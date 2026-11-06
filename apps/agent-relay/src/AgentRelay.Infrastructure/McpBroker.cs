@@ -74,6 +74,19 @@ public sealed class McpBroker : IAsyncDisposable
     }
     private string Key((string Data, string Executable, string? Assembly, McpIdentity? Identity) runtime) => runtime.Data + "|" + runtime.Executable + "|" + runtime.Assembly + "|" + runtime.Identity?.Generation;
     private void Send(JsonNode value) { lock (output) Console.WriteLine(value.ToJsonString(RelayJson.Options)); }
+    // The monitor and request path share the notification owner. Listing the tools is the acknowledgement.
+    private void NotifyCatalogChange(string nextContract)
+    {
+        if (catalog is null || catalog == nextContract)
+        {
+            notified = null;
+            return;
+        }
+        if (notified == nextContract) return;
+        Send(new JsonObject { ["jsonrpc"] = "2.0", ["method"] = "notifications/tools/list_changed" });
+        Send(new JsonObject { ["jsonrpc"] = "2.0", ["method"] = "notifications/resources/list_changed" });
+        notified = nextContract;
+    }
     private void Save()
     {
         if (binding is null || !File.Exists(Path.Combine(data, "connections", binding.Value.ToString("N") + ".bin"))) return;
@@ -95,26 +108,21 @@ public sealed class McpBroker : IAsyncDisposable
                     }
                     if (stop.IsCancellationRequested) break;
                 }
-                else if (selected is not null)
+                else lock (admission)
                 {
+                    if (busy != 0 || selected is null) continue;
                     try
                     {
-                        var next = Key(Resolve());
-                        if (next != selected)
+                        var runtime = Resolve();
+                        if (Key(runtime) != selected)
                         {
                             state = "update_pending";
-                            if (notified != next)
-                            {
-                                Send(new JsonObject { ["jsonrpc"] = "2.0", ["method"] = "notifications/tools/list_changed" });
-                                Send(new JsonObject { ["jsonrpc"] = "2.0", ["method"] = "notifications/resources/list_changed" });
-                                notified = next;
-                            }
+                            NotifyCatalogChange(runtime.Identity?.ContractHash ?? McpIdentity.Current.ContractHash);
                         }
                     }
                     catch (Exception error) when (error is RelayException or IOException or JsonException) { state = "outdated"; }
+                    Save();
                 }
-                // Do not race the request thread's metadata/lease replacement.
-                if (Volatile.Read(ref busy) == 0) Save();
             }
         }
         catch (OperationCanceledException) when (stop.IsCancellationRequested) { }
@@ -214,6 +222,7 @@ public sealed class McpBroker : IAsyncDisposable
         if (runtime.Identity is not null && runtime.Identity != identity) throw new RelayException("runtime_unconfigured", "The selected worker does not match its qualified contract metadata.", false);
         await worker.StandardInput.WriteLineAsync("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}");
         selected = key;
+        NotifyCatalogChange(identity.ContractHash);
     }
     private void DropWorker()
     {

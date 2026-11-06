@@ -12,6 +12,8 @@ Update the checkpoint after material progress so a resumed agent can continue wi
 
 On an explicit “pause” or “save”, stop starting new work. Preserve the current edits, stop or account for owned running operations, and update the dated checkpoint with the exact safe resume action. Then stop and report using **Point de reprise** with three fields: **État**, **Sauvegarde**, **Reprise**. Resume only when the operator requests it.
 
+Windows qualification must not trigger a Computer Use authorization prompt. Use existing non-interactive qualification methods that respect the approved access boundary. Record visual acceptance as pending if it requires that prompt.
+
 If the goal tool refuses a new objective because an unrelated historic objective is unfinished, record that diagnostic and track this scope/timing in the workstream. Never falsely complete the unrelated objective or claim its consumption. Resume normal goal tracking when available; report unavailable metrics truthfully.
 
 The handoff checkpoint contains authorization/limits, objective, branch and last delivered commit, decisions and their owners, completed checks with retained output locations, unresolved risks and the exact next action. Before resuming, read AGENTS, the design guide and the relevant application decision/workstream, then inspect repository and objective state. An old GO or old test is not new authorization or fresh evidence.

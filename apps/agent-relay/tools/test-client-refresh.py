@@ -5,6 +5,7 @@ from client_refresh import CodexControlConnector
 
 class FixtureRpc:
     stale=False
+    server='agent_relay'
     calls=[]
     def __init__(self,command,*args):
         assert 'proxy' in command and '--sock' in command and command[1:3]==['app-server','proxy'];self.calls.clear()
@@ -15,11 +16,15 @@ class FixtureRpc:
         self.calls.append(method)
         if method=='initialize':return {}
         if method=='config/mcpServer/reload':assert params is None;return {}
-        if method=='mcpServerStatus/list':assert params['threadId']=='owned-thread';return {'data':[{'name':'agent_relay','tools':{'get_connection_status':{}}}]}
+        if method=='mcpServerStatus/list':
+            assert params['threadId']=='owned-thread' and params['serverName']==self.server
+            return {'data':[{'name':self.server,'tools':{'get_connection_status':{}}}]}
         if method=='mcpServer/tool/call':
-            assert params['threadId']=='owned-thread' and params['tool']=='get_connection_status'
+            assert params['threadId']=='owned-thread' and params['server']==self.server and params['tool']=='get_connection_status'
             return {'structuredContent':{'version':'1.1.0-rc.1','contractHash':'stale' if self.stale else 'contract','clientRefreshRequired':False,'host':{'connectionId':'fixture-identity'}},'content':[]}
-        if method=='mcpServer/resource/read':return {'contents':[{'text':'Current guide'}]}
+        if method=='mcpServer/resource/read':
+            assert params['server']==self.server
+            return {'contents':[{'text':'Current guide'}]}
         raise AssertionError(method)
 
 root=Path(__file__).resolve().parents[3]
@@ -28,6 +33,9 @@ expected={'version':'1.1.0-rc.1','contractHash':'contract','connectionIds':['fix
 socket=folder/'fixture.sock';socket.write_text('Test marker, no listener',encoding='utf-8')
 client=CodexControlConnector(root,folder,socket,executable='codex.exe',expected=expected,transport_factory=FixtureRpc)
 assert client.refresh(thread='owned-thread')['sameClientVerified'] is True
+FixtureRpc.server='agent_relay_personal_assistant'
+assert client.refresh(server=FixtureRpc.server, thread='owned-thread')['sameClientVerified'] is True
+FixtureRpc.server='agent_relay'
 FixtureRpc.stale=True
 assert client.refresh(thread='owned-thread')['sameClientVerified'] is False
 assert client.refresh()['state']=='reload_requested'

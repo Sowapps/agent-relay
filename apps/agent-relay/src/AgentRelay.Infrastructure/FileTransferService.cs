@@ -114,7 +114,8 @@ public sealed class FileTransferService(SessionService sessions, WslBridge bridg
             if (File.Exists(destination)) throw new RelayException("uncertain_partial", "A retained private partial exists; inspect it before a new transfer.", effectsPossible: false);
             if (!transfer.Overwrite && File.Exists(windowsPath)) throw new RelayException("destination_exists", "Destination exists; overwrite must be explicit.");
             Directory.CreateDirectory(Path.GetDirectoryName(windowsPath)!);
-            WorkspacePath(windowsWorkspace, Path.GetRelativePath(windowsWorkspace, destination));
+            // The partial lives under private var. Only the final path is relative to the project workspace.
+            RuntimePaths.DemandPrivatePath(destination);
         }
         long bytes = 0; string sha256;
         await using (var input = new FileStream(source, FileMode.Open, FileAccess.Read, FileShare.Read, 1024 * 1024, FileOptions.Asynchronous | FileOptions.SequentialScan))
@@ -149,6 +150,7 @@ public sealed class FileTransferService(SessionService sessions, WslBridge bridg
             if (native.GetProperty("bytes").GetInt64() != bytes || native.GetProperty("sha256").GetString() != sha256)
                 throw new InvalidDataException("The downloaded file changed or failed its SHA-256 check.");
             WorkspacePath(windowsWorkspace, localRelative);
+            RuntimePaths.DemandPrivatePath(destination);
             File.Move(destination, windowsPath, transfer.Overwrite);
         }
         var result = new WorkResult("file-transfer", transfer.Direction + " completed", Details: new Dictionary<string, string>

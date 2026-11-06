@@ -14,7 +14,7 @@ spec = importlib.util.spec_from_file_location('relay_registration', Path(__file_
 registration = importlib.util.module_from_spec(spec); spec.loader.exec_module(registration)
 
 
-def update(data, reports, paths, control_socket=None, thread=None):
+def update(data, reports, paths, control_socket=None, thread=None, server='agent_relay'):
     data, reports = data.resolve(), reports.resolve(); reports.mkdir(parents=True, exist_ok=True)
     runtime = json.loads((data / 'mcp-runtime.json').read_text(encoding='utf-8-sig'))
     broker = Path(runtime['mcpExecutable']).resolve()
@@ -24,6 +24,7 @@ def update(data, reports, paths, control_socket=None, thread=None):
     expected['quickstartHash'] = hashlib.sha256(guide.read_text(encoding='utf-8-sig').replace('\r\n', '\n').encode()).hexdigest()
     changes = []
     identities = set()
+    selected_identities = set()
     for path in dict.fromkeys(path.resolve() for path in paths):
         if not path.is_file(): continue
         raw = path.read_bytes(); updated = raw.decode('utf-8-sig'); matches = []
@@ -41,6 +42,8 @@ def update(data, reports, paths, control_socket=None, thread=None):
             fragment = '[mcp_servers.' + json.dumps(server_name) + ']\ncommand = ' + json.dumps(str(broker)) + '\nargs = ' + json.dumps(desired_args) + '\n'
             updated = registration.update(updated, fragment, server_name)
             matches.append(identity); identities.add(str(uuid.UUID(identity)))
+            if server_name == server:
+                selected_identities.add(str(uuid.UUID(identity)))
         if matches: changes.append((path, raw, updated.encode('utf-8'), matches))
     # Verify each preserved principal before writing any registration. No rights/default connection substitution.
     with (reports / 'fresh-connections.stderr.log').open('w', encoding='utf-8') as errors:
@@ -48,6 +51,9 @@ def update(data, reports, paths, control_socket=None, thread=None):
             with RelayMcp(dict(runtime, executable=str(broker), connectionId=identity), data, root, errors) as client:
                 client.call('tools/list'); client.tool('list_projects'); status = client.tool('get_connection_status')
                 if uuid.UUID(status['host']['connectionId']) != uuid.UUID(identity): raise ValueError('The authenticated principal does not match the registered identity')
+                if (status['clientRefreshRequired'] or status['version'] != expected['version']
+                        or status['contractHash'] != expected['contractHash']):
+                    raise ValueError('Fresh scoped connection does not match the selected host contract')
     backup = reports / ('registrations-' + uuid.uuid4().hex); backup.mkdir(); applied = []
     try:
         for index, (path, before, after, identity) in enumerate(changes):
@@ -59,9 +65,20 @@ def update(data, reports, paths, control_socket=None, thread=None):
         for path, before, after in reversed(applied):
             if path.read_bytes() == after: registration.replace_if_unchanged(path, after, before)
         raise
-    expected['connectionIds'] = sorted(identities)
-    result = {'updated': len(applied), 'matchingConnections': sum(len(item[3]) for item in changes), 'identitiesAndOtherSettingsPreserved': True,
-              'freshScopedConnectionsVerified': bool(changes), 'clientRefresh': CodexControlConnector(root, reports, control_socket, expected=expected).refresh(thread=thread), 'modelCalls': 0}
+    expected['connectionIds'] = sorted(selected_identities)
+    if len(selected_identities) == 1:
+        refresh = CodexControlConnector(root, reports, control_socket, expected=expected).refresh(server=server, thread=thread)
+    else:
+        refresh = {'state': 'binding_unconfirmed', 'sameClientVerified': False,
+                   'requiresClientReload': None, 'modelTurns': 0,
+                   'message': 'Select one matching named connection to verify the owning chat.'}
+    result = {'updated': len(applied), 'matchingConnections': sum(len(item[3]) for item in changes),
+              'identitiesAndOtherSettingsPreserved': True,
+              'hostVerification': {'version': expected['version'], 'contractHash': expected['contractHash'],
+                                   'freshScopedConnectionsVerified': bool(changes)},
+              'existingChatVerification': 'confirmed' if refresh['sameClientVerified'] else 'unconfirmed',
+              'existingChatServer': server,
+              'freshScopedConnectionsVerified': bool(changes), 'clientRefresh': refresh, 'modelCalls': 0}
     (reports / 'update-result.json').write_text(json.dumps(result, indent=2), encoding='utf-8'); return result
 
 
@@ -69,6 +86,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--data', required=True, type=Path); parser.add_argument('--reports', required=True, type=Path)
     parser.add_argument('--config', action='append', type=Path); parser.add_argument('--codex-control-socket', type=Path); parser.add_argument('--thread')
+    parser.add_argument('--server', default='agent_relay')
     args = parser.parse_args()
     paths = args.config if args.config is not None else [root / '.codex/config.toml', Path.home() / '.codex/config.toml']
-    print(json.dumps(update(args.data, args.reports, paths, args.codex_control_socket, args.thread)))
+    print(json.dumps(update(args.data, args.reports, paths, args.codex_control_socket, args.thread, args.server)))

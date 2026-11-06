@@ -21,8 +21,12 @@ public sealed class ScopedWorkExecutor(ProjectSettingsStore projects, SessionSer
         if (request.Kind == "transfer")
         {
             var artifact = request.Artifact ?? throw new RelayException("invalid_work", "A scoped artifact transfer is required.");
-            policy.Transfer(caller, scope.ProjectId, artifact);
-            var configuration = projects.Load();
+            ProjectConfiguration configuration;
+            using (policy.Pin())
+            {
+                policy.Transfer(caller, scope.ProjectId, artifact);
+                configuration = policy.Configuration();
+            }
             var source = configuration.Workspaces.Single(item => item.Id == artifact.Source.WorkspaceId);
             var destination = configuration.Workspaces.Single(item => item.Id == artifact.Destination.WorkspaceId);
             var fromRemote = source.EndpointId == scope.RecipientId;

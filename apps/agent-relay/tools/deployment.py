@@ -15,6 +15,8 @@ import uuid
 import re
 from host_identity import identity, resolve_host
 
+STATE_FILES = ('relay.sqlite', 'mcp-runtime.json', 'relay-config.json', 'relay-projects.json',
+               'mcp-contract.json', 'mcp-contract-history.json')
 
 def read(path): return json.loads(path.read_text(encoding='utf-8-sig'))
 
@@ -37,7 +39,9 @@ def exclusive(data):
 
 def snapshot(data, destination):
     destination.mkdir()
-    for name in ['mcp-runtime.json', 'relay-config.json', 'relay-projects.json', 'mcp-contract.json', 'mcp-contract-history.json']:
+    for name in STATE_FILES:
+        if name == 'relay.sqlite':
+            continue  # SQLite backup includes committed WAL state.
         if (data / name).exists(): shutil.copy2(data / name, destination / name)
     if (data / 'connections').exists(): shutil.copytree(data / 'connections', destination / 'connections')
     if (data / 'relay.sqlite').exists():
@@ -46,6 +50,15 @@ def snapshot(data, destination):
 
 def validate(runtime, root, development=False):
     validate_runtime(runtime, root, development)
+
+
+def demand_idle(data):
+    database_path = data / 'relay.sqlite'
+    if not database_path.exists():
+        return
+    with closing(sqlite3.connect(database_path.as_uri() + '?mode=ro', uri=True)) as database:
+        if database.execute("SELECT 1 FROM work WHERE json_extract(payload,'$.state') IN ('pending','running') LIMIT 1").fetchone():
+            raise RuntimeError('Active durable work exists; publication refused')
 
 
 def launch(runtime, data, reports, show=False):
@@ -65,8 +78,10 @@ def launch(runtime, data, reports, show=False):
         process.wait(timeout=10); raise
 
 
-def publish(data, prepared, reports, show):
+def publish(data, prepared, reports, show, *, expected_data=None):
     root = Path(__file__).resolve().parents[3]; data, prepared, reports = data.resolve(), prepared.resolve(), reports.resolve()
+    if expected_data is not None and data != expected_data.resolve():
+        raise ValueError('Selected data scope differs from the approved promotion target')
     reject_pilotage_paths(root, data, prepared, reports)
     for path in [data, prepared, reports]:
         if not any(path.is_relative_to(base) for base in [app_var(root), root / 'local/apps/agent-relay']): raise ValueError('Deployment paths escaped the declared application roots')
@@ -91,6 +106,7 @@ def publish(data, prepared, reports, show):
             write(data / 'ui-host.json', current_host)
             print(json.dumps({'published': False, 'alreadyCurrent': True, 'pid': current_host['pid'], 'currentChatMcpQualified': False}))
             return
+    demand_idle(data)
     reports.mkdir(parents=True, exist_ok=True); data.mkdir(parents=True, exist_ok=True)
     transaction = reports / ('deployment-' + uuid.uuid4().hex); transaction.mkdir()
     check = transaction / 'preflight'; check.mkdir(); snapshot(data, check / 'before')
@@ -104,10 +120,7 @@ def publish(data, prepared, reports, show):
         validate(previous, root, development)
     previous = resolve_host(previous, data)
     was_running = previous is not None
-    if (data / 'relay.sqlite').exists():
-        with closing(sqlite3.connect((data / 'relay.sqlite').as_uri() + '?mode=ro', uri=True)) as database:
-            if database.execute("SELECT count(*) FROM work WHERE json_extract(payload,'$.state') IN ('pending','running')").fetchone()[0]:
-                raise RuntimeError('Active durable work exists; publication refused')
+    demand_idle(data)
     if was_running:
         if not identity(previous, data):
             raise RuntimeError('Relay owner changed before shutdown; no process was stopped')
@@ -135,10 +148,10 @@ def publish(data, prepared, reports, show):
         if started is not None: started.terminate(); started.wait(timeout=10)
         if backup_ready:
             with exclusive(data):
-                for name in ['relay.sqlite', 'relay.sqlite-wal', 'relay.sqlite-shm', 'mcp-runtime.json', 'mcp-contract.json', 'mcp-contract-history.json', 'connections']:
+                for name in (*STATE_FILES, 'relay.sqlite-wal', 'relay.sqlite-shm', 'connections'):
                     target = data / name
                     if target.exists(): target.replace(transaction / ('failed-' + name))
-                for name in ['relay.sqlite', 'mcp-runtime.json', 'mcp-contract.json', 'mcp-contract-history.json']:
+                for name in STATE_FILES:
                     if (backup / name).exists(): shutil.copy2(backup / name, data / name)
                 if (backup / 'connections').exists(): shutil.copytree(backup / 'connections', data / 'connections')
         if was_running:

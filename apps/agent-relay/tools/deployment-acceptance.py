@@ -92,6 +92,8 @@ def exercise_update(args, root, case, result):
     launch = deployment.launch
     children = []
     inject = False
+    def promote(candidate, *, expected=data):
+        deployment.publish(data, candidate, reports, False, expected_data=expected)
 
     def owned_launch(pointer, target, logs, show=False):
         nonlocal inject
@@ -103,6 +105,7 @@ def exercise_update(args, root, case, result):
                 with closing(sqlite3.connect(data / 'relay.sqlite')) as connection:
                     connection.execute('CREATE TABLE injected_failure(marker TEXT)')
                     connection.commit()
+                deployment.write(data / 'relay-config.json', {'version': 999, 'profiles': []})
             finally:
                 process.terminate()
                 process.wait(timeout=10)
@@ -111,14 +114,39 @@ def exercise_update(args, root, case, result):
 
     try:
         with patch.object(deployment, 'launch', owned_launch):
-            deployment.publish(data, args.previous_prepared, reports, False)
+            promote(args.previous_prepared)
             verify_binding(case, data, binding, root)
             old = deployment.read(reports / 'host.json')
             pointer = deployment.read(data / 'mcp-runtime.json')
+            settings_before = (data / 'relay-config.json').read_bytes()
+            try:
+                promote(args.prepared, expected=case / 'wrong-scope')
+            except ValueError as error:
+                require('approved promotion target' in str(error), str(error))
+            else:
+                raise RuntimeError('Wrong promotion target was accepted')
+            require(deployment.identity(old, data), 'Wrong-target refusal displaced the current host')
+            with closing(sqlite3.connect(data / 'relay.sqlite')) as connection:
+                active_id = str(uuid.uuid4())
+                connection.execute('INSERT INTO work(id,payload) VALUES (?,?)', (active_id, '{"state":"pending"}'))
+                connection.commit()
+            try:
+                try:
+                    promote(args.prepared)
+                except RuntimeError as error:
+                    require('Active durable work' in str(error), str(error))
+                else:
+                    raise RuntimeError('An active target accepted promotion')
+            finally:
+                with closing(sqlite3.connect(data / 'relay.sqlite')) as connection:
+                    connection.execute('DELETE FROM work WHERE id=?', (active_id,))
+                    connection.commit()
+            require(deployment.identity(old, data), 'Busy-target refusal displaced the current host')
+            result.update(wrongTargetRefused=True, activeWorkRefused=True)
             started = time.monotonic()
             inject = True
             try:
-                deployment.publish(data, args.prepared, reports, False)
+                promote(args.prepared)
             except InjectedFailure:
                 pass
             else:
@@ -128,6 +156,8 @@ def exercise_update(args, root, case, result):
                     'Rollback did not restore a running baseline host')
             require(deployment.read(data / 'mcp-runtime.json') == pointer,
                     'Rollback did not restore the previous runtime pointer')
+            require((data / 'relay-config.json').read_bytes() == settings_before,
+                    'Rollback did not restore the previous relay settings')
             verify_preserved(expected)
             verify_binding(case, data, binding, root)
             with closing(sqlite3.connect(data / 'relay.sqlite')) as connection:
@@ -138,14 +168,15 @@ def exercise_update(args, root, case, result):
             verify_bad_preflight(args.prepared, data, reports, restored)
 
             started = time.monotonic()
-            deployment.publish(data, args.prepared, reports, False)
+            promote(args.prepared)
             verify_binding(case, data, binding, root)
             verify_preserved(expected)
             require(runtime_command(deployment.read(data / 'mcp-runtime.json')) == runtime_command(runtime),
                     'Successful rehearsal did not select the candidate runtime')
             result.update(failedPreparationPreservesHost=True, projectAndCredentialFilesPreserved=len(expected),
                           healthyUpdateSeconds=round(time.monotonic() - started, 3),
-                          scopedMcpAfterUpdateAndRollback=binding is not None)
+                          scopedMcpAfterUpdateAndRollback=binding is not None,
+                          existingChatVerification='unconfirmed')
     finally:
         # Only handles returned by our own launch calls are eligible for cleanup.
         for process in reversed(children):

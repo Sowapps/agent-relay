@@ -16,7 +16,10 @@ parser.add_argument('phase', choices=['prepare', 'local', 'agents', 'claude', 'r
 parser.add_argument('--data', type=Path, required=True)
 parser.add_argument('--templates', type=Path, required=True)
 parser.add_argument('--attach', action='store_true', help='Use an already running explicitly owned qualification host; never stop it')
+parser.add_argument('--codex-only', action='store_true', help='Open and close only the Codex A session for the model-free I/O check')
 args = parser.parse_args()
+if args.codex_only and args.phase not in ('local', 'cleanup'):
+    parser.error('--codex-only applies to local and cleanup only')
 root = Path(__file__).resolve().parents[3]
 data = args.data.resolve()
 assert data.is_relative_to(root / 'local/apps/agent-relay')
@@ -91,7 +94,8 @@ for name in ['codex-a','codex-b','claude-a','command-a']:
 for f in [p,*p.rglob('*')]:os.chown(f,a.pw_uid,a.pw_gid)
 print(json.dumps({'created':str(p),'modelPrompts':0}))'''
     result = subprocess.run(['wsl.exe', '-d', template['distribution'], '-u', 'root', '--exec', 'python3', '-c', script],
-                            input=json.dumps({'root': state['linuxRoot'], 'user': template['user']}), text=True, encoding='utf-8', capture_output=True, timeout=20)
+                            input=json.dumps({'root': state['linuxRoot'], 'user': template['user']}), text=True, encoding='utf-8',
+                            errors='replace', capture_output=True, timeout=20)
     assert result.returncode == 0, result.stderr
     endpoints = []; workspaces = []; memberships = []
     for key, client in [('main-a', None), ('main-b', None), ('codex-a', 'codex'), ('codex-b', 'codex'), ('claude-a', 'claude'), ('command-a', 'command')]:
@@ -137,12 +141,13 @@ with ExitStack() as stack:
             result['discovery'] = a.tool('list_projects')
             assert [project['id'] for project in result['discovery']['configuration']['projects']] == [ids['project-a']]
             result['sessionProbe'] = {}
-            for key in ['codex-a', 'codex-b', 'claude-a']:
+            for key in (['codex-a'] if args.codex_only else ['codex-a', 'codex-b', 'claude-a']):
                 mcp = clients[key[-1]]
                 opened = mcp.tool('open_session', {'project_id': ids['project-' + key[-1]], 'endpoint_id': ids[key], 'workspace_id': ids['work-' + key], 'session_id': state['sessions'][key], 'name': 'V1 ' + key})
                 result['sessionProbe'][key] = ready(mcp, key)
             try:
-                a.tool('get_session', {'session_id': state['sessions']['codex-b']})
+                reader, foreign = (b, 'codex-a') if args.codex_only else (a, 'codex-b')
+                reader.tool('get_session', {'session_id': state['sessions'][foreign]})
                 raise AssertionError('Cross-project session read succeeded')
             except RuntimeError as error:
                 assert 'capability_denied' in str(error), error
@@ -189,7 +194,8 @@ with ExitStack() as stack:
             assert 'AMBRE_731' in result['record']['result']['output'], result['record']
             result['nativeConversationId'] = after['nativeConversationId']; result['modelPrompts'] = 1
         else:
-            result['closed'] = {key: clients[key[-1]].tool('close_session', {'session_id': identifier}) for key, identifier in state['sessions'].items()}
+            result['closed'] = {key: clients[key[-1]].tool('close_session', {'session_id': identifier})
+                                for key, identifier in state['sessions'].items() if not args.codex_only or key == 'codex-a'}
             result['modelPrompts'] = 0
         result['passed'] = True
     except BaseException as error:
