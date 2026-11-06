@@ -95,6 +95,10 @@ def main(first_pointer, next_pointer, broker_pointer=None):
             assert one['clientRefresh']['state'] == 'unsupported' and one['clientRefresh']['sameClientVerified'] is False
             assert one['hostVerification']['freshScopedConnectionsVerified']
             assert one['existingChatVerification'] == 'unconfirmed'
+            named = update.update(data, reports / 'registration-named', [config], fixture / 'absent-socket',
+                                  server='agent_relay_personal_assistant')
+            assert named['existingChatServer'] == 'agent_relay_personal_assistant'
+            assert named['clientRefresh']['state'] == 'unsupported'
             result['idempotentRegistrationAndUnsupportedClient'] = True
             # Keep the original outer stdio process alive while host/runtime/contract change.
             original_pid = client.process.pid
