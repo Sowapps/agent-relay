@@ -94,7 +94,8 @@ for name in ['codex-a','codex-b','claude-a','command-a']:
 for f in [p,*p.rglob('*')]:os.chown(f,a.pw_uid,a.pw_gid)
 print(json.dumps({'created':str(p),'modelPrompts':0}))'''
     result = subprocess.run(['wsl.exe', '-d', template['distribution'], '-u', 'root', '--exec', 'python3', '-c', script],
-                            input=json.dumps({'root': state['linuxRoot'], 'user': template['user']}), text=True, encoding='utf-8', capture_output=True, timeout=20)
+                            input=json.dumps({'root': state['linuxRoot'], 'user': template['user']}), text=True, encoding='utf-8',
+                            errors='replace', capture_output=True, timeout=20)
     assert result.returncode == 0, result.stderr
     endpoints = []; workspaces = []; memberships = []
     for key, client in [('main-a', None), ('main-b', None), ('codex-a', 'codex'), ('codex-b', 'codex'), ('claude-a', 'claude'), ('command-a', 'command')]:

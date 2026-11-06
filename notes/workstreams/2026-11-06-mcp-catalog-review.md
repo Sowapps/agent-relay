@@ -26,3 +26,7 @@ Next run a candidate build and retained connection fixture on a copy. Review the
 | Scripts and tests | Reuse exact ZIP verification, update/rollback and test fixtures. Rehearsal explicitly checks the target, refuses active work and records existing-chat confirmation separately. |
 
 This is a responsibility and boundary review supported by selected regressions, not a line-by-line certification. Before real promotion, the host must prevent new admissions across the idle-check/shutdown interval. The existing idle checks are useful but do not provide that cross-process guarantee. Pilotage AP remains outside this rehearsal.
+
+## First candidate observation
+
+The retained catalog fixture passed on an RC1-to-RC6 contract switch. The first exact archive passed portable checks and promotion rehearsal. WSL preparation, Codex session readiness, the direct command and upload reached their expected outcomes, but download rejected the private Windows partial because it was validated as if it belonged to the project workspace. The correction validates private staging with its own path policy. The fixture session was closed. Rebuild and repeat the exact archive and native transfer checks. The selected RC6 qualification window was found, but Computer Use app approval timed out before capture.
