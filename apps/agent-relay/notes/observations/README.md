@@ -5,6 +5,10 @@
 
 ## Reports
 
+- [RC6 native WSL reply](2026-11-07-rc6-native-reply.md): real output, request and inbox correlation, and transcript checksums.
+
+- [Stable v1.1.0 deployment to Pilotage AP](2026-11-07-stable-deployment.md): published archive, preserved data and existing-chat checkpoint.
+
 - [UI consistency corrections](2026-11-02-ui-consistency.md): prototype-first components, stable updates, clear diagnostics and scoped qualification/delivery.
 
 - [UI feedback audit](2026-11-02-ui-feedback-audit.md): confirmed rendering/refresh causes, diagnostic semantics, prototype drift and a prototype-first correction plan; no implementation.
