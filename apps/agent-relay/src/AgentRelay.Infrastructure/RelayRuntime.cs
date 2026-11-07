@@ -26,9 +26,10 @@ public sealed class RelayRuntime : IAsyncDisposable
             service = new(new SqliteExchangeStore(dataDirectory), new LocalEchoResponder(), [LocalDemo.Route]);
             mvp = new(dataDirectory);
             var connections = new ConnectionStore(dataDirectory); connections.EnsureAdministrator();
-            projects = new(dataDirectory, reportError);
+            var promotion = new PromotionAdmission(dataDirectory);
+            projects = new(dataDirectory, reportError, promotion);
             server = new(RelayLocation.PipeName(dataDirectory), service, reportError, mvp, connections, projects, dataDirectory, () =>
-            { var handler = ShowWindowRequested; if (handler is null) return false; handler(); return true; });
+            { var handler = ShowWindowRequested; if (handler is null) return false; handler(); return true; }, promotion);
             listener = server.RunAsync(stop.Token);
         }
         catch

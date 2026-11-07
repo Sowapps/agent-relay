@@ -21,7 +21,7 @@ internal static class Program
         catch (Exception error)
         {
             var code = error is RelayException relay ? relay.Code : error is OperationCanceledException ? "unavailable_or_timeout" : "application_error";
-            Console.Error.WriteLine(RelayJson.Serialize(new RelayFailure(code, error.Message)));
+            Console.Error.WriteLine(RelayJson.Serialize(new RelayFailure(code, error.Message, (error as RelayException)?.EffectsPossible)));
             return 1;
         }
     }
@@ -82,6 +82,7 @@ internal static class Program
                 "history" => new PipeRequest("history"),
                 "inbox" => new PipeRequest("refresh_inbox"),
                 "profiles" => new PipeRequest("configuration"),
+                "deployment-quiesce" => new PipeRequest("deployment_quiesce"),
                 "start-profile" => new PipeRequest("start_profile", ProfileId: options.Profile),
                 _ => throw new ArgumentException("Unknown client mode.")
             };

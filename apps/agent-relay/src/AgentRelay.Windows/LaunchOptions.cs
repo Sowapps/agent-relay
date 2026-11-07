@@ -6,7 +6,7 @@ internal sealed record LaunchOptions(string Mode, string DataDirectory, string? 
     public static LaunchOptions Parse(string[] arguments)
     {
         var mode = arguments.Length > 0 && !arguments[0].StartsWith('-') ? arguments[0] : "tray";
-        if (mode is not ("tray" or "startup" or "startup-enable" or "startup-disable" or "startup-status" or "send" or "read" or "mcp" or "mcp-worker" or "mcp-contract" or "prepare" or "submit" or "result" or "history" or "inbox" or "profiles" or "start-profile" or "admin" or "initialize")) throw new ArgumentException("Unsupported application mode.");
+        if (mode is not ("tray" or "startup" or "startup-enable" or "startup-disable" or "startup-status" or "send" or "read" or "mcp" or "mcp-worker" or "mcp-contract" or "prepare" or "submit" or "result" or "history" or "inbox" or "profiles" or "start-profile" or "admin" or "initialize" or "deployment-quiesce")) throw new ArgumentException("Unsupported application mode.");
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         bool show = false;
         for (var index = mode == "tray" && (arguments.Length == 0 || arguments[0].StartsWith('-')) ? 0 : 1; index < arguments.Length; index++)

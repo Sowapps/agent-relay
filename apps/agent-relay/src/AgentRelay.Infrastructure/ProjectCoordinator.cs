@@ -22,6 +22,9 @@ public sealed class ProjectCoordinator : IAsyncDisposable
     private readonly Task archiveLoop;
 
     public ProjectCoordinator(string dataDirectory, Action<Exception>? reportError = null)
+        : this(dataDirectory, reportError, new PromotionAdmission(dataDirectory)) { }
+
+    internal ProjectCoordinator(string dataDirectory, Action<Exception>? reportError, PromotionAdmission promotion)
     {
         Settings = new(dataDirectory); var database = new RelayDatabase(dataDirectory); store = new(database);
         observation = new(database);
@@ -40,7 +43,11 @@ public sealed class ProjectCoordinator : IAsyncDisposable
             {
                 while (await timer.WaitForNextTickAsync(archiveStop.Token))
                 {
-                    try { await Application.ReconcileArchivesAsync(archiveStop.Token); }
+                    try
+                    {
+                        using var admission = promotion.TryEnter();
+                        if (admission is not null) await Application.ReconcileArchivesAsync(archiveStop.Token);
+                    }
                     catch (Exception error) when (!archiveStop.IsCancellationRequested) { reportError?.Invoke(error); }
                 }
             }

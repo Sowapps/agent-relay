@@ -5,6 +5,8 @@
 
 ## Records
 
+- [RC6 rendering and promotion admission barrier](2026-11-07-promotion-quiescence.md): isolated tests and safe rollout boundary for older hosts.
+
 - [MCP refresh, design review and RC promotion rehearsal](2026-11-06-mcp-catalog-review.md): authorized lots 1–4 and resume gates.
 
 - [Post-audit tool cleanup](2026-11-06-audit-tooling-polish.md): bounded code cleanup, release evidence and read-only report lookup.

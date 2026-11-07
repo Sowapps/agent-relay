@@ -152,7 +152,7 @@ def stage_runtime(candidate):
     return {'executable': str(stage / 'AgentRelay.Windows.exe')}
 
 
-def rehearse(report, folder, receipt, baseline_directory):
+def rehearse(report, folder, receipt, baseline_directory, legacy_baseline=False):
     if not receipt or not receipt.is_absolute() or receipt.name != REPORT_FILE:
         raise ValueError('Supply the absolute qualification result.json with --receipt')
     if receipt.parent.parent != operation_directory(DELIVERY, 'qualify') or receipt.parent.name == '..':
@@ -188,9 +188,11 @@ def rehearse(report, folder, receipt, baseline_directory):
     write(previous / 'mcp-runtime.json', baseline_runtime)
     write(folder / 'mcp-runtime.json', stage_runtime(candidate))
     report['candidate'] = candidate
-    phase(report, folder, 'rollback', python_script('deployment-acceptance.py', '--prepared', folder,
-                                                    '--previous-prepared', previous, '--fixture', fixture,
-                                                    '--binding', binding))
+    arguments = ['--prepared', folder, '--previous-prepared', previous, '--fixture', fixture, '--binding', binding]
+    if legacy_baseline:
+        arguments.append('--expect-legacy-refusal')
+    phase(report, folder, 'legacy-promotion' if legacy_baseline else 'rollback',
+          python_script('deployment-acceptance.py', *arguments))
 
 
 def main():
@@ -198,12 +200,13 @@ def main():
     parser.add_argument('action', choices=(*OPERATIONS, 'status'))
     parser.add_argument('--receipt', type=Path)
     parser.add_argument('--baseline-directory', type=Path, help='Use a verified baseline archive for rehearsal')
+    parser.add_argument('--legacy-baseline', action='store_true', help='Rehearse a legacy live refusal and offline upgrade')
     parser.add_argument('--observe-stable', action='store_true', help='Explicitly compare stable identity before and after')
     parser.add_argument('--operation', choices=OPERATIONS, help='Filter status to one operation')
     parser.add_argument('--json', action='store_true', help='Emit machine-readable status')
     args = parser.parse_args()
     if args.action == 'status':
-        if args.receipt or args.baseline_directory or args.observe_stable:
+        if args.receipt or args.baseline_directory or args.legacy_baseline or args.observe_stable:
             parser.error('status reads reports only')
         show_status((args.operation,) if args.operation else OPERATIONS, args.json)
         return
@@ -211,8 +214,10 @@ def main():
         parser.error('--operation and --json are for status')
     if args.action == 'rehearse' and not args.receipt:
         parser.error('rehearse requires --receipt')
-    if (args.receipt or args.baseline_directory) and args.action != 'rehearse':
-        parser.error('--receipt and --baseline-directory are for rehearse')
+    if (args.receipt or args.baseline_directory or args.legacy_baseline) and args.action != 'rehearse':
+        parser.error('Receipt and baseline options are for rehearse')
+    if args.legacy_baseline and not args.baseline_directory:
+        parser.error('--legacy-baseline requires an explicit baseline archive')
     output = operation_directory(DELIVERY, args.action) / uuid.uuid4().hex
     reject_pilotage_paths(ROOT, output)
     output.mkdir(parents=True)
@@ -233,7 +238,7 @@ def main():
         if args.action == 'qualify':
             qualify(report, output)
         elif args.action == 'rehearse':
-            rehearse(report, output, args.receipt, args.baseline_directory)
+            rehearse(report, output, args.receipt, args.baseline_directory, args.legacy_baseline)
         else:
             phase(report, output, args.action, powershell(ROOT / 'dev.ps1', args.action, '-App', 'agent-relay', '-Offline'))
         report['status'] = 'passed'
