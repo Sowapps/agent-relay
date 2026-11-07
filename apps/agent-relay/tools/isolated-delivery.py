@@ -14,19 +14,18 @@ import uuid
 import xml.etree.ElementTree as ET
 
 from delivery_reports import REPORT_FILE, latest_reports, operation_directory
-from deployment import read, write
-from host_identity import resolve_host
+from deployment import write
+from pilotage_stable import EXE, registration_state
 from release_artifact import (
     EXTRACTED_DIRECTORY, VERIFICATION_FILE, archive_path, extract_archive,
     ordinary_directory, ordinary_file, read_json, sha256, verified_archive,
 )
-from runtime_layout import app_var, pilotage_scope, reject_pilotage_paths, runtime_command
+from runtime_layout import app_var, pilotage_stable_root, reject_pilotage_paths
 
 
 TOOLS = Path(__file__).resolve().parent
 ROOT = TOOLS.parents[2]
 VAR = app_var(ROOT)
-STABLE = pilotage_scope(ROOT)
 RELEASES = ROOT / 'local/apps/agent-relay/releases'
 DELIVERY = VAR / 'isolated-delivery'
 OPERATIONS = ('build', 'test', 'run', 'qualify', 'rehearse')
@@ -51,22 +50,16 @@ def show_status(actions, as_json):
         print('No retained operation reports.')
 
 
-def stable_snapshot():
-    ordinary_directory(STABLE)
-    names = ['mcp-runtime.json', 'mcp-contract.json', 'relay-projects.json',
-             'relay-config.json', 'mcp.codex.toml', 'mcp.windows.json']
-    files = {name: sha256(STABLE / name) for name in names}
-    for credential in ordinary_directory(STABLE / 'connections').glob('*'):
-        if credential.is_file():
-            files[credential.relative_to(STABLE).as_posix()] = sha256(ordinary_file(credential))
-    runtime = read(STABLE / 'mcp-runtime.json')
-    host = resolve_host(runtime, STABLE)
-    if host:
-        probe = subprocess.run(runtime_command(runtime) + ['profiles', '--data-dir', str(STABLE)],
-                               capture_output=True, check=True, timeout=12, creationflags=subprocess.CREATE_NO_WINDOW)
-        json.loads(probe.stdout)
-    return {'version': read(STABLE / 'mcp-contract.json')['version'], 'files': files, 'responded': bool(host),
-            'pid': host['pid'] if host else None, 'executableSha256': sha256(Path(runtime_command(runtime)[0]))}
+def stable_snapshot(config):
+    _, table, data, binding = registration_state(config)
+    stable_root = pilotage_stable_root(ROOT)
+    command = Path(table['command'])
+    if not data.is_relative_to(stable_root) or not command.is_relative_to(stable_root) or command.name != EXE:
+        raise ValueError('The observed connection is not registered on a managed Pilotage AP stable installation')
+    files = {name: sha256(ordinary_file(data / name)) for name in ('relay-config.json', 'relay-projects.json')
+             if (data / name).is_file()}
+    return {'registration': table, 'files': files, 'bindingId': binding,
+            'executableSha256': sha256(ordinary_file(command))}
 
 
 def git(*arguments):
@@ -169,20 +162,13 @@ def rehearse(report, folder, receipt, baseline_directory, legacy_baseline=False)
     fixture = ordinary_directory(extracted / 'var/apps/agent-relay/default')
     reject_pilotage_paths(ROOT, fixture)
     binding = ordinary_file(extracted / 'requests-0/example-context.json')
-    if baseline_directory:
-        baseline_directory = package_directory(baseline_directory)
-        baseline_version = read_json(baseline_directory / VERIFICATION_FILE)['version']
-        baseline = candidate_evidence(baseline_directory, baseline_version)
-        if baseline['sha256'] == candidate['sha256']:
-            raise ValueError('Select a different verified baseline archive')
-        baseline_runtime = stage_runtime(baseline)
-        report['baseline'] = baseline
-    else:
-        if not STABLE.exists():
-            raise ValueError('Supply --baseline-directory when there is no installed baseline runtime')
-        # The compatibility route uses only the installed binary on synthetic data.
-        runtime = read_json(STABLE / 'mcp-runtime.json')
-        baseline_runtime = {'executable': runtime_command(runtime)[0]}
+    baseline_directory = package_directory(baseline_directory)
+    baseline_version = read_json(baseline_directory / VERIFICATION_FILE)['version']
+    baseline = candidate_evidence(baseline_directory, baseline_version)
+    if baseline['sha256'] == candidate['sha256']:
+        raise ValueError('Select a different verified baseline archive')
+    baseline_runtime = stage_runtime(baseline)
+    report['baseline'] = baseline
     previous = folder / 'previous'
     previous.mkdir()
     write(previous / 'mcp-runtime.json', baseline_runtime)
@@ -201,7 +187,8 @@ def main():
     parser.add_argument('--receipt', type=Path)
     parser.add_argument('--baseline-directory', type=Path, help='Use a verified baseline archive for rehearsal')
     parser.add_argument('--legacy-baseline', action='store_true', help='Rehearse a legacy live refusal and offline upgrade')
-    parser.add_argument('--observe-stable', action='store_true', help='Explicitly compare stable identity before and after')
+    parser.add_argument('--observe-stable', type=Path, metavar='CODEX_CONFIG',
+                        help='Compare the named stable registration and selected hashes before and after')
     parser.add_argument('--operation', choices=OPERATIONS, help='Filter status to one operation')
     parser.add_argument('--json', action='store_true', help='Emit machine-readable status')
     args = parser.parse_args()
@@ -212,8 +199,8 @@ def main():
         return
     if args.operation or args.json:
         parser.error('--operation and --json are for status')
-    if args.action == 'rehearse' and not args.receipt:
-        parser.error('rehearse requires --receipt')
+    if args.action == 'rehearse' and (not args.receipt or not args.baseline_directory):
+        parser.error('rehearse requires --receipt and --baseline-directory')
     if (args.receipt or args.baseline_directory or args.legacy_baseline) and args.action != 'rehearse':
         parser.error('Receipt and baseline options are for rehearse')
     if args.legacy_baseline and not args.baseline_directory:
@@ -230,11 +217,8 @@ def main():
     print(f'Operation report: {output / REPORT_FILE}', flush=True)
     try:
         report.update(commit=git('rev-parse', 'HEAD'), dirty=bool(git('status', '--porcelain')))
-        observe_stable = args.observe_stable or (args.action == 'rehearse' and not args.baseline_directory)
-        before = stable_snapshot() if observe_stable and STABLE.exists() else None
-        report['stableObserved'] = observe_stable
-        report['stablePresent'] = before is not None if observe_stable else None
-        report['stableRespondedBefore'] = before['responded'] if before else None
+        before = stable_snapshot(args.observe_stable.absolute()) if args.observe_stable else None
+        report['stableObserved'] = before is not None
         if args.action == 'qualify':
             qualify(report, output)
         elif args.action == 'rehearse':
@@ -249,7 +233,7 @@ def main():
     finally:
         original_error = sys.exc_info()[1]
         try:
-            report['stablePreserved'] = stable_snapshot() == before if before is not None else None
+            report['stablePreserved'] = stable_snapshot(args.observe_stable.absolute()) == before if before is not None else None
             if report['stablePreserved'] is False:
                 raise RuntimeError('Protected stable identity or configuration changed during operation')
         except Exception as error:

@@ -7,15 +7,19 @@ def app_var(root):
     return Path(root).resolve() / 'var/apps/agent-relay'
 
 
-def pilotage_scope(root):
+def pilotage_legacy_scope(root):
     return app_var(root) / 'v1-qualification'
 
 
+def pilotage_stable_root(root):
+    return app_var(root) / 'ap-stable'
+
+
 def reject_pilotage_paths(root, *paths):
-    stable = pilotage_scope(root).resolve()
+    protected = (pilotage_legacy_scope(root).resolve(), pilotage_stable_root(root).resolve())
     for path in paths:
         target = Path(path).resolve()
-        if target.is_relative_to(stable) or stable.is_relative_to(target):
+        if any(target.is_relative_to(scope) or scope.is_relative_to(target) for scope in protected):
             raise ValueError('Pilotage AP requires a separately authorized stable deployment')
 
 

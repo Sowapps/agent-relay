@@ -37,13 +37,14 @@ def exclusive(data):
     finally: kernel.CloseHandle(handle)
 
 
-def snapshot(data, destination):
+def snapshot(data, destination, *, files=STATE_FILES):
     destination.mkdir()
-    for name in STATE_FILES:
+    for name in files:
         if name == 'relay.sqlite':
             continue  # SQLite backup includes committed WAL state.
         if (data / name).exists(): shutil.copy2(data / name, destination / name)
-    if (data / 'connections').exists(): shutil.copytree(data / 'connections', destination / 'connections')
+    if (data / 'connections').exists():
+        shutil.copytree(data / 'connections', destination / 'connections')
     if (data / 'relay.sqlite').exists():
         with closing(sqlite3.connect(data / 'relay.sqlite')) as source, closing(sqlite3.connect(destination / 'relay.sqlite')) as target: source.backup(target)
 
