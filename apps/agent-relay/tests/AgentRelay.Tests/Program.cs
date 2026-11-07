@@ -88,6 +88,7 @@ using (var busy = new ExchangeService(new SqliteExchangeStore(Path.Combine(data,
     await pending;
 }
 Console.WriteLine("APPLICATION_INTEGRATION=PASS");
+await VerifyPromotionAsync(data + "-promotion");
 await WorkScenarios.Run(data);
 await SessionScenarios.Run(data + "-sessions");
 await ProjectScenarios.Run(data + "-projects");
@@ -102,6 +103,50 @@ static void Check(bool condition, string name)
 {
     if (!condition) throw new InvalidOperationException(name);
     Console.WriteLine("PASS: " + name);
+}
+
+static async Task VerifyPromotionAsync(string data)
+{
+    var connections = new ConnectionStore(data);
+    connections.EnsureAdministrator();
+    var responder = new PausedResponder();
+    using var service = new ExchangeService(new SqliteExchangeStore(data), responder, [LocalDemo.Route]);
+    using var server = new RelayPipeServer(RelayLocation.PipeName(data), service, _ => { }, connections: connections, dataDirectory: data);
+    using var stop = new CancellationTokenSource();
+    var listening = server.RunAsync(stop.Token);
+    var client = new RelayPipeClient(data);
+    var confirm = new PipeRequest("deployment_quiesce");
+    var admitted = client.SendAsync(LocalDemo.Message("already admitted"), CancellationToken.None);
+    try
+    {
+        await responder.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var marker = Path.Combine(data, "promotion.lock");
+        File.WriteAllText(marker, "test-owner");
+        try
+        {
+            await RefusesBeforeExecution("busy", () => client.RequestAsync(confirm, CancellationToken.None));
+            responder.Release.TrySetResult();
+            await admitted;
+            var ack = await client.RequestAsync(confirm, CancellationToken.None);
+            Check(ack.Warnings?.Single() == "deployment-quiescent-v1", "promotion confirms drained admissions");
+            await RefusesBeforeExecution("maintenance", () => client.SendAsync(LocalDemo.Message("too late"), CancellationToken.None));
+        }
+        finally { File.Delete(marker); }
+        await client.SendAsync(LocalDemo.Message("after promotion"), CancellationToken.None);
+    }
+    finally
+    {
+        responder.Release.TrySetResult();
+        stop.Cancel();
+        await listening;
+    }
+}
+
+static async Task RefusesBeforeExecution<T>(string code, Func<Task<T>> action)
+{
+    try { await action(); throw new InvalidOperationException("Expected promotion refusal: " + code); }
+    catch (RelayException error) when (error.Code == code && error.EffectsPossible == false)
+    { Console.WriteLine("PASS: promotion refused " + code + " before execution"); }
 }
 
 static async Task Refuses(string code, Func<Task<RelayExchange>> action)

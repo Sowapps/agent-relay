@@ -15,10 +15,16 @@ public sealed class RelayPipeServer : IDisposable
     private readonly ProjectCoordinator? projects;
     private readonly string? dataDirectory;
     private readonly Func<bool>? showWindow;
+    private readonly PromotionAdmission? promotion;
     private NamedPipeServerStream listener;
 
     public RelayPipeServer(string name, ExchangeService service, Action<Exception> reportError, MvpCoordinator? mvp = null,
         ConnectionStore? connections = null, ProjectCoordinator? projects = null, string? dataDirectory = null, Func<bool>? showWindow = null)
+        : this(name, service, reportError, mvp, connections, projects, dataDirectory, showWindow,
+            dataDirectory is null ? null : new PromotionAdmission(dataDirectory)) { }
+
+    internal RelayPipeServer(string name, ExchangeService service, Action<Exception> reportError, MvpCoordinator? mvp,
+        ConnectionStore? connections, ProjectCoordinator? projects, string? dataDirectory, Func<bool>? showWindow, PromotionAdmission? promotion)
     {
         this.name = name;
         this.service = service;
@@ -27,6 +33,7 @@ public sealed class RelayPipeServer : IDisposable
         this.connections = connections; this.projects = projects;
         this.dataDirectory = dataDirectory;
         this.showWindow = showWindow;
+        this.promotion = promotion;
         listener = CreateListener();
     }
 
@@ -66,16 +73,27 @@ public sealed class RelayPipeServer : IDisposable
                     deadline.CancelAfter(PipeDeadlines.For(request.Operation));
                     if (request.Version != 1) throw new RelayException("unsupported_version", "Unsupported local protocol version.");
                     var authenticated = connections is null ? null : await connections.AuthenticateAsync(request.AccessToken, deadline.Token);
+                    var passive = request.Operation is "mcp_handshake" or "configuration" or "history" or "read" or "show_window" ||
+                        request.Operation == "project" && request.ProjectAction is { } query &&
+                        (query.Name is "configuration" or "describe_endpoints" or "list_sessions" or "list_results" or "list_events" ||
+                            query.Name.StartsWith("observe_", StringComparison.Ordinal));
+                    using var admissionLease = passive || request.Operation == "deployment_quiesce" ? null : promotion?.Enter();
                     if (dataDirectory is not null && File.Exists(Path.Combine(dataDirectory, "maintenance.json")))
                     {
                         // McpFacade needs this authenticated read-only handshake before scoped reads during migration.
                         // Keep handshake availability coupled to migration.qualify; it grants no work admission.
-                        var passive = request.Operation is "mcp_handshake" or "configuration" or "history" or "result" or "read" or "show_window" ||
-                            request.Operation == "project" && request.ProjectAction is { } action &&
-                            (action.Name is "configuration" or "describe_endpoints" or "list_sessions" or "list_results" or "list_events" or "get_result" || action.Name.StartsWith("observe_", StringComparison.Ordinal));
-                        if (!passive) throw new RelayException("maintenance", "La migration est en cours. Les nouvelles opérations restent bloquées jusqu’à sa validation.");
+                        var migrationRead = passive || request.Operation == "result" ||
+                            request.Operation == "project" && request.ProjectAction?.Name == "get_result";
+                        if (!migrationRead) throw new RelayException("maintenance", "La migration est en cours. Les nouvelles opérations restent bloquées jusqu’à sa validation.");
                     }
-                    if (request.Operation == "mcp_handshake")
+                    if (request.Operation == "deployment_quiesce")
+                    {
+                        if (authenticated is not { Administrator: true } || promotion is null)
+                            throw new RelayException("capability_denied", "Only local deployment can confirm quiescence.", effectsPossible: false);
+                        promotion.Confirm(() => projects?.Work.IsActive == true || mvp?.Work.IsActive == true);
+                        response = new(Warnings: ["deployment-quiescent-v1"]);
+                    }
+                    else if (request.Operation == "mcp_handshake")
                     {
                         if (authenticated is not { Administrator: false }) throw new RelayException("capability_denied", "An MCP connection must retain its explicit participant identity.");
                         response = new(Mcp: new(McpIdentity.Current, authenticated.ConnectionId, authenticated.Caller.EndpointId, authenticated.Caller.ProjectIds));

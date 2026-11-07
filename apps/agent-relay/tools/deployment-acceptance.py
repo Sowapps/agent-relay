@@ -8,6 +8,7 @@ from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
+import subprocess
 import time
 from unittest.mock import patch
 import uuid
@@ -90,10 +91,20 @@ def exercise_update(args, root, case, result):
         require(any(path.parent == data / 'connections' for path in expected),
                 'Scoped rehearsal fixture has no credential files to verify')
     launch = deployment.launch
+    confirm = deployment.confirm_quiescence
     children = []
     inject = False
     def promote(candidate, *, expected=data):
         deployment.publish(data, candidate, reports, False, expected_data=expected)
+
+    def confirm_and_probe(pointer, target):
+        confirm(pointer, target)
+        response = subprocess.run(runtime_command(pointer) + ['send', '--data-dir', str(target), '--message', 'late fixture request'],
+                                  capture_output=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)
+        error = json.loads(response.stderr)
+        require(response.returncode != 0 and error['code'] == 'maintenance' and error['effectsPossible'] is False,
+                'A request after quiescence confirmation was not safely refused')
+        result['lateRequestRefused'] = True
 
     def owned_launch(pointer, target, logs, show=False):
         nonlocal inject
@@ -113,11 +124,29 @@ def exercise_update(args, root, case, result):
         return process
 
     try:
-        with patch.object(deployment, 'launch', owned_launch):
+        with patch.object(deployment, 'launch', owned_launch), patch.object(deployment, 'confirm_quiescence', confirm_and_probe):
             promote(args.previous_prepared)
             verify_binding(case, data, binding, root)
             old = deployment.read(reports / 'host.json')
             pointer = deployment.read(data / 'mcp-runtime.json')
+            if args.expect_legacy_refusal:
+                try:
+                    promote(args.prepared)
+                except RuntimeError as error:
+                    require('did not confirm the admission barrier' in str(error), str(error))
+                else:
+                    raise RuntimeError('A legacy host was accepted for live promotion')
+                require(deployment.identity(old, data), 'The refusal displaced the legacy host')
+                require(not (data / 'promotion.lock').exists(), 'The refused legacy update left admissions blocked')
+                old_process = next(process for process in children if process.pid == old['pid'])
+                old_process.terminate()
+                old_process.wait(timeout=10)
+                promote(args.prepared)
+                verify_binding(case, data, binding, root)
+                verify_preserved(expected)
+                require(not (data / 'promotion.lock').exists(), 'Healthy offline promotion left admissions blocked')
+                result.update(legacyOnlinePromotionRefused=True, stoppedLegacyPromotionPassed=True)
+                return
             settings_before = (data / 'relay-config.json').read_bytes()
             try:
                 promote(args.prepared, expected=case / 'wrong-scope')
@@ -156,6 +185,7 @@ def exercise_update(args, root, case, result):
                     'Rollback did not restore a running baseline host')
             require(deployment.read(data / 'mcp-runtime.json') == pointer,
                     'Rollback did not restore the previous runtime pointer')
+            require(not (data / 'promotion.lock').exists(), 'Healthy rollback left admissions blocked')
             require((data / 'relay-config.json').read_bytes() == settings_before,
                     'Rollback did not restore the previous relay settings')
             verify_preserved(expected)
@@ -173,6 +203,7 @@ def exercise_update(args, root, case, result):
             verify_preserved(expected)
             require(runtime_command(deployment.read(data / 'mcp-runtime.json')) == runtime_command(runtime),
                     'Successful rehearsal did not select the candidate runtime')
+            require(not (data / 'promotion.lock').exists(), 'Healthy promotion left admissions blocked')
             result.update(failedPreparationPreservesHost=True, projectAndCredentialFilesPreserved=len(expected),
                           healthyUpdateSeconds=round(time.monotonic() - started, 3),
                           scopedMcpAfterUpdateAndRollback=binding is not None,
@@ -191,6 +222,7 @@ def main():
     parser.add_argument('--previous-prepared', type=Path, required=True)
     parser.add_argument('--fixture', type=Path)
     parser.add_argument('--binding', type=Path)
+    parser.add_argument('--expect-legacy-refusal', action='store_true')
     args = parser.parse_args()
     if args.binding and not args.fixture:
         parser.error('--binding requires --fixture')

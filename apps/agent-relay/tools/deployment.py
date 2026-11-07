@@ -61,6 +61,42 @@ def demand_idle(data):
             raise RuntimeError('Active durable work exists; publication refused')
 
 
+class PromotionFreeze:
+    """Block new admission until an owned replacement or rollback is healthy."""
+
+    def __init__(self, data):
+        self.marker = data / 'promotion.lock'
+        self.owner = uuid.uuid4().hex
+        self.retain = False
+
+    def __enter__(self):
+        try:
+            with self.marker.open('x', encoding='ascii') as lock:
+                lock.write(self.owner)
+        except FileExistsError as error:
+            raise RuntimeError('A promotion barrier already exists for this scope') from error
+        return self
+
+    def __exit__(self, *_):
+        if not self.retain and self.marker.is_file() and self.marker.read_text(encoding='ascii') == self.owner:
+            self.marker.unlink()
+
+
+def confirm_quiescence(runtime, data):
+    result = subprocess.run(runtime_command(runtime) + ['deployment-quiesce', '--data-dir', str(data)],
+                            capture_output=True, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)
+    if result.returncode:
+        try:
+            failure = json.loads(result.stderr)
+        except (ValueError, UnicodeError):
+            failure = {}
+        if failure.get('code') == 'busy':
+            raise RuntimeError('Admitted requests or operations are still active; publication refused')
+        raise RuntimeError('The running relay did not confirm the admission barrier; publication refused')
+    if json.loads(result.stdout).get('warnings') != ['deployment-quiescent-v1']:
+        raise RuntimeError('The running relay did not acknowledge the promotion protocol; publication refused')
+
+
 def launch(runtime, data, reports, show=False):
     identifier = uuid.uuid4().hex
     with (reports / (identifier + '.stdout.log')).open('wb') as output, (reports / (identifier + '.stderr.log')).open('wb') as errors:
@@ -89,6 +125,12 @@ def publish(data, prepared, reports, show, *, expected_data=None):
     contract_path = Path(runtime_command(runtime)[0]).parent / 'mcp-contract.json'
     contract = read(contract_path)
     if not re.fullmatch(r'\d+\.\d+\.\d+(?:-rc\.[1-9]\d*)?', contract['version']): raise ValueError('Only stable and RC versions may be deployed')
+    data.mkdir(parents=True, exist_ok=True)
+    with PromotionFreeze(data) as freeze:
+        publish_prepared(data, reports, runtime, contract, root, development, show, freeze)
+
+
+def publish_prepared(data, reports, runtime, contract, root, development, show, freeze):
     history_path = data / 'mcp-contract-history.json'
     history = read(history_path) if history_path.exists() else {}
     known = history.get(contract['version'])
@@ -107,24 +149,32 @@ def publish(data, prepared, reports, show, *, expected_data=None):
             print(json.dumps({'published': False, 'alreadyCurrent': True, 'pid': current_host['pid'], 'currentChatMcpQualified': False}))
             return
     demand_idle(data)
-    reports.mkdir(parents=True, exist_ok=True); data.mkdir(parents=True, exist_ok=True)
+    reports.mkdir(parents=True, exist_ok=True)
     transaction = reports / ('deployment-' + uuid.uuid4().hex); transaction.mkdir()
     check = transaction / 'preflight'; check.mkdir(); snapshot(data, check / 'before')
     for name in ['relay.sqlite', 'relay-config.json', 'relay-projects.json']:
         if (check / 'before' / name).exists(): shutil.copy2(check / 'before' / name, check / name)
     if (check / 'before/connections').exists(): shutil.copytree(check / 'before/connections', check / 'connections')
     probe = launch(runtime, check, transaction); probe.terminate(); probe.wait(timeout=10)
+    replace_runtime(data, reports, runtime, contract, history, transaction, root, development, show, freeze)
+
+
+def replace_runtime(data, reports, runtime, contract, history, transaction, root, development, show, freeze):
+    history_path = data / 'mcp-contract-history.json'
     metadata = data / 'ui-host.json'; report_metadata = reports / 'host.json'
     previous = read(metadata) if metadata.exists() else read(report_metadata) if report_metadata.exists() else None
     if previous is not None:
         validate(previous, root, development)
     previous = resolve_host(previous, data)
     was_running = previous is not None
+    if was_running:
+        confirm_quiescence(runtime, data)
     demand_idle(data)
     if was_running:
         if not identity(previous, data):
             raise RuntimeError('Relay owner changed before shutdown; no process was stopped')
         os.kill(int(previous['pid']), signal.SIGTERM)
+        freeze.retain = True
         for _ in range(50):
             try:
                 with exclusive(data): break
@@ -135,6 +185,7 @@ def publish(data, prepared, reports, show, *, expected_data=None):
     try:
         with exclusive(data): snapshot(data, backup)
         backup_ready = True
+        freeze.retain = True
         started = launch(runtime, data, transaction, show)
         old = read(backup / 'mcp-runtime.json') if (backup / 'mcp-runtime.json').exists() else {}
         if old.get('connectionId'): runtime['connectionId'] = old['connectionId']
@@ -144,6 +195,7 @@ def publish(data, prepared, reports, show, *, expected_data=None):
         write(metadata, dict(runtime, pid=started.pid, executable=runtime_command(runtime)[0], data=str(data), transaction=str(transaction)))
         write(report_metadata, read(metadata))
         write(transaction / 'result.json', {'healthy': True, 'rollbackSnapshot': str(backup), 'pid': started.pid})
+        freeze.retain = False
     except BaseException:
         if started is not None: started.terminate(); started.wait(timeout=10)
         if backup_ready:
@@ -156,7 +208,9 @@ def publish(data, prepared, reports, show, *, expected_data=None):
                 if (backup / 'connections').exists(): shutil.copytree(backup / 'connections', data / 'connections')
         if was_running:
             restored = launch(previous, data, transaction, show); write(metadata, dict(previous, pid=restored.pid)); write(report_metadata, read(metadata))
-        write(transaction / 'result.json', {'healthy': False, 'rollbackPerformed': True}); raise
+        write(transaction / 'result.json', {'healthy': False, 'rollbackPerformed': True})
+        freeze.retain = False
+        raise
     print(json.dumps({'published': True, 'pid': started.pid, 'transaction': str(transaction), 'currentChatMcpQualified': False}))
 
 
