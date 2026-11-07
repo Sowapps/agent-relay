@@ -1,16 +1,10 @@
-# Agent Relay v1.0.1
+# Agent Relay v1.1.0
 
-Windows x64 package for project-scoped agent collaboration between Windows and WSL, with a shared monitoring and diagnostic interface.
+Agent Relay connects a Windows MCP client with agents and project workspaces in WSL. This stable release includes the fixes exercised on the 1.1.0 release candidates.
 
-- Delegate from a Windows MCP client to supported Codex or Claude agents in WSL; name and reuse sessions or run independent sessions in parallel.
-- Receive replies and independent agent reports, run authorized direct commands without a model turn, inspect environments and transfer individual files between authorized workspaces.
-- Follow project activity, retained messages, session exchanges, results and errors in the Windows application. Its current interface is in French.
-- Start with your usual agent using self-contained prompts, explicit project/workspace/permission guidance and preserved user instructions and approvals.
-- Enable or disable optional Windows sign-in startup in Réglages → Général. The relay starts quietly in the notification area without starting agents/tasks; the setting is off by default and errors remain readable/retryable.
-- Start in English or French with the included README.md / README.fr.md, current guides and documented boundaries. Five public MCP resources provide operational documentation.
+- Codex WSL receives delegated requests through a single bracketed paste and submission. Unconfirmed work stays in the history with a clear recovery status and no automatic replay.
+- MCP clients can inspect the active version, contract and catalog status. A retained launcher follows the selected runtime, and a client with an outdated catalog receives a readable recovery action.
+- General settings separate project lifecycle and MCP connections. Each project's own view shows its participants, workspaces and permissions. Archival stops new admissions and waits for admitted work to finish.
+- The Windows interface keeps open diagnostics stable during updates, presents scoped history and offers an explicit cleanup action for older technical data.
 
-This maintenance release adds the reviewed startup preference and its retained native launcher, updates the startup guides and includes the French starting README. Existing projects, permissions and MCP tools remain unchanged. Dependency versions are unchanged.
-
-The ZIP includes .NET. WebView2 is required for the graphical interface; native WSL work additionally needs the documented Python/WSL/tmux/client prerequisites and account login. The package is unsigned. No global installation, automatic startup or client settings changes occur implicitly.
-
-Verify SHA256SUMS.txt, extract the complete ZIP to a persistent writable folder and start with README.md or START-HERE.txt. Local qualification covers the extracted executable, isolated startup, scoped MCP, updated documentation, project preservation, restart and internal graphical rendering. It does not claim prerequisite installation on a clean Windows machine or repeat paid native-agent tests.
+The Windows x64 ZIP includes .NET and the English and French getting-started guides. The interface uses WebView2. Native agent work requires the documented WSL, tmux and signed-in client. Verify the ZIP against SHA256SUMS.txt and follow the portable release guide.

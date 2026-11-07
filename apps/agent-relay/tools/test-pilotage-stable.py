@@ -25,11 +25,13 @@ def rejected(action, message):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--release-directory', required=True, type=Path)
+    parser.add_argument('--baseline-directory', type=Path, help='Use an older portable verifier fixture as the source')
     args = parser.parse_args()
     release = args.release_directory.resolve()
     verification = read_json(release / VERIFICATION_FILE)
-    extracted = release / EXTRACTED_DIRECTORY
-    assert Path(verification['extracted']) == extracted
+    baseline = args.baseline_directory.resolve() if args.baseline_directory else release
+    extracted = baseline / EXTRACTED_DIRECTORY
+    assert Path(read_json(baseline / VERIFICATION_FILE)['extracted']) == extracted
     fixture = read_json(extracted / 'requests-0/example-context.json')
     assert fixture['localOnly'] is True
     original = app_var(extracted) / 'default'
@@ -45,10 +47,10 @@ def main():
     snapshot(original, source, files=workflow.STATE_FILES)
     (source / 'host.lock').touch()
     config = test / 'config.toml'
-    command = workflow.candidate_table(test / 'result.json', fixture['connectionId'])
-    command['args'][2] = str(source)
-    config.write_text(f'[mcp_servers.{workflow.SERVER}]\ncommand = ' + json.dumps(command['command'])
-                      + '\nargs = ' + json.dumps(command['args']) + '\nrequired = true\n'
+    command = str(extracted / 'app' / workflow.EXE)
+    arguments = ['mcp', '--data-dir', str(source), '--connection-id', fixture['connectionId']]
+    config.write_text(f'[mcp_servers.{workflow.SERVER}]\ncommand = ' + json.dumps(command)
+                      + '\nargs = ' + json.dumps(arguments) + '\nrequired = true\n'
                       + '[mcp_servers.unrelated]\ncommand = "preserved"\n', encoding='utf-8')
     initial_config = config.read_bytes()
     initial_source = workflow.source_fingerprint(source)
