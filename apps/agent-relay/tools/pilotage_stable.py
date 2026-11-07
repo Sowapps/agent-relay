@@ -106,9 +106,20 @@ def expected_membership(data, project, endpoint):
     return memberships
 
 
+def scoped_launcher(executable, data):
+    runtime = read_json(data / 'mcp-runtime.json')
+    declared = runtime.get('mcpExecutable')
+    if declared is None:
+        return executable
+    broker = data / 'mcp-launcher' / EXE
+    if Path(declared) != broker or sha256(ordinary_file(broker)) != sha256(ordinary_file(executable)):
+        raise ValueError('The scoped MCP launcher differs from the staged archive')
+    return broker
+
+
 def probe(receipt, report):
     executable, data = locations(receipt)
-    runtime = {'executable': str(executable), 'connectionId': report['bindingId']}
+    runtime = {'executable': str(scoped_launcher(executable, data)), 'connectionId': report['bindingId']}
     with (receipt.parent / 'mcp.stderr.log').open('a', encoding='utf-8') as errors:
         with RelayMcp(runtime, data, ROOT, errors) as mcp:
             version = mcp.initialization['serverInfo']['version']
@@ -202,14 +213,15 @@ def prepare(config, release, version, project, endpoint, thread, stable_root, le
     return receipt
 
 
-def candidate_table(receipt, binding):
+def candidate_table(receipt, report):
     executable, data = locations(receipt)
-    return {'command': str(executable), 'args': ['mcp', '--data-dir', str(data), '--connection-id', binding]}
+    return {'command': str(scoped_launcher(executable, data)),
+            'args': ['mcp', '--data-dir', str(data), '--connection-id', report['bindingId']]}
 
 
 def matches_target(table, receipt, report):
     return table.get('enabled', True) is True and all(
-        table.get(key) == value for key, value in candidate_table(receipt, report['bindingId']).items()
+        table.get(key) == value for key, value in candidate_table(receipt, report).items()
     )
 
 
@@ -224,7 +236,7 @@ def switch(receipt, report):
     if selected != source or binding != report['bindingId'] or route(table) != report['previousRoute']:
         raise ValueError('The named connection changed after preparation')
     fragment = f'[mcp_servers.{SERVER}]\n' + ''.join(
-        f'{key} = {registration.toml_value(value)}\n' for key, value in candidate_table(receipt, binding).items()
+        f'{key} = {registration.toml_value(value)}\n' for key, value in candidate_table(receipt, report).items()
     )
     desired = registration.update(raw.decode('utf-8-sig'), fragment, SERVER).encode('utf-8')
     started = time.monotonic()

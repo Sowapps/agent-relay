@@ -5,6 +5,7 @@
 
 ## Records
 
+- [Stable rollout for Pilotage AP](2026-11-07-stable-pilotage-rollout.md): real RC round trip, publication and live cutover proof.
 - [Pilotage AP stable operation](2026-11-07-pilotage-stable-workflow.md): archive, isolated switch and same-chat confirmation workflow.
 
 - [RC6 rendering and promotion admission barrier](2026-11-07-promotion-quiescence.md): isolated tests and safe rollout boundary for older hosts.
