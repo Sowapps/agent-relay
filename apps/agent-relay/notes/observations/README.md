@@ -5,6 +5,8 @@
 
 ## Reports
 
+- [Pilotage AP live reply on stable 1.1.0](2026-11-08-pilotage-ap-live-reply.md): restored stable host, actual same-chat version, correlated native reply and startup diagnosis.
+
 - [RC6 native WSL reply](2026-11-07-rc6-native-reply.md): real output, request and inbox correlation, and transcript checksums.
 
 - [Stable v1.1.0 deployment to Pilotage AP](2026-11-07-stable-deployment.md): published archive, preserved data and existing-chat checkpoint.

@@ -10,3 +10,5 @@ A fresh authenticated connection to the deployed host returned version `1.1.0`, 
 The existing Pilotage AP Codex chat still loaded the older MCP catalog. Its verification stopped before opening a session or submitting a WSL request. The cutover receipt therefore records `awaiting-chat`. The actual successful native reply is recorded in the [isolated RC6 observation](2026-11-07-rc6-native-reply.md).
 
 Copies of the package, publication and cutover receipts are indexed in `local/apps/agent-relay/evidence/2026-11-07-stable-qualification/SHA256SUMS.txt`. The manifest SHA-256 is `fa6611efce2caa270e348588bf04e8f70f29336b4805e446530fbc4f1cb2c55d`.
+
+The [live Pilotage AP proof](2026-11-08-pilotage-ap-live-reply.md) records the subsequent successful same-chat qualification.

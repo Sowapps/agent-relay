@@ -97,6 +97,8 @@ The successful switch prints `chatCheck`. In that exact Codex chat and using the
 
 The registration write is the cutover point. If a check or write fails before it, the tool stops only the candidate it started and preserves the previous registration. If interrupted near cutover, inspect the retained receipt and named registration with `status` before any retry. After cutover, preserve the selected scope and any new history while recovering the client. Restoring an older scope requires a new stopped-scope review and must never silently route Pilotage AP to development. Logs and timings stay next to the receipt under the managed installation directory.
 
+Windows sign-in startup is a preference per data scope. After a switch to a new scope, check the new installation's preference and identify any entry for the previous scope before proposing a transfer. An agent with authorized local command access can recover an unavailable host using the selected installation's own executable with `startup --data-dir <exact-data-directory>`. The launch is separate from sign-in registration. Verify the scoped MCP version and inspect any retained request before sending more work. An agent with MCP access alone needs to ask the operator or relay maintainer when the host is unavailable.
+
 ## Current limits
 
 The local echo is a deterministic regression adapter. The application uses the [MVP command/agent workflow](mvp-architecture.md), with native clients and a separate inbound message capability.
