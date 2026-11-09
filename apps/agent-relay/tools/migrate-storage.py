@@ -4,7 +4,6 @@ Usage: --source <legacy-scope> --destination <var-scope> --runtime-pointer <prep
        --config <Codex-config> [--config ...] [--apply]. No model or global-agent-auth change.
 """
 import argparse
-import base64
 from contextlib import closing
 import hashlib
 import json
@@ -22,7 +21,6 @@ import subprocess
 import time
 import tomllib
 import uuid
-import winreg
 from deployment import exclusive, launch
 from host_identity import resolve_host
 import importlib.util
@@ -31,7 +29,6 @@ _registration=importlib.util.module_from_spec(_spec);_spec.loader.exec_module(_r
 from runtime_layout import app_var, validate_runtime, runtime_command
 from relay_mcp import RelayMcp
 
-REGISTRY = r'Software\Microsoft\Windows\CurrentVersion\Run'
 CORE = ['relay-config.json', 'relay-projects.json', 'connections', 'attention-reviews.json']
 RETIRE = [*CORE, 'relay.sqlite', 'relay.sqlite-wal', 'relay.sqlite-shm', 'prepared', 'presentation-cache',
           'startup-launcher', 'startup.log', 'ui-host.json', 'mcp-runtime.json', 'mcp.codex.toml', 'mcp.windows.json',
@@ -49,21 +46,16 @@ def write(path, value):
 def reparse(path): return bool(path.lstat().st_file_attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
 
 
-def startup_name(data): return 'AgentRelay-' + hashlib.sha256(str(data).upper().encode()).hexdigest()[:12].upper()
-
-
-def startup_read(data):
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY) as key: return winreg.QueryValueEx(key, startup_name(data))
-    except FileNotFoundError: return None
-
-
-def startup_restore(data, value):
-    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, REGISTRY) as key:
-        if value is not None: winreg.SetValueEx(key, startup_name(data), 0, value[1], value[0])
-        else:
-            try: winreg.DeleteValue(key, startup_name(data))
-            except FileNotFoundError: pass
+def startup_entry(runtime, data, **change):
+    """Delegate scoped Windows startup entry operations to the prepared C# runtime."""
+    command = runtime_command(runtime) + ['startup-entry', '--data-dir', str(data)]
+    if change:
+        command.append('--apply')
+    result = subprocess.run(command, input=json.dumps(change) if change else None, capture_output=True,
+                            encoding='utf-8', timeout=35, creationflags=subprocess.CREATE_NO_WINDOW)
+    if result.returncode:
+        raise RuntimeError('Startup entry operation failed: ' + result.stderr.strip())
+    return json.loads(result.stdout)
 
 
 def documents(data, table):
@@ -246,6 +238,10 @@ def migrate(args):
         elif path.is_dir(): required += sum(file.stat().st_size for file in path.rglob('*') if file.is_file())
     if shutil.disk_usage(root).free < required + 32 * 1024 * 1024: raise RuntimeError('Insufficient space for the Windows migration copy')
     runtime = read(args.runtime_pointer); validate_runtime(runtime, root)
+    old_startup = startup_entry(runtime, source)['entry']
+    new_startup = startup_entry(runtime, destination)
+    if new_startup['entry'] is not None:
+        raise RuntimeError('A destination startup registration already exists')
     old_runtime = read(source / 'mcp-runtime.json')
     if old_runtime.get('connectionId'): runtime['connectionId'] = old_runtime['connectionId']
     changes = client_changes(args.config, source, destination, runtime, runtime.get('connectionId'))
@@ -253,20 +249,21 @@ def migrate(args):
     native_probe = [native_call(group, 'probe', transaction_id) for group in plan['native']] if args.check_native or args.apply else []
     report = {'applied': False, 'source': str(source), 'destination': str(destination), 'projects': plan['projectIds'], 'native': plan['native'],
               'windows': plan['windows'], 'clientConfigurations': [str(change['path']) for change in changes], 'nativeProbe': native_probe,
-              'modelCalls': 0, 'userWorkspacesMoved': False, 'requiresClientReload': True}
+              'modelCalls': 0, 'userWorkspacesMoved': False, 'requiresClientReload': True,
+              'startupEnabled': old_startup is not None}
     if not args.apply: return report
     transaction = app_var(root) / 'migrations' / transaction_id; transaction.mkdir(parents=True)
     write(transaction / 'plan.json', report)
     for index, change in enumerate(changes): (transaction / ('client-' + str(index) + '.before.toml')).write_bytes(change['before'])
-    old_startup = startup_read(source); new_startup = startup_read(destination)
-    if new_startup is not None: raise RuntimeError('A destination startup registration already exists')
-    write(transaction / 'startup-before.json', {'source': old_startup, 'destination': new_startup})
+    write(transaction / 'startup-before.json', {'source': old_startup, 'destination': new_startup['entry']})
     previous = current_host(source, old_runtime); started = None; applied_configs = []; native_attempted = []
     retired = transaction / 'retired'; retired.mkdir(); moved = []; workspace_moved = []
     opened = False
+    source_startup_attempted = destination_startup_attempted = False
     try:
         # Disable only this scope's startup registration while its path is being changed.
-        startup_restore(source, None)
+        source_startup_attempted = True
+        startup_entry(runtime, source, action='disable', expected=old_startup)
         if previous:
             confirmed = current_host(source, old_runtime)
             assert confirmed and confirmed['ProcessId'] == previous['ProcessId']
@@ -292,10 +289,12 @@ def migrate(args):
                 qualify(runtime, destination, root, transaction, connection, binding['projectIds'])
             for change in changes: replace_config(change); applied_configs.append(change)
             if old_startup:
-                result = subprocess.run(runtime_command(runtime) + ['startup-enable', '--data-dir', str(destination)], capture_output=True, text=True, timeout=35,
-                                        creationflags=subprocess.CREATE_NO_WINDOW)
-                if result.returncode or not json.loads(result.stdout)['enabled']: raise RuntimeError('Destination startup registration not confirmed: ' + result.stderr)
+                destination_startup_attempted = True
+                startup_entry(runtime, destination, action='enable', expected=None)
+            else:
+                startup_entry(runtime, destination, action='disable', expected=None)
             for group in plan['native']: native_call(group, 'commit', transaction_id)
+            startup_entry(runtime, source, action='disable', expected=None)
             for name in RETIRE:
                 path = source / name
                 if path.exists(): path.replace(retired / name); moved.append(name)
@@ -319,24 +318,38 @@ def migrate(args):
         for change in reversed(applied_configs):
             try: replace_config(change, reverse=True)
             except Exception as problem: rollback_errors.append(str(problem))
-        try: startup_restore(destination, new_startup); startup_restore(source, old_startup)
-        except Exception as problem: rollback_errors.append(str(problem))
+        keep_candidate = False
+        if destination.exists():
+            try:
+                if startup_entry(runtime, destination)['entry'] is not None:
+                    if not destination_startup_attempted:
+                        raise RuntimeError('The destination startup entry changed independently; candidate retained in place')
+                    startup_entry(runtime, destination, action='disable', expected=new_startup['enabledEntry'])
+            except Exception as problem:
+                rollback_errors.append(str(problem))
+                keep_candidate = True
         try:
             if (source / 'migrated-to.json').exists(): (source / 'migrated-to.json').unlink()
             if (source / 'relay.sqlite').is_dir(): (source / 'relay.sqlite').rmdir()
             for name in reversed(moved): (retired / name).replace(source / name)
             for path, target in reversed(workspace_moved): target.replace(path)
         except Exception as problem: rollback_errors.append(str(problem))
+        if source_startup_attempted and old_startup is not None:
+            try:
+                if startup_entry(runtime, source)['entry'] != old_startup:
+                    startup_entry(runtime, source, action='restore', expected=None, entry=old_startup)
+            except Exception as problem: rollback_errors.append(str(problem))
         for group in reversed(native_attempted):
             try: native_call(group, 'rollback', transaction_id)
             except Exception as problem: rollback_errors.append(str(problem))
-        if destination.exists():
+        if destination.exists() and not keep_candidate:
             # Keep the failed candidate in var for diagnosis. Do not remove possibly valuable data.
             destination.replace(transaction / 'failed-candidate')
         if previous and not rollback_errors:
             restored = launch(old_runtime, source, transaction)
             write(source / 'ui-host.json', dict(old_runtime, pid=restored.pid, data=str(source)))
-        write(transaction / 'result.json', {'applied': False, 'error': str(error), 'rollbackPerformed': not rollback_errors, 'rollbackErrors': rollback_errors})
+        write(transaction / 'result.json', {'applied': False, 'error': str(error), 'rollbackPerformed': not rollback_errors,
+                                            'rollbackErrors': rollback_errors, 'candidateRetainedInPlace': keep_candidate})
         raise
 
 

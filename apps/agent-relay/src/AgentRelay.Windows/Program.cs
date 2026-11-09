@@ -11,7 +11,7 @@ internal static class Program
         try
         {
             var options = LaunchOptions.Parse(arguments);
-            if (options.Mode is "mcp" or "mcp-worker")
+            if (options.Mode is "mcp" or "mcp-worker" or "startup-entry")
             {
                 Console.InputEncoding = new System.Text.UTF8Encoding(false);
                 Console.OutputEncoding = new System.Text.UTF8Encoding(false);
@@ -29,6 +29,15 @@ internal static class Program
     private static async Task<int> RunClientAsync(LaunchOptions options)
     {
         if (options.Mode == "startup") { StartupRegistration.Launch(options.DataDirectory, options.LifetimeMilliseconds); return 0; }
+        if (options.Mode == "startup-entry")
+        {
+            RuntimePaths.DemandPrivatePath(Path.Combine(options.DataDirectory, "mcp-runtime.json"));
+            var snapshot = options.Apply
+                ? StartupRegistration.Change(options.DataDirectory, RelayJson.Deserialize<StartupEntryChange>(await Console.In.ReadToEndAsync()))
+                : StartupRegistration.Capture(options.DataDirectory);
+            Console.WriteLine(RelayJson.Serialize(snapshot));
+            return 0;
+        }
         if (options.Mode == "startup-transfer")
         {
             var result = StartupPreferenceTransfer.Run(options.DataDirectory, options.PreviousDataDirectory!, options.Apply);

@@ -26,7 +26,7 @@ Private Windows/WSL storage is excluded from scoped file transfers. Traversal/re
 
 ## Standard migration procedure
 
-Prepare a self-contained candidate with `tools/export-mcp.ps1 -DataDirectory <var-preparation-scope> -PrepareRuntime`. Then use one command, first without `--apply` to review the plan:
+Prepare a self-contained candidate from the current checkout with `tools/export-mcp.ps1 -DataDirectory <var-preparation-scope> -PrepareRuntime`. The migration uses that C# runtime to read and change the Windows startup entry even when the source data comes from an older release. Then use one command, first without `--apply` to review the plan:
 
 ```powershell
 python -B ./apps/agent-relay/tools/migrate-storage.py `
@@ -40,6 +40,8 @@ python -B ./apps/agent-relay/tools/migrate-storage.py `
 Repeat `--config` for each reviewed connection pointing to that exact scope, then add `--apply` within the authorized migration scope. The command refuses destination merges, active work, unowned roots, conflicting process identity and concurrent client edits. Only the exact idle tray owner may be stopped; MCP facades and other chats are not terminated. Early shared profile roots without a marker need the strictly recognized legacy layout/owner; session roots always need their session ownership marker.
 
 The command copies a consistent SQLite store and protected credential bytes, preserves project/grant and historical payload bytes, rewrites only active internal session/profile paths, stages native copies and verifies authenticated MCP reads for each configured participant. A maintenance gate holds new tasks during verification. Startup is transferred only if already enabled for this scope, using its new retained native bootstrap. Config merges preserve each connection UUID and all unrelated settings. Failed preparation retains a diagnostic candidate and restores old references/startup/native roots and the old host when safe; changed client files are never overwritten during rollback.
+
+The C# startup operation owns the registry entry name, the retained launcher command and the exact string value/type in the rollback receipt. It verifies the reviewed entry before each change and refuses unrelated or unexpected commands. The Python procedure orders those calls with the data migration and preserves the original startup receipt in `startup-before.json`.
 
 After successful cutover, owned legacy files are retained in the var transaction backup. Developer artifacts and declared workspaces remain in place. `migrated-to.json` and a directory at the former SQLite filename prevent older launchers from creating a second writable store. Already open old MCP facades must reload through their client's supported lifecycle: they reread their original data path for every request. A new connection is qualified before completion; there is no hidden dual-store forwarding. An idempotent repeat reports the existing migration. Once new work is admitted, rollback requires a new, deliberate maintenance review rather than restoring an older snapshot automatically.
 

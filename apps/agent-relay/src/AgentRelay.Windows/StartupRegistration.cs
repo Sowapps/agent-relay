@@ -4,10 +4,14 @@ using System.Text;
 using System.Text.Json;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
+using System.Text.Json.Serialization;
 
 namespace AgentRelay.Windows;
 
 internal sealed record StartupPreferenceState(bool? Enabled, string? Error = null);
+internal sealed record StartupEntry(string Value, RegistryValueKind Kind);
+internal sealed record StartupEntrySnapshot(StartupEntry? Entry, StartupEntry EnabledEntry);
+internal sealed record StartupEntryChange([property: JsonRequired] StartupEntry? Expected, string Action, StartupEntry? Entry = null);
 
 internal interface IStartupPreference
 {
@@ -49,32 +53,103 @@ internal static class StartupRegistration
     private static string Launcher(string data) => Path.Combine(Path.GetFullPath(data), "startup-launcher", "AgentRelay.Windows.exe");
     private static string Quote(string value) => '"' + value + new string('\\', value.Length - value.TrimEnd('\\').Length) + '"';
     internal static string Command(string data) => Quote(Launcher(data)) + " startup";
+    private static StartupEntry EnabledEntry(string data) => new(Command(data), RegistryValueKind.String);
     public static bool Enabled(string data)
-    { using var key = Registry.CurrentUser.OpenSubKey(RegistryPath); return key?.GetValue(Name(data)) is string; }
-    internal static void DemandOwnedEntry(string data)
-    {
-        using var key = Registry.CurrentUser.OpenSubKey(RegistryPath);
-        if (key?.GetValue(Name(data)) is { } value && !Equals(value, Command(data)))
-            throw new IOException("A startup entry differs from the relay-owned command. Review it before moving the preference.");
-    }
+    { using var key = Registry.CurrentUser.OpenSubKey(RegistryPath); return ReadValue(key, Name(data)) is string; }
+    internal static void DemandOwnedEntry(string data) => _ = Capture(data);
     internal static void ValidateInstalledLauncher(string data)
     {
         using var key = Registry.CurrentUser.OpenSubKey(RegistryPath);
-        if (key?.GetValue(Name(data)) is string command && command == Command(data) && !File.Exists(Launcher(data)))
+        if (ReadValue(key, Name(data)) is string command && MatchesCommand(command, Command(data)) && !File.Exists(Launcher(data)))
             throw new IOException("Le lanceur de démarrage conservé est introuvable.");
     }
     public static void Set(string data, bool enabled)
     {
-        if (!enabled) { using var existing = Registry.CurrentUser.OpenSubKey(RegistryPath, writable: true); existing?.DeleteValue(Name(data), throwOnMissingValue: false); }
-        else
-        {
-            if (Command(data).Length > 260) throw new IOException("Le chemin du dossier de données est trop long pour le démarrage Windows. Choisissez un emplacement plus court.");
-            _ = ResolveRuntime(data);
-            PrepareLauncher(data);
-            using var key = Registry.CurrentUser.CreateSubKey(RegistryPath);
-            key.SetValue(Name(data), Command(data), RegistryValueKind.String);
-        }
+        if (enabled) PrepareEntry(data);
+        WriteEntry(Name(data), enabled ? EnabledEntry(data) : null);
         if (Enabled(data) != enabled) throw new IOException("Le changement du démarrage automatique n’a pas pu être confirmé.");
+    }
+
+    internal static StartupEntrySnapshot Capture(string data)
+    {
+        var enabled = EnabledEntry(data);
+        using var key = Registry.CurrentUser.OpenSubKey(RegistryPath);
+        var name = Name(data);
+        var value = ReadValue(key, name);
+        var entry = value switch
+        {
+            null => null,
+            string text when key is not null => new StartupEntry(text, key.GetValueKind(name)),
+            _ => throw new IOException("The startup entry is not a Windows launch command. Review it before migrating.")
+        };
+        DemandOwnedEntry(enabled, entry);
+        return new(entry, enabled);
+    }
+
+    /// <summary>Applies a reviewed scoped change and returns the exact registry entry.</summary>
+    /// <seealso cref="Capture"/>
+    internal static StartupEntrySnapshot Change(string data, StartupEntryChange change)
+        => Change(change, () => Capture(data), entry => WriteEntry(Name(data), entry), () => PrepareEntry(data));
+
+    internal static StartupEntrySnapshot Change(StartupEntryChange change, Func<StartupEntrySnapshot> capture,
+        Action<StartupEntry?> write, Action prepare)
+    {
+        var before = capture();
+        var desired = SelectEntry(before, change);
+        if (change.Action == "enable") prepare();
+        if (capture().Entry != before.Entry)
+            throw new IOException("The startup entry changed during preparation. Review it before migrating.");
+        if (desired != before.Entry) write(desired);
+        var after = capture();
+        if (after.Entry != desired) throw new IOException("The startup entry change could not be verified.");
+        return after;
+    }
+
+    private static StartupEntry? SelectEntry(StartupEntrySnapshot before, StartupEntryChange change)
+    {
+        if (before.Entry != change.Expected)
+            throw new IOException("The startup entry changed since review. Inspect it before retrying.");
+        var desired = change.Action switch
+        {
+            "enable" when change.Entry is null => before.EnabledEntry,
+            "disable" when change.Entry is null => null,
+            "restore" when change.Entry is not null => change.Entry,
+            _ => throw new ArgumentException("Expected a valid enable, disable or restore change.")
+        };
+        DemandOwnedEntry(before.EnabledEntry, desired);
+        return desired;
+    }
+
+    private static void DemandOwnedEntry(StartupEntry enabled, StartupEntry? entry)
+    {
+        if (entry is not null && (entry.Kind is not (RegistryValueKind.String or RegistryValueKind.ExpandString)
+            || !MatchesCommand(entry.Value, enabled.Value)))
+            throw new IOException("The startup entry does not select the retained launcher for this scope. Review it before migrating.");
+    }
+
+    private static bool MatchesCommand(string actual, string expected) =>
+        string.Equals(actual, expected, StringComparison.OrdinalIgnoreCase);
+
+    private static object? ReadValue(RegistryKey? key, string name) =>
+        key?.GetValue(name, null, RegistryValueOptions.DoNotExpandEnvironmentNames);
+
+    private static void WriteEntry(string name, StartupEntry? entry)
+    {
+        if (entry is null)
+        {
+            using var existing = Registry.CurrentUser.OpenSubKey(RegistryPath, writable: true);
+            existing?.DeleteValue(name, throwOnMissingValue: false);
+            return;
+        }
+        using var key = Registry.CurrentUser.CreateSubKey(RegistryPath);
+        key.SetValue(name, entry.Value, entry.Kind);
+    }
+
+    private static void PrepareEntry(string data)
+    {
+        if (Command(data).Length > 260) throw new IOException("Le chemin du dossier de données est trop long pour le démarrage Windows. Choisissez un emplacement plus court.");
+        _ = ResolveRuntime(data);
+        PrepareLauncher(data);
     }
 
     internal static ProcessStartInfo ResolveRuntime(string data)
