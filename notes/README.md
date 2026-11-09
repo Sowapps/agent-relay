@@ -6,6 +6,7 @@
 ## Records
 
 - [Workstreams](workstreams/README.md): resumable scope and checkpoints for authorized work.
+- [Open issues](open-issues.md): recurring or unresolved problems, their proof and next actions.
 
 - [Workspace observations](observations/README.md): repository migrations and development-tool qualification.
 

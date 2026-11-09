@@ -5,6 +5,7 @@
 
 ## Records
 
+- [Stable startup and operating procedures](2026-11-09-stable-startup.md): on-demand recovery, retained scope and recurring-issue follow-up.
 - [Stable rollout for Pilotage AP](2026-11-07-stable-pilotage-rollout.md): real RC round trip, publication and live cutover proof.
 - [Pilotage AP stable operation](2026-11-07-pilotage-stable-workflow.md): archive, isolated switch and same-chat confirmation workflow.
 

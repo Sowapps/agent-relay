@@ -128,10 +128,12 @@ def publish(data, prepared, reports, show, *, expected_data=None):
     if not re.fullmatch(r'\d+\.\d+\.\d+(?:-rc\.[1-9]\d*)?', contract['version']): raise ValueError('Only stable and RC versions may be deployed')
     data.mkdir(parents=True, exist_ok=True)
     with PromotionFreeze(data) as freeze:
-        publish_prepared(data, reports, runtime, contract, root, development, show, freeze)
+        result = publish_prepared(data, reports, runtime, contract, root, development, show, freeze)
+    print(json.dumps(result))
 
 
-def publish_prepared(data, reports, runtime, contract, root, development, show, freeze):
+def publish_prepared(data, reports, runtime, contract, root, development, show, freeze, *,
+                     validate_previous=None, verify=None):
     history_path = data / 'mcp-contract-history.json'
     history = read(history_path) if history_path.exists() else {}
     known = history.get(contract['version'])
@@ -139,6 +141,9 @@ def publish_prepared(data, reports, runtime, contract, root, development, show, 
         raise ValueError('This deployed version already identifies a different MCP contract. Increment the RC or stable version before deployment.')
     existing_pointer = read(data / 'mcp-runtime.json') if (data / 'mcp-runtime.json').is_file() else None
     existing_host = read(data / 'ui-host.json') if (data / 'ui-host.json').is_file() else None
+    if validate_previous is not None and existing_pointer:
+        validate_previous(existing_pointer)
+        existing_host = existing_pointer
     current_host = resolve_host(existing_host, data) if existing_pointer and existing_host and runtime_command(existing_pointer) == runtime_command(runtime) else None
     if current_host is not None:
         probe = subprocess.run(runtime_command(runtime) + ['profiles', '--data-dir', str(data)], capture_output=True, timeout=8, creationflags=subprocess.CREATE_NO_WINDOW)
@@ -147,8 +152,9 @@ def publish_prepared(data, reports, runtime, contract, root, development, show, 
             write(data / 'mcp-contract.json', contract)
             write(history_path, dict(history, **{contract['version']: contract['contractHash']}))
             write(data / 'ui-host.json', current_host)
-            print(json.dumps({'published': False, 'alreadyCurrent': True, 'pid': current_host['pid'], 'currentChatMcpQualified': False}))
-            return
+            proof = verify() if verify else None
+            return {'published': False, 'alreadyCurrent': True, 'pid': current_host['pid'],
+                    'currentChatMcpQualified': False, 'verification': proof}
     demand_idle(data)
     reports.mkdir(parents=True, exist_ok=True)
     transaction = reports / ('deployment-' + uuid.uuid4().hex); transaction.mkdir()
@@ -157,15 +163,23 @@ def publish_prepared(data, reports, runtime, contract, root, development, show, 
         if (check / 'before' / name).exists(): shutil.copy2(check / 'before' / name, check / name)
     if (check / 'before/connections').exists(): shutil.copytree(check / 'before/connections', check / 'connections')
     probe = launch(runtime, check, transaction); probe.terminate(); probe.wait(timeout=10)
-    replace_runtime(data, reports, runtime, contract, history, transaction, root, development, show, freeze)
+    return replace_runtime(data, reports, runtime, contract, history, transaction, root, development, show, freeze,
+                           validate_previous=validate_previous, verify=verify)
 
 
-def replace_runtime(data, reports, runtime, contract, history, transaction, root, development, show, freeze):
+def replace_runtime(data, reports, runtime, contract, history, transaction, root, development, show, freeze, *,
+                    validate_previous=None, verify=None):
     history_path = data / 'mcp-contract-history.json'
     metadata = data / 'ui-host.json'; report_metadata = reports / 'host.json'
     previous = read(metadata) if metadata.exists() else read(report_metadata) if report_metadata.exists() else None
+    pointer = data / 'mcp-runtime.json'
+    if validate_previous is not None and pointer.is_file():
+        previous = read(pointer)
     if previous is not None:
-        validate(previous, root, development)
+        if validate_previous is None:
+            validate(previous, root, development)
+        else:
+            validate_previous(previous)
     previous = resolve_host(previous, data)
     was_running = previous is not None
     if was_running:
@@ -183,16 +197,18 @@ def replace_runtime(data, reports, runtime, contract, history, transaction, root
         else: raise RuntimeError('Previous host did not release ownership')
     backup = transaction / 'before'; backup_ready = False
     started = None
+    proof = None
     try:
         with exclusive(data): snapshot(data, backup)
         backup_ready = True
         freeze.retain = True
         started = launch(runtime, data, transaction, show)
         old = read(backup / 'mcp-runtime.json') if (backup / 'mcp-runtime.json').exists() else {}
-        if old.get('connectionId'): runtime['connectionId'] = old['connectionId']
-        write(data / 'mcp-runtime.json', runtime)
+        retained = {key: old[key] for key in ('connectionId', 'distribution', 'mcpExecutable') if old.get(key)}
+        write(data / 'mcp-runtime.json', retained | runtime)
         write(data / 'mcp-contract.json', contract)
         write(history_path, dict(history, **{contract['version']: contract['contractHash']}))
+        proof = verify() if verify else None
         write(metadata, dict(runtime, pid=started.pid, executable=runtime_command(runtime)[0], data=str(data), transaction=str(transaction)))
         write(report_metadata, read(metadata))
         write(transaction / 'result.json', {'healthy': True, 'rollbackSnapshot': str(backup), 'pid': started.pid})
@@ -212,7 +228,8 @@ def replace_runtime(data, reports, runtime, contract, history, transaction, root
         write(transaction / 'result.json', {'healthy': False, 'rollbackPerformed': True})
         freeze.retain = False
         raise
-    print(json.dumps({'published': True, 'pid': started.pid, 'transaction': str(transaction), 'currentChatMcpQualified': False}))
+    return {'published': True, 'pid': started.pid, 'transaction': str(transaction), 'currentChatMcpQualified': False,
+            'verification': proof}
 
 
 if __name__ == '__main__':

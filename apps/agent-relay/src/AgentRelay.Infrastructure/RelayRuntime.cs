@@ -15,14 +15,15 @@ public sealed class RelayRuntime : IAsyncDisposable
     private readonly ProjectCoordinator projects;
     public event Action? ShowWindowRequested;
 
-    private RelayRuntime(string dataDirectory, Action<Exception> reportError)
+    private RelayRuntime(string dataDirectory, Action<Exception> reportError, bool onDemand)
     {
         RuntimePaths.DemandActive(dataDirectory);
         Directory.CreateDirectory(dataDirectory);
-        try { ownership = new FileStream(Path.Combine(dataDirectory, "host.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
-        catch (IOException error) when ((error.HResult & 0xffff) is 32 or 33) { throw new RelayAlreadyRunningException(error); }
+        try { ownership = RelayLocation.OpenHostOwnership(dataDirectory); }
+        catch (IOException error) when (RelayLocation.IsSharingConflict(error)) { throw new RelayAlreadyRunningException(error); }
         try
         {
+            if (onDemand) PromotionAdmission.DemandStartupAllowed(dataDirectory);
             service = new(new SqliteExchangeStore(dataDirectory), new LocalEchoResponder(), [LocalDemo.Route]);
             mvp = new(dataDirectory);
             var connections = new ConnectionStore(dataDirectory); connections.EnsureAdministrator();
@@ -44,7 +45,8 @@ public sealed class RelayRuntime : IAsyncDisposable
         }
     }
 
-    public static RelayRuntime Start(string dataDirectory, Action<Exception> reportError) => new(RelayLocation.Normalize(dataDirectory), reportError);
+    public static RelayRuntime Start(string dataDirectory, Action<Exception> reportError, bool onDemand = false) =>
+        new(RelayLocation.Normalize(dataDirectory), reportError, onDemand);
     public Task Completion => listener;
 
     public async ValueTask DisposeAsync()

@@ -168,7 +168,7 @@ public sealed class McpBroker : IAsyncDisposable
                         }
                         forwarded = true;
                         await worker!.StandardInput.WriteLineAsync(request.ToJsonString(RelayJson.Options));
-                        response = JsonNode.Parse(await responses!.ReadAsync().WaitAsync(TimeSpan.FromSeconds(190)) ?? throw new IOException("Worker closed."))!;
+                        response = JsonNode.Parse(await responses!.ReadAsync().WaitAsync(TimeSpan.FromSeconds(205)) ?? throw new IOException("Worker closed."))!;
                         if (method == "tools/list" && response["result"] is not null) catalog = identity.ContractHash;
                     }
                     state = catalog == identity.ContractHash ? "current" : catalog is null ? "catalog_unconfirmed" : "client_reload_required";

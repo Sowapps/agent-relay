@@ -28,6 +28,7 @@ if (args.Length == 3 && args[0] == "monitor-review") { await UiRenderScenarios.R
 if (args.Length == 3 && args[0] == "monitor-usability") { await UiRenderScenarios.Usability(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); Console.WriteLine("NATIVE_USABILITY=PASS"); return; }
 var data = Path.GetFullPath(args.Single());
 DateDisplayScenarios.Run();
+StartupTransferScenarios.Run();
 StorageScenarios.Run(Path.Combine(data, "storage"));
 await RawPipeScenarios.Run(data+"-raw-pipe");
 MonitorScenarios.Run();
