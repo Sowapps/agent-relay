@@ -6,12 +6,17 @@ public sealed class RelayDatabase
 {
     public string DataDirectory { get; }
     private readonly string connectionString;
-    public RelayDatabase(string dataDirectory)
+    private readonly bool readOnly;
+    public RelayDatabase(string dataDirectory) : this(dataDirectory, readOnly: false) { }
+
+    internal RelayDatabase(string dataDirectory, bool readOnly)
     {
         DataDirectory = Path.GetFullPath(dataDirectory);
-        Directory.CreateDirectory(dataDirectory);
+        this.readOnly = readOnly;
         connectionString = new SqliteConnectionStringBuilder { DataSource = Path.Combine(Path.GetFullPath(dataDirectory), "relay.sqlite"),
-            Pooling = false, DefaultTimeout = 5 }.ToString();
+            Mode = readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWriteCreate, Pooling = false, DefaultTimeout = 5 }.ToString();
+        if (readOnly) return;
+        Directory.CreateDirectory(dataDirectory);
         using var connection = Open();
         using var version = connection.CreateCommand();
         version.CommandText = "PRAGMA user_version;";
@@ -44,6 +49,7 @@ public sealed class RelayDatabase
         try
         {
             connection.Open();
+            if (readOnly) return connection;
             using var command = connection.CreateCommand();
             command.CommandText = "PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;";
             command.ExecuteNonQuery();

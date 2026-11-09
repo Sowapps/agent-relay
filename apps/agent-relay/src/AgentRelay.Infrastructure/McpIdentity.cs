@@ -63,6 +63,8 @@ public static class McpErrors
         {
             "client_catalog_outdated" or "connection_outdated" or "relay_migrated" => "reload_client_connection",
             "runtime_contract_mismatch" => "inspect_relay_runtime",
+            "relay_start_failed" => "start_relay_or_contact_maintainer",
+            "maintenance" => "wait_for_relay_maintenance",
             _ => "inspect_before_retry"
         };
         return new { isError = true, structuredContent = new McpFailureEnvelope(new(code, message, recovery, error is RelayException { EffectsPossible: false } ? "not_started" : "unconfirmed", diagnosticId)), content = new[] { new { type = "text", text = message + " [" + code + "]" } } };

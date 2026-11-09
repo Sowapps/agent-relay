@@ -50,10 +50,21 @@ public sealed class ConnectionStore(string dataDirectory)
         if (string.IsNullOrEmpty(secret) || secret.Length != 64) throw new RelayException("authentication_required", "A scoped connection credential is required.");
         var digest = Encoding.ASCII.GetBytes(Hash(secret));
         foreach (var binding in await bindings.ListAsync(token))
-            if (!binding.Revoked && CryptographicOperations.FixedTimeEquals(digest, Encoding.ASCII.GetBytes(binding.Digest)))
+            if (Matches(binding, digest))
                 return new(new(binding.EndpointId, binding.ProjectIds), binding.Administrator, binding.Id);
         throw new RelayException("authentication_required", "The connection credential is invalid or revoked.");
     }
+
+    internal static async Task DemandStartupAsync(string data, Guid id, string secret, CancellationToken token)
+    {
+        var records = new SqliteDocuments<ConnectionBinding>(new RelayDatabase(data, readOnly: true), "connections");
+        var binding = await records.FindAsync(id, token);
+        if (secret.Length != 64 || binding is not { Administrator: false } || !Matches(binding, Encoding.ASCII.GetBytes(Hash(secret))))
+            throw new RelayException("authentication_required", "An active participant credential is required to start the relay.", false);
+    }
+
+    private static bool Matches(ConnectionBinding binding, byte[] digest) =>
+        !binding.Revoked && CryptographicOperations.FixedTimeEquals(digest, Encoding.ASCII.GetBytes(binding.Digest));
 
     public async Task RevokeAsync(Guid id, CancellationToken token)
     {

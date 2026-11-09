@@ -29,6 +29,12 @@ internal static class Program
     private static async Task<int> RunClientAsync(LaunchOptions options)
     {
         if (options.Mode == "startup") { StartupRegistration.Launch(options.DataDirectory, options.LifetimeMilliseconds); return 0; }
+        if (options.Mode == "startup-transfer")
+        {
+            var result = StartupPreferenceTransfer.Run(options.DataDirectory, options.PreviousDataDirectory!, options.Apply);
+            Console.WriteLine(RelayJson.Serialize(result));
+            return 0;
+        }
         if (options.Mode is "startup-enable" or "startup-disable" or "startup-status")
         {
             var preference = new WindowsStartupPreference(options.DataDirectory);
@@ -37,7 +43,13 @@ internal static class Program
         }
         if (options.Mode == "initialize") { await PortableConfiguration.InitializeAsync(options.DataDirectory, options.ConnectionId); return 0; }
         if (options.Mode == "mcp-contract") { Console.WriteLine(RelayJson.Serialize(McpIdentity.Current)); return 0; }
-        if (options.Mode == "mcp-worker") { await McpFacade.RunAsync(options.DataDirectory, options.ConnectionId); return 0; }
+        if (options.Mode == "mcp-worker")
+        {
+            var startup = string.Equals(Path.GetFileName(Environment.ProcessPath), "AgentRelay.Windows.exe", StringComparison.OrdinalIgnoreCase)
+                ? new RelayHostStartup(options.DataDirectory, () => StartupRegistration.ResolveRuntime(options.DataDirectory)) : null;
+            await McpFacade.RunAsync(options.DataDirectory, options.ConnectionId, startup);
+            return 0;
+        }
         if (options.Mode == "mcp") { await McpBroker.RunAsync(options.DataDirectory, options.ConnectionId); return 0; }
         if (options.Mode == "admin")
         {
@@ -47,7 +59,7 @@ internal static class Program
             if (request.Operation is not ("configure_projects" or "connection")) throw new ArgumentException("Only explicit project configuration and connection maintenance are accepted.");
             Directory.CreateDirectory(options.DataDirectory);
             FileStream? ownership = null;
-            try { ownership = new FileStream(Path.Combine(options.DataDirectory, "host.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+            try { ownership = RelayLocation.OpenHostOwnership(options.DataDirectory); }
             catch (IOException) { /* Host owns the directory: use its authenticated administrative route. */ }
             if (ownership is null)
             {
@@ -107,7 +119,7 @@ internal static class Program
             catch (IOException) { Console.Error.WriteLine(error); }
         }
         RelayRuntime runtime;
-        try { runtime = RelayRuntime.Start(options.DataDirectory, Report); }
+        try { runtime = RelayRuntime.Start(options.DataDirectory, Report, options.OnDemand); }
         catch (RelayAlreadyRunningException)
         {
             if (options.Show) new RelayPipeClient(options.DataDirectory).RequestAsync(new("show_window"), CancellationToken.None).GetAwaiter().GetResult();

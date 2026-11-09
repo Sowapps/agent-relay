@@ -5,6 +5,7 @@
 
 ## Records
 
+- [Procedure improvement loop](2026-11-09-procedure-improvement-loop.md): reuse operating procedures, track recurrences and improve the process.
 - [Single knowledge owner](2026-11-05-single-knowledge-owner.md): shared rules have one authority across all levels.
 - [Responsibility layering](2026-11-05-responsibility-layering.md): coherent services and precise strategies without service proliferation.
 - [Targeted maintenance references](2026-11-05-maintenance-references.md): reciprocal coupled-operation links and selective @see usage.

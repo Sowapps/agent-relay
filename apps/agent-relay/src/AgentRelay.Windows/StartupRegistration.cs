@@ -51,6 +51,12 @@ internal static class StartupRegistration
     internal static string Command(string data) => Quote(Launcher(data)) + " startup";
     public static bool Enabled(string data)
     { using var key = Registry.CurrentUser.OpenSubKey(RegistryPath); return key?.GetValue(Name(data)) is string; }
+    internal static void DemandOwnedEntry(string data)
+    {
+        using var key = Registry.CurrentUser.OpenSubKey(RegistryPath);
+        if (key?.GetValue(Name(data)) is { } value && !Equals(value, Command(data)))
+            throw new IOException("A startup entry differs from the relay-owned command. Review it before moving the preference.");
+    }
     internal static void ValidateInstalledLauncher(string data)
     {
         using var key = Registry.CurrentUser.OpenSubKey(RegistryPath);

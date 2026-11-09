@@ -26,6 +26,10 @@ For a significant design choice, use a dated application notes/decisions record:
 Qualify unfamiliar infrastructure with an isolated example in persistent local storage. A build cannot prove interactive debugging or an external integration.
 If a prerequisite is absent, record it, continue independent authorized work and prepare the next step. Do not silently install software or cross the gate.
 
+Before operating, find the current procedure in the application documentation and check the [open issues register](../../notes/open-issues.md) for a recurring symptom. Reuse the existing command or checklist. When a step is missing or demonstrably wrong, correct its owner and record the change in the same lot (evidence `2026-11-09-procedure-improvement-loop`).
+
+Add unresolved blockers, errors, defects and process gaps to that register as they are encountered. Reuse the existing ID for a recurrence and update its last observation and occurrence count. Record the observed impact, a proof reference and the next action. After a correction, require a check that reproduces the original scenario before closing the item. Preserve the result in its workstream or observation.
+
 ## Implementation and verification
 
 Define and apply the process and conventions with proportionate checks (evidence `2026-10-28-design-and-proportionate-checks-precede-development`).
@@ -40,4 +44,5 @@ Use a dedicated `codex/<scope>` branch from the integration branch. Within the a
 (evidence `2026-11-01-dedicated-branch-delivery`)
 
 Update current documentation. Keep dated measurements and unresolved proposals in notes. Report changes, passed checks and remaining qualification gaps concisely.
+End each workstream with a short self-review. Identify one concrete improvement to the tool, procedure or decision that caused avoidable work. Implement a small in-scope correction or propose the next authorized step and track it while open.
 Close the objective when its authorized work ends. An experiment can complete with a negative technical result.

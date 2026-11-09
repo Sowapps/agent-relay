@@ -136,6 +136,9 @@ def qualify(report, folder):
     if sha256(Path(candidate['archive'])) != candidate['sha256']:
         raise ValueError('Portable verifier did not qualify the exact archive')
     report['candidate'] = candidate
+    phase(report, folder, 'mcp-cold-start', python_script('test-mcp-startup.py', '--release-directory', directory))
+    if git('rev-parse', 'HEAD') != report['commit'] or git('status', '--porcelain'):
+        raise ValueError('Source changed during cold-start qualification')
 
 
 def stage_runtime(candidate):

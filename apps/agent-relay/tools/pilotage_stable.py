@@ -12,7 +12,7 @@ import time
 import tomllib
 import uuid
 
-from deployment import demand_idle, exclusive, launch, snapshot, write
+from deployment import PromotionFreeze, demand_idle, exclusive, launch, publish_prepared, snapshot, write
 from relay_mcp import RelayMcp
 from release_artifact import (
     MANIFEST_FILE, VERIFICATION_FILE, archive_path, declared_checksum, extract_archive,
@@ -56,7 +56,9 @@ def route(table):
     return {key: table.get(key) for key in ('command', 'args', 'enabled')}
 
 
-def locations(receipt):
+def locations(receipt, report=None):
+    if report and report.get('retainedBroker'):
+        return Path(report['runtimeExecutable']), Path(report['data'])
     installation = receipt.parent / 'installation'
     return installation / 'app' / EXE, app_var(installation) / 'default'
 
@@ -106,20 +108,25 @@ def expected_membership(data, project, endpoint):
     return memberships
 
 
-def scoped_launcher(executable, data):
+def scoped_launcher(executable, data, retained=None):
     runtime = read_json(data / 'mcp-runtime.json')
     declared = runtime.get('mcpExecutable')
     if declared is None:
+        if retained is not None:
+            raise ValueError('The retained MCP launcher disappeared')
         return executable
     broker = data / 'mcp-launcher' / EXE
-    if Path(declared) != broker or sha256(ordinary_file(broker)) != sha256(ordinary_file(executable)):
+    digest = retained or sha256(ordinary_file(executable))
+    if (Path(declared) != broker or Path(runtime['executable']) != executable
+            or sha256(ordinary_file(broker)) != digest):
         raise ValueError('The scoped MCP launcher differs from the staged archive')
     return broker
 
 
 def probe(receipt, report):
-    executable, data = locations(receipt)
-    runtime = {'executable': str(scoped_launcher(executable, data)), 'connectionId': report['bindingId']}
+    executable, data = locations(receipt, report)
+    launcher = scoped_launcher(executable, data, report.get('retainedBroker'))
+    runtime = {'executable': str(launcher), 'connectionId': report['bindingId']}
     with (receipt.parent / 'mcp.stderr.log').open('a', encoding='utf-8') as errors:
         with RelayMcp(runtime, data, ROOT, errors) as mcp:
             version = mcp.initialization['serverInfo']['version']
@@ -149,16 +156,35 @@ def stop_owned(process):
         process.terminate()
     process.wait(timeout=10)
 
-
-def prepare(config, release, version, project, endpoint, thread, stable_root, legacy_scope=None):
+def verified_inputs(release, version, *, rehearsal=False):
     archive = archive_path(release, version)
-    if '-rc.' in version:
+    if '-rc.' in version and not rehearsal:
         raise ValueError('Pilotage AP accepts stable releases only')
     verification = read_json(release / VERIFICATION_FILE)
     digest = declared_checksum(archive)
     if (verification.get('passed') is not True or verification.get('version') != version
             or verification.get('archiveSha256') != digest):
         raise ValueError('The selected stable archive has no matching verification')
+    return archive, digest
+
+
+def release_manifest(package, version):
+    with package.open(MANIFEST_FILE) as manifest_file:
+        manifest = json.load(manifest_file)
+    if manifest.get('version') != version or manifest.get('selfContained') is not True:
+        raise ValueError('Archive manifest does not match the selected self-contained release')
+    return manifest
+
+
+def stage_archive(archive, digest, version, executable):
+    with verified_archive(archive, digest) as package:
+        release_manifest(package, version)
+        executable.parent.parent.mkdir(parents=True)
+        extract_archive(package, executable.parent, prefix='app/')
+
+
+def prepare(config, release, version, project, endpoint, thread, stable_root, legacy_scope=None):
+    archive, digest = verified_inputs(release, version)
     _, table, source, binding = registration_state(config)
     if not source.is_relative_to(stable_root) and source != legacy_scope:
         raise ValueError('The named connection points outside the declared Pilotage AP scopes')
@@ -176,13 +202,7 @@ def prepare(config, release, version, project, endpoint, thread, stable_root, le
     started = time.monotonic()
     write(receipt, report)
     try:
-        with verified_archive(archive, digest) as package:
-            with package.open(MANIFEST_FILE) as manifest_file:
-                manifest = json.load(manifest_file)
-            if manifest.get('version') != version or manifest.get('selfContained') is not True:
-                raise ValueError('Archive manifest does not match the selected self-contained stable release')
-            executable.parent.parent.mkdir()
-            extract_archive(package, executable.parent, prefix='app/')
+        stage_archive(archive, digest, version, executable)
         report['installationFiles'] = installation_fingerprint(executable)
         guide = ordinary_file(executable.parent / 'documentation/mcp-tools.md')
         report['toolsDocSha256'] = doc_digest(guide.read_text(encoding='utf-8-sig'))
@@ -214,8 +234,8 @@ def prepare(config, release, version, project, endpoint, thread, stable_root, le
 
 
 def candidate_table(receipt, report):
-    executable, data = locations(receipt)
-    return {'command': str(scoped_launcher(executable, data)),
+    executable, data = locations(receipt, report)
+    return {'command': str(scoped_launcher(executable, data, report.get('retainedBroker'))),
             'args': ['mcp', '--data-dir', str(data), '--connection-id', report['bindingId']]}
 
 
@@ -272,6 +292,120 @@ def switch(receipt, report):
     return report
 
 
+def startup_state(executable, data):
+    result = subprocess.run([str(executable), 'startup-status', '--data-dir', str(data)],
+                            capture_output=True, timeout=12, creationflags=subprocess.CREATE_NO_WINDOW)
+    if result.returncode:
+        raise RuntimeError('Cannot read the installation startup preference')
+    state = json.loads(result.stdout)
+    if type(state.get('enabled')) is not bool or state.get('error'):
+        raise RuntimeError('The installation startup preference needs repair before upgrading')
+    return state['enabled']
+
+
+def startup_transfer_plan(executable, data, previous):
+    result = subprocess.run([str(executable), 'startup-transfer', '--data-dir', str(data),
+                             '--previous-data-dir', str(previous)],
+                            capture_output=True, timeout=12, creationflags=subprocess.CREATE_NO_WINDOW)
+    if result.returncode:
+        return {'status': 'review_required', 'previousData': str(previous)}
+    plan = json.loads(result.stdout)
+    return dict(plan, status='transfer_available' if plan['previousEnabled'] else 'no_legacy_entry',
+                previousData=str(previous))
+
+
+def upgrade(config, release, version, project, endpoint, thread, stable_root, *, rehearsal=False, legacy_startup=None):
+    """Switch only the runtime pointer of an already retained portable installation."""
+    raw, table, data, binding = registration_state(config)
+    if rehearsal and not stable_root.is_relative_to(ROOT / 'local/apps/agent-relay'):
+        raise ValueError('RC rehearsal requires a private developer fixture')
+    if (not data.is_relative_to(stable_root) or table.get('enabled', True) is not True
+            or (data / 'migrated-to.json').exists() or (data / 'maintenance.json').exists()):
+        raise ValueError('The named connection is not on an active managed stable scope')
+    installation = data.parents[3]
+    if data != app_var(installation) / 'default' or installation.name != 'installation':
+        raise ValueError('The stable connection does not use the retained portable layout')
+    broker = data / 'mcp-launcher' / EXE
+    pointer = ordinary_file(data / 'mcp-runtime.json')
+    original_pointer = pointer.read_bytes()
+    previous = json.loads(original_pointer)
+    if (Path(table['command']) != broker or Path(previous.get('mcpExecutable', '')) != broker
+            or previous.get('distribution') != 'portable-win-x64'):
+        raise ValueError('The scope first needs the guarded one-time retained launcher cutover')
+    marker = read_json(broker.parent / 'installation.json')
+    if marker.get('version') != 1 or (broker.parent / marker['root']).resolve() != installation:
+        raise ValueError('The retained broker belongs to another installation')
+
+    def validate_runtime(runtime):
+        target = Path(runtime['executable'])
+        if (target.name != EXE or target != installation / 'app' / EXE
+                and not target.is_relative_to(installation / 'releases')):
+            raise ValueError('The reviewed runtime escaped the stable installation')
+        return ordinary_file(target)
+
+    previous_executable = validate_runtime(previous)
+    project, endpoint, thread = (str(uuid.UUID(value)) for value in (project, endpoint, thread))
+    expected_membership(data, project, endpoint)
+    archive, digest = verified_inputs(release, version, rehearsal=rehearsal)
+    identifier = uuid.uuid4().hex[:12]
+    folder = ordinary_directory(stable_root / ('upgrade-' + identifier))
+    folder.mkdir()
+    receipt = folder / 'result.json'
+    executable = installation / 'releases' / (f'v{version}-' + identifier) / 'app' / EXE
+    report = {'stage': 'preparing-upgrade', 'startedUtc': now(), 'version': version, 'archiveSha256': digest,
+              'config': str(config), 'data': str(data), 'runtimeExecutable': str(executable),
+              'retainedBroker': sha256(ordinary_file(broker)), 'bindingId': binding, 'projectId': project,
+              'endpointId': endpoint, 'threadId': thread, 'server': SERVER, 'modelCalls': 0,
+              'challenge': uuid.uuid4().hex}
+    started = time.monotonic()
+    write(receipt, report)
+    try:
+        prior_contract = read_json(previous_executable.parent / 'mcp-contract.json')
+        if prior_contract.get('version') == version:
+            with verified_archive(archive, digest) as package:
+                files = release_manifest(package, version)['files']
+            expected_files = {name.removeprefix('app/'): checksum for name, checksum in files.items()
+                              if name.startswith('app/')}
+            if installation_fingerprint(previous_executable) != expected_files:
+                raise ValueError('A different payload cannot reuse the installed stable version')
+            executable = previous_executable
+            report['runtimeExecutable'] = str(executable)
+        else:
+            stage_archive(archive, digest, version, executable)
+        validate_runtime({'executable': str(executable)})
+        contract = read_json(executable.parent / 'mcp-contract.json')
+        if contract.get('version') != version:
+            raise ValueError('The staged runtime reports a different contract version')
+        guide = ordinary_file(executable.parent / 'documentation/mcp-tools.md')
+        report['toolsDocSha256'] = doc_digest(guide.read_text(encoding='utf-8-sig'))
+        if legacy_startup is not None and legacy_startup != data:
+            report['legacyStartup'] = startup_transfer_plan(executable, data, legacy_startup)
+        reports = folder / 'deployment'
+
+        def verify():
+            if config.read_bytes() != raw:
+                raise RuntimeError('Codex registration changed during the stable update')
+            if startup_state(executable, data) != report['startupEnabled']:
+                raise RuntimeError('The stable startup preference changed during the update')
+            return probe(receipt, report)
+
+        with PromotionFreeze(data) as freeze:
+            if pointer.read_bytes() != original_pointer or config.read_bytes() != raw:
+                raise RuntimeError('The selected stable runtime or Codex configuration changed; review before retrying')
+            report['startupEnabled'] = startup_state(previous_executable, data)
+            outcome = publish_prepared(data, reports, {'executable': str(executable)}, contract,
+                                       ROOT, False, False, freeze, validate_previous=validate_runtime, verify=verify)
+        report.update(stage='awaiting-chat', hostPid=outcome['pid'], freshMcp=outcome['verification'],
+                      deploymentTransaction=outcome.get('transaction'))
+    except (Exception, KeyboardInterrupt) as error:
+        report.update(stage='upgrade-failed', error=str(error) or type(error).__name__)
+        raise
+    finally:
+        report.update(upgradeSeconds=round(time.monotonic() - started, 3), updatedUtc=now())
+        write(receipt, report)
+    return receipt
+
+
 def chat_check(report):
     result = {key: report[key] for key in ('threadId', 'server', 'challenge', 'projectId', 'toolsDocSha256')}
     if report['freshMcp']['reportsVersionToClient']:
@@ -286,7 +420,12 @@ def status(config, receipt=None, report=None):
     location = 'managed-stable' if (data.is_relative_to(stable_root) and command.is_relative_to(stable_root)) else 'outside-managed-stable'
     result = {'server': SERVER, 'data': str(data), 'bindingId': binding, 'command': str(command), 'location': location,
               'enabled': table.get('enabled', True), 'chatConfirmed': False}
-    if receipt is None or str(config) != report['config'] or not matches_target(table, receipt, report):
+    if receipt is None or str(config) != report['config'] or data != locations(receipt, report)[1]:
+        return dict(result, stage='registration-only')
+    installed = read_json(data / 'mcp-runtime.json')
+    if Path(installed['executable']) != locations(receipt, report)[0]:
+        return dict(result, stage='superseded')
+    if not matches_target(table, receipt, report):
         return dict(result, stage='registration-only')
     result['freshMcp'] = probe(receipt, report)
     confirmed = report['stage'] == 'confirmed'
@@ -319,6 +458,12 @@ def main():
     prepare_cli.add_argument('--release-directory', required=True, type=Path)
     for key in ('version', 'project', 'endpoint', 'thread'):
         prepare_cli.add_argument('--' + key, required=True)
+    upgrade_cli = commands.add_parser('upgrade')
+    upgrade_cli.add_argument('--config', required=True, type=Path)
+    upgrade_cli.add_argument('--release-directory', required=True, type=Path)
+    upgrade_cli.add_argument('--apply', required=True, action='store_true')
+    for key in ('version', 'project', 'endpoint', 'thread'):
+        upgrade_cli.add_argument('--' + key, required=True)
     status_cli = commands.add_parser('status')
     status_cli.add_argument('--config', required=True, type=Path)
     status_cli.add_argument('--receipt', type=Path)
@@ -335,6 +480,13 @@ def main():
             receipt = prepare(args.config.absolute(), args.release_directory.absolute(), args.version, args.project,
                               args.endpoint, args.thread, stable_root, pilotage_legacy_scope(ROOT))
             result = {'stage': 'prepared', 'receipt': str(receipt)}
+        elif args.action == 'upgrade':
+            receipt = upgrade(args.config.absolute(), args.release_directory.absolute(), args.version, args.project,
+                              args.endpoint, args.thread, stable_root, legacy_startup=pilotage_legacy_scope(ROOT))
+            report = read_json(receipt)
+            result = {'stage': report['stage'], 'receipt': str(receipt), 'version': report['version'],
+                      'chatCheck': chat_check(report), 'startupEnabled': report['startupEnabled'],
+                      'legacyStartup': report.get('legacyStartup')}
         else:
             receipt = args.receipt.absolute() if args.receipt else None
             if receipt and (receipt.parent.parent != stable_root or receipt.name != 'result.json'):

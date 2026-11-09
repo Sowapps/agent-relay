@@ -32,7 +32,7 @@ public static class McpFacade
 
     private static string GuideMimeType(string file) => file.EndsWith(".md", StringComparison.Ordinal) ? "text/markdown" : "text/plain";
 
-    public static async Task RunAsync(string dataDirectory, Guid? connectionId = null)
+    public static async Task RunAsync(string dataDirectory, Guid? connectionId = null, RelayHostStartup? startup = null)
     {
         var client = new RelayPipeClient(dataDirectory, connectionId ?? Guid.Empty);
         var input = new BoundedLines(Console.In, PipeFrames.MaximumBytes);
@@ -56,7 +56,7 @@ public static class McpFacade
                     "resources/list" => new { resources=Guides.Select(item=>new {uri=item.Key,name=item.Value,mimeType=GuideMimeType(item.Value),description="Public Agent Relay MCP usage documentation; no local project data or credentials."}).ToArray() },
                     "resources/read" => ReadGuide(request.GetProperty("params")),
                     "ping" => new { },
-                    "tools/call" => await CallAsync(client, dataDirectory, connectionId, request.GetProperty("params")),
+                    "tools/call" => await CallAsync(client, dataDirectory, connectionId, request.GetProperty("params"), startup),
                     _ => throw new RelayException("method_not_found", "Unsupported MCP method.")
                 };
                 var output = RelayJson.Serialize(new { jsonrpc = "2.0", id, result });
@@ -73,7 +73,7 @@ public static class McpFacade
         }
     }
 
-    private static async Task<object> CallAsync(RelayPipeClient client, string data, Guid? connectionId, JsonElement parameters)
+    private static async Task<object> CallAsync(RelayPipeClient client, string data, Guid? connectionId, JsonElement parameters, RelayHostStartup? startup)
     {
         try
         {
@@ -82,7 +82,10 @@ public static class McpFacade
             var tool = McpToolCatalog.Resolve(name, arguments);
             if (connectionId is null || connectionId == Guid.Empty) throw new RelayException("authentication_required", "An explicit participant connection is required.", effectsPossible: false);
             var secret = ConnectionStore.ReadSecret(data, connectionId);
-            var handshake = (await client.RequestRawAsync(new("mcp_handshake", AccessToken: secret), CancellationToken.None)).GetProperty("mcp").Deserialize<McpHostStatus>(RelayJson.Options)!;
+            var hello = startup is null
+                ? await client.RequestRawAsync(new("mcp_handshake", AccessToken: secret), CancellationToken.None)
+                : await startup.HandshakeAsync(client, connectionId.Value, secret, CancellationToken.None);
+            var handshake = hello.GetProperty("mcp").Deserialize<McpHostStatus>(RelayJson.Options)!;
             if (handshake.ConnectionId != connectionId.Value) throw new RelayException("authentication_required", "The credential does not match this explicitly selected connection identity.", false);
             var identity = McpIdentity.Current;
             if (handshake.Identity.ContractHash != identity.ContractHash || handshake.Identity.Version != identity.Version)
