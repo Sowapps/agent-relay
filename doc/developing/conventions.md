@@ -29,6 +29,7 @@ Expected failures carry a stable code and explicit effect/recovery semantics. Tr
 ## Other source languages
 
 Python uses snake_case functions/locals, PascalCase classes, explicit UTF-8 file I/O, pathlib and subprocess argument lists. Keep executable CLI behavior under main/entry-point guards when a module is reusable. Prefer normal multiline blocks over semicolon chains; use ordinary imports rather than dynamic imports for static dependencies.
+For an Agent Relay operation already owned by C#, invoke the C# entry point from the Python procedure. Keep Python only where it owns useful orchestration or a distinct adapter. Extend the existing C# operation when the caller needs another supported state.
 
 JavaScript uses camelCase functions/locals and const unless reassignment is necessary. Keep pure model helpers separate from rendering and action effects. Components own markup, escaping and accessibility; state belongs to the controller/model, not duplicated DOM assumptions. Preserve the existing module mechanism until a justified change requires another toolchain.
 

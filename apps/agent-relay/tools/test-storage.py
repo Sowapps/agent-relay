@@ -4,7 +4,6 @@ Usage: python -B test-storage.py --runtime-pointer <prepared pointer>. Creates e
 """
 import argparse
 from contextlib import closing
-import hashlib
 import importlib.util
 import json
 import os
@@ -14,6 +13,7 @@ import sqlite3
 import subprocess
 import time
 from types import SimpleNamespace
+from unittest.mock import patch
 import uuid
 from deployment import launch
 from runtime_layout import runtime_command, app_var
@@ -21,6 +21,44 @@ from relay_mcp import RelayMcp
 
 spec = importlib.util.spec_from_file_location('storage_migration', Path(__file__).with_name('migrate-storage.py'))
 migration = importlib.util.module_from_spec(spec); spec.loader.exec_module(migration)
+
+
+def rehearse_enabled_rollback(runtime, arguments):
+    source, destination = arguments.source, arguments.destination
+    entries = {scope: migration.startup_entry(runtime, scope) for scope in (source, destination)}
+    original = dict(entries[source]['enabledEntry'], kind=2)
+    entries[source]['entry'] = original
+    events = []
+
+    def startup(_runtime, scope, **change):
+        state = entries[scope]
+        if change:
+            action = change['action']
+            assert state['entry'] == change['expected'], (scope, change, state)
+            value = state['enabledEntry'] if action == 'enable' else change.get('entry')
+            state['entry'] = value
+            events.append((scope, action))
+        return dict(state)
+
+    original_write = migration.write
+
+    def fail_after_retiring_source(path, value):
+        if path == destination / 'ui-host.json':
+            assert entries[destination]['entry'] == entries[destination]['enabledEntry']
+            assert not (source / 'mcp-runtime.json').exists()
+            raise RuntimeError('Injected failure after enabling destination startup')
+        original_write(path, value)
+
+    with patch.object(migration, 'startup_entry', startup), patch.object(migration, 'write', fail_after_retiring_source):
+        try:
+            migration.migrate(arguments)
+        except RuntimeError as error:
+            assert 'Injected failure after enabling destination startup' in str(error), error
+        else:
+            raise AssertionError('Expected a late migration failure')
+    assert events == [(source, 'disable'), (destination, 'enable'), (source, 'disable'),
+                      (destination, 'disable'), (source, 'restore')]
+    assert entries[source]['entry'] == original and entries[destination]['entry'] is None
 
 
 def main(pointer):
@@ -49,7 +87,8 @@ def main(pointer):
     reports = fixture / 'reports'; reports.mkdir()
     host = launch(runtime, source, reports)
     arguments = SimpleNamespace(source=source, destination=destination, runtime_pointer=pointer, config=[config], check_native=False, apply=False, fail_after_prepare=False)
-    original_startup = migration.startup_read(source)
+    original_startup = migration.startup_entry(runtime, source)['entry']
+    assert original_startup is None, 'The fictional scope must start without a Windows startup entry'
     try:
         assert not migration.migrate(arguments)['applied']
         assert host.poll() is None and config.read_bytes() == raw and not destination.exists()
@@ -68,11 +107,14 @@ def main(pointer):
         except RuntimeError as error: assert 'injected failure' in str(error)
         else: raise AssertionError('Failure injection did not run')
         assert migration.fingerprint(source) == before and config.read_bytes() == raw and not destination.exists()
-        assert migration.startup_read(source) == original_startup
+        assert migration.startup_entry(runtime, source)['entry'] == original_startup
         # The rollback restarted its exact source host; the next invocation rediscovers it.
         arguments.fail_after_prepare = False
+        rehearse_enabled_rollback(runtime, arguments)
+        assert migration.fingerprint(source) == before and config.read_bytes() == raw and not destination.exists()
         result = migration.migrate(arguments)
         assert result['healthy'] and migration.fingerprint(destination) == before
+        assert migration.startup_entry(runtime, destination)['entry'] is None
         assert (destination / 'relay-projects.json').read_bytes() == configuration
         assert 'model="preserve-me"' in config.read_text()
         assert (source / 'relay.sqlite').is_dir() and not (source / 'connections').exists()
@@ -102,6 +144,7 @@ def main(pointer):
             if standalone.poll() is None: standalone.terminate()
             standalone.wait(timeout=10)
         report = {'passed': True, 'dryRunNonMutating': True, 'activeWorkRefused': True, 'injectedRollback': True,
+                  'disabledStartupStayedAbsent': True, 'enabledStartupLateRollbackSimulated': True,
                   'historyAndPermissionsPreserved': True, 'clientTableOnly': True, 'idempotent': True, 'retiredStoreBlocked': True,
                   'noLocalDefault': True, 'systemDotnetAbsent': True, 'modelCalls': 0, 'wslCalls': 0, 'fixture': str(fixture)}
         migration.write(fixture / 'result.json', report)

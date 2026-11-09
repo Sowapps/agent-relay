@@ -1,3 +1,4 @@
+using Microsoft.Win32;
 using AgentRelay.Windows;
 
 internal static class StartupTransferScenarios
@@ -34,6 +35,42 @@ internal static class StartupTransferScenarios
                 events.SequenceEqual(new[] { "target:True", "source:False", "target:False" }), "rollback preserves legacy preference");
         }
         Console.WriteLine("STARTUP_PREFERENCE_TRANSFER=PASS");
+        MigrationEntries();
+    }
+
+    private static void MigrationEntries()
+    {
+        var legacy = new StartupEntry(StartupRegistration.Command(@"C:\fixture\legacy"), RegistryValueKind.String);
+        var current = new StartupEntry(StartupRegistration.Command(@"C:\fixture\current"), RegistryValueKind.String);
+        var exact = new StartupEntry(legacy.Value.ToLowerInvariant(), RegistryValueKind.ExpandString);
+        var source = new EntryFixture(legacy, exact);
+        var target = new EntryFixture(current, null);
+        var unrelated = new EntryFixture(new("unrelated", RegistryValueKind.String), exact);
+
+        source.Apply(new(exact, "disable"));
+        var enabled = target.Apply(new(null, "enable")).Entry;
+        Check(source.Entry is null && enabled == current && target.Prepared, "migration enables only the new scope");
+        target.Apply(new(enabled, "disable"));
+        source.Apply(new(null, "restore", exact));
+        Check(source.Entry == exact && target.Entry is null && unrelated.Entry == exact && unrelated.Writes == 0,
+            "rollback restores exact command and registry kind");
+
+        target.Apply(new(null, "disable"));
+        Check(target.Writes == 2, "a disabled entry stays absent without a write");
+        Refuses(() => source.Apply(new(null, "disable")));
+        Refuses(() => target.Apply(new(null, "restore", exact)));
+        Check(source.Entry == exact && target.Entry is null, "mismatched receipts leave both scopes intact");
+
+        Refuses(() => target.Apply(new(null, "enable"), () => target.Entry = current));
+        Check(target.Entry == current && target.Writes == 2, "an entry changed during preparation is not overwritten");
+        Console.WriteLine("STARTUP_MIGRATION_ENTRIES=PASS");
+    }
+
+    private static void Refuses(Action action)
+    {
+        try { action(); }
+        catch (IOException) { return; }
+        throw new InvalidOperationException("Expected the startup entry change to be refused.");
     }
 
     private static void Check(bool value, string message)
@@ -54,5 +91,23 @@ internal static class StartupTransferScenarios
             enabled = value;
             return Read();
         }
+    }
+
+    private sealed class EntryFixture(StartupEntry enabled, StartupEntry? entry)
+    {
+        public StartupEntry? Entry { get; set; } = entry;
+        public int Writes { get; private set; }
+        public bool Prepared { get; private set; }
+
+        public StartupEntrySnapshot Apply(StartupEntryChange change, Action? whilePreparing = null) =>
+            StartupRegistration.Change(change, () => new(Entry, enabled), value =>
+            {
+                Entry = value;
+                Writes++;
+            }, () =>
+            {
+                Prepared = true;
+                whilePreparing?.Invoke();
+            });
     }
 }
