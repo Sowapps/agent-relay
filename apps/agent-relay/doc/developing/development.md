@@ -100,7 +100,7 @@ The registration write is the cutover point. If a check or write fails before it
 
 Windows sign-in startup is a preference per data scope. An in-place upgrade keeps that scope and verifies its enabled or disabled state before and after. For a one-time move, run the selected installation's `AgentRelay.Windows.exe startup-transfer --data-dir <stable-data-directory> --previous-data-dir <reviewed-legacy-directory>` for a read-only preview. Only with explicit startup-change authorization, repeat it with `--apply`. The command verifies the current entry before retiring the previous one and attempts to restore the prior preference on failure. The [portable recovery procedure](../using/portable-release.md#recover-an-unavailable-relay) also covers agents without an MCP connection.
 
-Rehearse on a fictional installation with `test-pilotage-stable.py --release-directory <verified-stable> --upgrade-release-directory <verified-RC>`. Use `test-mcp-startup.py --release-directory <verified-RC>` for the portable cold-start, concurrency, credential and maintenance checks.
+Rehearse on a fictional installation with `test-pilotage-stable.py --release-directory <verified-stable> --upgrade-release-directory <verified-RC>`. Add `--guard-runtime-pointer <prepared-current-pointer>` when the baseline archive predates the C# `maintenance-idle` command. Use `test-mcp-startup.py --release-directory <verified-RC>` for the portable cold-start, concurrency, credential and maintenance checks.
 
 ## Current limits
 

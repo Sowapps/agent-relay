@@ -11,7 +11,7 @@ internal static class Program
         try
         {
             var options = LaunchOptions.Parse(arguments);
-            if (options.Mode is "mcp" or "mcp-worker" or "startup-entry")
+            if (options.Mode is "mcp" or "mcp-worker" or "startup-entry" or "maintenance-idle")
             {
                 Console.InputEncoding = new System.Text.UTF8Encoding(false);
                 Console.OutputEncoding = new System.Text.UTF8Encoding(false);
@@ -28,6 +28,12 @@ internal static class Program
 
     private static async Task<int> RunClientAsync(LaunchOptions options)
     {
+        if (options.Mode == "maintenance-idle")
+        {
+            await SqliteWorkStore.DemandIdleAsync(options.DataDirectory, options.AllowUninitialized, CancellationToken.None);
+            Console.WriteLine(RelayJson.Serialize(new { idle = true }));
+            return 0;
+        }
         if (options.Mode == "startup") { StartupRegistration.Launch(options.DataDirectory, options.LifetimeMilliseconds); return 0; }
         if (options.Mode == "startup-entry")
         {

@@ -43,6 +43,10 @@ The command copies a consistent SQLite store and protected credential bytes, pre
 
 The C# startup operation owns the registry entry name, the retained launcher command and the exact string value/type in the rollback receipt. It verifies the reviewed entry before each change and refuses unrelated or unexpected commands. The Python procedure orders those calls with the data migration and preserves the original startup receipt in `startup-before.json`.
 
+Migration and deployment call the prepared C# runtime's `maintenance-idle` operation to check durable `pending` and `running` records in read-only mode. Migration repeats the check under host ownership. Only an initial deployment can opt into a missing database. A readable history of terminal outcomes remains eligible for maintenance. A live replacement also uses its separate admission barrier for requests already admitted by the host.
+
+Use a prepared runtime that exposes `maintenance-idle`. For a real rollout of an archive that predates this command, use the administration tooling from that archive's release checkout. The development rehearsal can exercise earlier archives with an explicit current guard.
+
 After successful cutover, owned legacy files are retained in the var transaction backup. Developer artifacts and declared workspaces remain in place. `migrated-to.json` and a directory at the former SQLite filename prevent older launchers from creating a second writable store. Already open old MCP facades must reload through their client's supported lifecycle: they reread their original data path for every request. A new connection is qualified before completion; there is no hidden dual-store forwarding. An idempotent repeat reports the existing migration. Once new work is admitted, rollback requires a new, deliberate maintenance review rather than restoring an older snapshot automatically.
 
 ## Qualification

@@ -5,6 +5,7 @@
 
 ## Records
 
+- [Durable work guard](2026-11-10-durable-work-guard.md): shared C# maintenance check and isolated migration/deployment tests.
 - [Windows startup entry ownership](2026-11-09-startup-registration-owner.md): C# startup operations and storage-migration rollback.
 - [Stable startup and operating procedures](2026-11-09-stable-startup.md): on-demand recovery, retained scope and recurring-issue follow-up.
 - [Stable rollout for Pilotage AP](2026-11-07-stable-pilotage-rollout.md): real RC round trip, publication and live cutover proof.

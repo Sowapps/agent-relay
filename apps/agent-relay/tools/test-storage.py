@@ -97,7 +97,7 @@ def main(pointer):
             database.execute('INSERT INTO work VALUES (?,?)', (identifier, '{"state":"pending"}')); database.commit()
         arguments.apply = True
         try: migration.migrate(arguments)
-        except RuntimeError as error: assert 'Active work' in str(error)
+        except RuntimeError as error: assert 'Active durable work' in str(error)
         else: raise AssertionError('Active work migrated')
         assert host.poll() is None and not destination.exists()
         with closing(sqlite3.connect(source / 'relay.sqlite')) as database:

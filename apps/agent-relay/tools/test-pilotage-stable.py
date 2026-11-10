@@ -14,7 +14,7 @@ from deployment import snapshot
 from host_identity import identity, resolve_host
 from relay_mcp import RelayMcp
 from release_artifact import EXTRACTED_DIRECTORY, VERIFICATION_FILE, read_json
-from runtime_layout import app_var, pilotage_stable_root, reject_pilotage_paths
+from runtime_layout import app_var, pilotage_stable_root, reject_pilotage_paths, validate_runtime
 
 
 def rejected(action, message):
@@ -31,6 +31,7 @@ def main():
     parser.add_argument('--release-directory', required=True, type=Path)
     parser.add_argument('--baseline-directory', type=Path, help='Use an older portable verifier fixture as the source')
     parser.add_argument('--upgrade-release-directory', type=Path, help='Rehearse an in-place candidate update after cutover')
+    parser.add_argument('--guard-runtime-pointer', type=Path, help='Prepared current C# runtime for rehearsing an older archive')
     args = parser.parse_args()
     release = args.release_directory.resolve()
     verification = read_json(release / VERIFICATION_FILE)
@@ -43,6 +44,12 @@ def main():
     if not original.is_dir():
         original = extracted / 'data'  # Storage of the stable 1.0.1 verifier.
     stable = pilotage_stable_root(workflow.ROOT)
+    guard = None
+    if args.guard_runtime_pointer:
+        pointer = args.guard_runtime_pointer.resolve()
+        reject_pilotage_paths(workflow.ROOT, pointer)
+        guard = read_json(pointer)
+        validate_runtime(guard, workflow.ROOT, development=True)
     rejected(lambda: reject_pilotage_paths(workflow.ROOT, stable / 'installation'), 'separately authorized')
     test = workflow.ROOT / 'local/apps/agent-relay/tests' / ('ap-' + uuid.uuid4().hex[:8])
     test.mkdir(parents=True)
@@ -64,14 +71,14 @@ def main():
     upgrade_result = None
     rejected(lambda: workflow.prepare(config, release, version + '-rc.1', project, endpoint, thread, sandbox),
              'stable releases only')
-    receipt = workflow.prepare(config, release, version, project, endpoint, thread, sandbox)
+    receipt = workflow.prepare(config, release, version, project, endpoint, thread, sandbox, guard_runtime=guard)
     report = read_json(receipt)
     assert report['freshMcp']['projectId'] == project and report['freshMcp']['endpointId'] == endpoint
     assert config.read_bytes() == initial_config
     assert workflow.source_fingerprint(source) == initial_source
     changed = source / 'attention-reviews.json'
     changed.write_text('{}', encoding='utf-8')
-    rejected(lambda: workflow.switch(receipt, report), 'source changed')
+    rejected(lambda: workflow.switch(receipt, report, guard_runtime=guard), 'source changed')
     assert config.read_bytes() == initial_config
     changed.unlink()
     # Simulate a failing atomic registration after the real candidate is healthy.
@@ -85,13 +92,13 @@ def main():
 
     with patch.object(workflow, 'launch', track_launch):
         with patch.object(workflow.registration, 'replace_if_unchanged', side_effect=RuntimeError('fixture conflict')):
-            rejected(lambda: workflow.switch(receipt, report), 'fixture conflict')
+            rejected(lambda: workflow.switch(receipt, report, guard_runtime=guard), 'fixture conflict')
         assert hosts[-1].poll() is not None and config.read_bytes() == initial_config
-        receipt = workflow.prepare(config, release, version, project, endpoint, thread, sandbox)
+        receipt = workflow.prepare(config, release, version, project, endpoint, thread, sandbox, guard_runtime=guard)
         try:
             with config.open('a', encoding='utf-8') as stream:
                 stream.write('required = false\n')
-            report = workflow.switch(receipt, read_json(receipt))
+            report = workflow.switch(receipt, read_json(receipt), guard_runtime=guard)
             raw, table, data, binding = workflow.registration_state(config)
             assert table['required'] is True and binding == fixture['connectionId']
             assert tomllib.loads(raw.decode())['mcp_servers']['unrelated'] == {'command': 'preserved', 'required': False}

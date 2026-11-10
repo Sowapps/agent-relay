@@ -4,10 +4,34 @@ namespace AgentRelay.Infrastructure;
 
 public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
 {
+    private const string ActiveState = "json_extract(payload,'$.state') IN ('pending','running')";
+
+    /// <summary>Check durable work without opening a host or recovering pending operations.</summary>
+    /// <seealso cref="RecoverAsync"/>
+    public static async Task DemandIdleAsync(string dataDirectory, bool allowUninitialized, CancellationToken token)
+    {
+        var path = RelayDatabase.DatabasePath(dataDirectory);
+        RuntimePaths.DemandPrivatePath(path);
+        FileAttributes attributes;
+        try { attributes = File.GetAttributes(path); }
+        catch (Exception error) when (error is FileNotFoundException or DirectoryNotFoundException)
+        {
+            if (allowUninitialized) return;
+            throw new RelayException("storage_unavailable", "The relay database is missing. Verify the selected data directory before maintenance.", false);
+        }
+        if ((attributes & FileAttributes.Directory) != 0)
+            throw new RelayException("storage_unavailable", "The selected relay database path is not a file.", false);
+        using var connection = new RelayDatabase(dataDirectory, readOnly: true).Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT 1 FROM work WHERE {ActiveState} LIMIT 1";
+        if (await command.ExecuteScalarAsync(token) is not null)
+            throw new RelayException("busy", "Active durable work exists; finish it before maintenance.", false);
+    }
+
     public async Task ProgressAsync(Guid id, WorkProgress progress, CancellationToken token)
     {
         using var connection = database.Open(); using var command = connection.CreateCommand();
-        command.CommandText = "UPDATE work SET payload=json_set(payload,'$.progress',json($progress),'$.updatedAt',$at) WHERE id=$id AND json_extract(payload,'$.state') IN ('pending','running')";
+        command.CommandText = $"UPDATE work SET payload=json_set(payload,'$.progress',json($progress),'$.updatedAt',$at) WHERE id=$id AND {ActiveState}";
         command.Parameters.AddWithValue("$id", id.ToString("D")); command.Parameters.AddWithValue("$progress", RelayJson.Serialize(progress));
         command.Parameters.AddWithValue("$at", progress.UpdatedAt.ToString("O")); await command.ExecuteNonQueryAsync(token);
     }
@@ -51,7 +75,7 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
     public async Task RequestCancellationAsync(Guid id, CancellationToken token)
     {
         using var connection = database.Open(); using var command = connection.CreateCommand();
-        command.CommandText = "UPDATE work SET payload=json_set(payload,'$.cancellationRequestedAt',$at) WHERE id=$id AND json_extract(payload,'$.state') IN ('pending','running') AND json_extract(payload,'$.cancellationRequestedAt') IS NULL";
+        command.CommandText = $"UPDATE work SET payload=json_set(payload,'$.cancellationRequestedAt',$at) WHERE id=$id AND {ActiveState} AND json_extract(payload,'$.cancellationRequestedAt') IS NULL";
         command.Parameters.AddWithValue("$id", id.ToString("D")); command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O")); await command.ExecuteNonQueryAsync(token);
     }
 
@@ -74,7 +98,7 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
             using (var connection = database.Open())
             using (var command = connection.CreateCommand())
             {
-                command.CommandText = "SELECT payload FROM work WHERE json_extract(payload,'$.state') IN ('running','pending') ORDER BY rowid LIMIT 128";
+                command.CommandText = $"SELECT payload FROM work WHERE {ActiveState} ORDER BY rowid LIMIT 128";
                 using var reader = await command.ExecuteReaderAsync(token);
                 while (await reader.ReadAsync(token)) unfinished.Add(RelayJson.Deserialize<WorkRecord>(reader.GetString(0)));
             }
