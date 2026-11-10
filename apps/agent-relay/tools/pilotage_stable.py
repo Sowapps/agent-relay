@@ -86,13 +86,13 @@ def installation_fingerprint(executable):
 
 
 @contextmanager
-def stopped_source(source):
+def stopped_source(source, guard_runtime):
     ordinary_file(source / 'relay.sqlite')
     ordinary_file(source / 'host.lock')
     with exclusive(source):
         if (source / 'migrated-to.json').exists() or (source / 'promotion.lock').exists():
             raise ValueError('Source was migrated or has a pending promotion')
-        demand_idle(source)
+        demand_idle(guard_runtime, source)
         yield
 
 
@@ -183,7 +183,7 @@ def stage_archive(archive, digest, version, executable):
         extract_archive(package, executable.parent, prefix='app/')
 
 
-def prepare(config, release, version, project, endpoint, thread, stable_root, legacy_scope=None):
+def prepare(config, release, version, project, endpoint, thread, stable_root, legacy_scope=None, *, guard_runtime=None):
     archive, digest = verified_inputs(release, version)
     _, table, source, binding = registration_state(config)
     if not source.is_relative_to(stable_root) and source != legacy_scope:
@@ -207,7 +207,7 @@ def prepare(config, release, version, project, endpoint, thread, stable_root, le
         guide = ordinary_file(executable.parent / 'documentation/mcp-tools.md')
         report['toolsDocSha256'] = doc_digest(guide.read_text(encoding='utf-8-sig'))
         data.parent.mkdir(parents=True)
-        with stopped_source(source):
+        with stopped_source(source, guard_runtime or {'executable': str(executable)}):
             report['sourceFiles'] = source_fingerprint(source)
             expected_membership(source, project, endpoint)
             snapshot(source, data, files=STATE_FILES)
@@ -245,7 +245,7 @@ def matches_target(table, receipt, report):
     )
 
 
-def switch(receipt, report):
+def switch(receipt, report, *, guard_runtime=None):
     """Commit only the named registration, after all fallible host and scope checks."""
     if report['stage'] != 'prepared':
         raise ValueError('A prepared receipt is required; inspect status before retrying an interrupted switch')
@@ -260,10 +260,11 @@ def switch(receipt, report):
     )
     desired = registration.update(raw.decode('utf-8-sig'), fragment, SERVER).encode('utf-8')
     started = time.monotonic()
-    with stopped_source(source):
+    guard_runtime = guard_runtime or {'executable': str(executable)}
+    with stopped_source(source, guard_runtime):
         if source_fingerprint(source) != report['sourceFiles']:
             raise ValueError('The source changed after preparation; prepare a new copy')
-        with stopped_source(data):
+        with stopped_source(data, guard_runtime):
             if (installation_fingerprint(executable) != report['installationFiles']
                     or prepared_fingerprint(data) != report['preparedFiles']):
                 raise ValueError('The prepared archive or data changed; prepare a new copy')

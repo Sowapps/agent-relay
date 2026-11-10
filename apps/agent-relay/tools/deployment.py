@@ -53,13 +53,17 @@ def validate(runtime, root, development=False):
     validate_runtime(runtime, root, development)
 
 
-def demand_idle(data):
-    database_path = data / 'relay.sqlite'
-    if not database_path.exists():
-        return
-    with closing(sqlite3.connect(database_path.as_uri() + '?mode=ro', uri=True)) as database:
-        if database.execute("SELECT 1 FROM work WHERE json_extract(payload,'$.state') IN ('pending','running') LIMIT 1").fetchone():
-            raise RuntimeError('Active durable work exists; publication refused')
+def demand_idle(runtime, data, *, allow_uninitialized=False):
+    """Call the C# durable-work guard. The online admission barrier is separate."""
+    command = runtime_command(runtime) + ['maintenance-idle', '--data-dir', str(data)]
+    if allow_uninitialized:
+        command.append('--allow-uninitialized')
+    result = subprocess.run(command, capture_output=True, encoding='utf-8', errors='replace',
+                            timeout=12, creationflags=subprocess.CREATE_NO_WINDOW)
+    if result.returncode:
+        raise RuntimeError('Maintenance guard refused: ' + result.stderr.strip())
+    if json.loads(result.stdout) != {'idle': True}:
+        raise RuntimeError('The maintenance guard did not confirm idle durable work')
 
 
 class PromotionFreeze:
@@ -115,7 +119,7 @@ def launch(runtime, data, reports, show=False):
         process.wait(timeout=10); raise
 
 
-def publish(data, prepared, reports, show, *, expected_data=None):
+def publish(data, prepared, reports, show, *, expected_data=None, guard_runtime=None):
     root = Path(__file__).resolve().parents[3]; data, prepared, reports = data.resolve(), prepared.resolve(), reports.resolve()
     if expected_data is not None and data != expected_data.resolve():
         raise ValueError('Selected data scope differs from the approved promotion target')
@@ -123,17 +127,20 @@ def publish(data, prepared, reports, show, *, expected_data=None):
     for path in [data, prepared, reports]:
         if not any(path.is_relative_to(base) for base in [app_var(root), root / 'local/apps/agent-relay']): raise ValueError('Deployment paths escaped the declared application roots')
     runtime = read(prepared / 'mcp-runtime.json'); development=data.is_relative_to(root / 'local/apps/agent-relay'); validate(runtime, root, development)
+    if guard_runtime is not None:
+        validate(guard_runtime, root, development)
     contract_path = Path(runtime_command(runtime)[0]).parent / 'mcp-contract.json'
     contract = read(contract_path)
     if not re.fullmatch(r'\d+\.\d+\.\d+(?:-rc\.[1-9]\d*)?', contract['version']): raise ValueError('Only stable and RC versions may be deployed')
     data.mkdir(parents=True, exist_ok=True)
     with PromotionFreeze(data) as freeze:
-        result = publish_prepared(data, reports, runtime, contract, root, development, show, freeze)
+        result = publish_prepared(data, reports, runtime, contract, root, development, show, freeze,
+                                  guard_runtime=guard_runtime)
     print(json.dumps(result))
 
 
 def publish_prepared(data, reports, runtime, contract, root, development, show, freeze, *,
-                     validate_previous=None, verify=None):
+                     validate_previous=None, verify=None, guard_runtime=None):
     history_path = data / 'mcp-contract-history.json'
     history = read(history_path) if history_path.exists() else {}
     known = history.get(contract['version'])
@@ -155,7 +162,9 @@ def publish_prepared(data, reports, runtime, contract, root, development, show, 
             proof = verify() if verify else None
             return {'published': False, 'alreadyCurrent': True, 'pid': current_host['pid'],
                     'currentChatMcpQualified': False, 'verification': proof}
-    demand_idle(data)
+    guard_runtime = runtime if guard_runtime is None else guard_runtime
+    first_install = existing_pointer is None and existing_host is None and not (reports / 'host.json').exists()
+    demand_idle(guard_runtime, data, allow_uninitialized=first_install)
     reports.mkdir(parents=True, exist_ok=True)
     transaction = reports / ('deployment-' + uuid.uuid4().hex); transaction.mkdir()
     check = transaction / 'preflight'; check.mkdir(); snapshot(data, check / 'before')
@@ -164,11 +173,12 @@ def publish_prepared(data, reports, runtime, contract, root, development, show, 
     if (check / 'before/connections').exists(): shutil.copytree(check / 'before/connections', check / 'connections')
     probe = launch(runtime, check, transaction); probe.terminate(); probe.wait(timeout=10)
     return replace_runtime(data, reports, runtime, contract, history, transaction, root, development, show, freeze,
-                           validate_previous=validate_previous, verify=verify)
+                           validate_previous=validate_previous, verify=verify, guard_runtime=guard_runtime,
+                           allow_uninitialized=first_install)
 
 
 def replace_runtime(data, reports, runtime, contract, history, transaction, root, development, show, freeze, *,
-                    validate_previous=None, verify=None):
+                    validate_previous=None, verify=None, guard_runtime, allow_uninitialized):
     history_path = data / 'mcp-contract-history.json'
     metadata = data / 'ui-host.json'; report_metadata = reports / 'host.json'
     previous = read(metadata) if metadata.exists() else read(report_metadata) if report_metadata.exists() else None
@@ -184,7 +194,7 @@ def replace_runtime(data, reports, runtime, contract, history, transaction, root
     was_running = previous is not None
     if was_running:
         confirm_quiescence(runtime, data)
-    demand_idle(data)
+    demand_idle(guard_runtime, data, allow_uninitialized=allow_uninitialized)
     if was_running:
         if not identity(previous, data):
             raise RuntimeError('Relay owner changed before shutdown; no process was stopped')

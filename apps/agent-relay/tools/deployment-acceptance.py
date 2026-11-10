@@ -28,6 +28,30 @@ def require(condition, message):
         raise RuntimeError(message)
 
 
+def verify_durable_guard(runtime, case):
+    missing = case / 'uninitialized'
+    deployment.demand_idle(runtime, missing, allow_uninitialized=True)
+    require(not missing.exists(), 'A read-only check initialized a data directory')
+    try:
+        deployment.demand_idle(runtime, missing)
+    except RuntimeError as error:
+        require('storage_unavailable' in str(error), str(error))
+    else:
+        raise RuntimeError('A missing required database was accepted')
+
+    damaged = case / 'damaged'
+    damaged.mkdir()
+    database = damaged / 'relay.sqlite'
+    contents = b'damaged fixture'
+    database.write_bytes(contents)
+    try:
+        deployment.demand_idle(runtime, damaged, allow_uninitialized=True)
+    except RuntimeError:
+        require(database.read_bytes() == contents, 'The read-only check changed the damaged database')
+    else:
+        raise RuntimeError('A damaged database was accepted as uninitialized')
+
+
 def prepare_data(data, fixture):
     if fixture:
         deployment.snapshot(ordinary_directory(fixture), data)
@@ -83,6 +107,8 @@ def exercise_update(args, root, case, result):
     previous = deployment.read(ordinary_file(args.previous_prepared / 'mcp-runtime.json'))
     for pointer in (runtime, previous):
         deployment.validate(pointer, root, development=True)
+    verify_durable_guard(runtime, case)
+    result['durableGuardMissingAndDamagedChecks'] = True
     require(runtime_command(previous) != runtime_command(runtime),
             'Rehearsal requires distinct candidate and baseline runtime paths')
     expected = prepare_data(data, args.fixture)
@@ -95,7 +121,7 @@ def exercise_update(args, root, case, result):
     children = []
     inject = False
     def promote(candidate, *, expected=data):
-        deployment.publish(data, candidate, reports, False, expected_data=expected)
+        deployment.publish(data, candidate, reports, False, expected_data=expected, guard_runtime=runtime)
 
     def confirm_and_probe(pointer, target):
         confirm(pointer, target)
@@ -157,7 +183,7 @@ def exercise_update(args, root, case, result):
             require(deployment.identity(old, data), 'Wrong-target refusal displaced the current host')
             with closing(sqlite3.connect(data / 'relay.sqlite')) as connection:
                 active_id = str(uuid.uuid4())
-                connection.execute('INSERT INTO work(id,payload) VALUES (?,?)', (active_id, '{"state":"pending"}'))
+                connection.execute('INSERT INTO work(id,payload) VALUES (?,?)', (active_id, '{"state":"running"}'))
                 connection.commit()
             try:
                 try:
@@ -171,6 +197,7 @@ def exercise_update(args, root, case, result):
                     connection.execute('DELETE FROM work WHERE id=?', (active_id,))
                     connection.commit()
             require(deployment.identity(old, data), 'Busy-target refusal displaced the current host')
+            require(not (data / 'promotion.lock').exists(), 'Busy-target refusal left admissions blocked')
             result.update(wrongTargetRefused=True, activeWorkRefused=True)
             started = time.monotonic()
             inject = True

@@ -21,7 +21,7 @@ import subprocess
 import time
 import tomllib
 import uuid
-from deployment import exclusive, launch
+from deployment import demand_idle, exclusive, launch
 from host_identity import resolve_host
 import importlib.util
 _spec=importlib.util.spec_from_file_location('relay_register',Path(__file__).with_name('register-codex.py'))
@@ -68,12 +68,6 @@ def fingerprint(data):
         # Byte-level historical payload retention, not just record counts.
         return {table: hashlib.sha256(json.dumps(database.execute('SELECT * FROM ' + table + ' ORDER BY 1').fetchall()).encode()).hexdigest()
                 for table in ['work', 'inbox', 'transfers', 'connections', 'cursors', 'work_events', 'exchanges']}
-
-
-def idle(data):
-    with closing(sqlite3.connect((data / 'relay.sqlite').as_uri() + '?mode=ro', uri=True)) as database:
-        count = database.execute("SELECT count(*) FROM work WHERE json_extract(payload,'$.state') IN ('pending','running')").fetchone()[0]
-        if count: raise RuntimeError('Active work exists; finish or explicitly interrupt it before migration')
 
 
 def plans(source, destination):
@@ -226,7 +220,10 @@ def migrate(args):
         assert (destination / 'mcp-runtime.json').is_file()
         return {'applied': False, 'alreadyMigrated': True, 'destination': str(destination)}
     assert not destination.exists(), 'Destination exists; no merge or overwrite is allowed'
-    idle(source); before = fingerprint(source); plan = plans(source, destination)
+    runtime = read(args.runtime_pointer)
+    validate_runtime(runtime, root)
+    demand_idle(runtime, source)
+    before = fingerprint(source); plan = plans(source, destination)
     required = (source / 'relay.sqlite').stat().st_size
     for name in CORE:
         path = source / name
@@ -237,7 +234,6 @@ def migrate(args):
         if path.is_file(): required += path.stat().st_size
         elif path.is_dir(): required += sum(file.stat().st_size for file in path.rglob('*') if file.is_file())
     if shutil.disk_usage(root).free < required + 32 * 1024 * 1024: raise RuntimeError('Insufficient space for the Windows migration copy')
-    runtime = read(args.runtime_pointer); validate_runtime(runtime, root)
     old_startup = startup_entry(runtime, source)['entry']
     new_startup = startup_entry(runtime, destination)
     if new_startup['entry'] is not None:
@@ -274,7 +270,7 @@ def migrate(args):
             except RuntimeError: time.sleep(.1)
         else: raise RuntimeError('Source host did not release ownership')
         with exclusive(source):
-            idle(source)
+            demand_idle(runtime, source)
             if fingerprint(source) != before: raise RuntimeError('History changed since preflight; migration refused')
             prepare(source, destination, runtime, plan)
             for group in plan['native']:

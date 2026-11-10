@@ -13,7 +13,7 @@ public sealed class RelayDatabase
     {
         DataDirectory = Path.GetFullPath(dataDirectory);
         this.readOnly = readOnly;
-        connectionString = new SqliteConnectionStringBuilder { DataSource = Path.Combine(Path.GetFullPath(dataDirectory), "relay.sqlite"),
+        connectionString = new SqliteConnectionStringBuilder { DataSource = DatabasePath(DataDirectory),
             Mode = readOnly ? SqliteOpenMode.ReadOnly : SqliteOpenMode.ReadWriteCreate, Pooling = false, DefaultTimeout = 5 }.ToString();
         if (readOnly) return;
         Directory.CreateDirectory(dataDirectory);
@@ -42,6 +42,8 @@ public sealed class RelayDatabase
         command.ExecuteNonQuery();
         transaction.Commit();
     }
+
+    internal static string DatabasePath(string dataDirectory) => Path.Combine(dataDirectory, "relay.sqlite");
 
     public SqliteConnection Open()
     {
