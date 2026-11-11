@@ -1,33 +1,24 @@
-"""Refresh packaged adapters only in explicitly selected, relay-owned named-session roots."""
+"""Refresh packaged adapters only in explicitly selected, relay-owned named-session roots.
+
+@see deployment.demand_idle and deployment.exclusive for shared offline maintenance guards.
+@see provision-wsl.py and native_layout.py for the packaged helpers and session identity.
+"""
 import argparse
-import base64
+from contextlib import closing
 import json
 from pathlib import Path
-import sys
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'wsl'))
-from native_layout import load_layout, payload_files
 import sqlite3
 import subprocess
+import sys
 import uuid
 
-parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument('--data', type=Path, required=True)
-parser.add_argument('--session-id', type=uuid.UUID, action='append', help='Refresh only these retained session identities; repeat for an explicit set')
-args = parser.parse_args()
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'wsl'))
+from native_layout import payload_files
+from deployment import demand_idle, exclusive, read
+from runtime_layout import app_var, read_runtime, validate_runtime
+
 application = Path(__file__).resolve().parents[1]
 root = application.parents[1]
-data = args.data.resolve()
-assert any(data.is_relative_to(root / folder) for folder in ['var/apps/agent-relay','local/apps/agent-relay']), 'Select explicit declared relay data'
-with sqlite3.connect(data / 'relay.sqlite') as database:
-    active = database.execute("SELECT count(*) FROM work WHERE json_extract(payload,'$.state') IN ('pending','running')").fetchone()[0]
-    assert active == 0, 'Wait for active relay work before updating adapters'
-    sessions = [json.loads(row[0]) for row in database.execute('SELECT payload FROM sessions')]
-if args.session_id:
-    selected = {str(value) for value in args.session_id}
-    sessions = [session for session in sessions if session['id'] in selected]
-    if {session['id'] for session in sessions} != selected:
-        raise ValueError('A selected session is absent; no adapter was updated')
-files = payload_files(application / 'wsl')
 script = '''
 import base64,json,os,pathlib,sys,uuid
 c=json.load(sys.stdin);s=c['session'];p=pathlib.Path(s['root'])
@@ -41,10 +32,45 @@ for name,value in c['files'].items():
  temporary=target.with_suffix('.pending-'+uuid.uuid4().hex);temporary.write_bytes(base64.b64decode(value));os.replace(temporary,target)
 print(json.dumps({'sessionId':s['id'],'files':len(c['files']),'modelPrompts':0}))
 '''
-for session in sessions:
-    template = session['template']
-    result = subprocess.run(['wsl.exe', '-d', template['distribution'], '-u', template['user'], '--exec', 'python3', '-c', script],
-                            input=json.dumps({'session': session, 'files': files}), text=True, encoding='utf-8', capture_output=True, timeout=20)
-    if result.returncode:
-        raise RuntimeError(result.stderr)
-    print(result.stdout.strip())
+
+
+def synchronize(data, session_ids=None, runtime_pointer=None):
+    data = data.resolve()
+    if not any(data.is_relative_to(folder) and data != folder
+               for folder in [app_var(root), root / 'local/apps/agent-relay']):
+        raise ValueError('Select explicit declared relay data')
+    registered = read_runtime(data)
+    runtime = read(runtime_pointer.resolve()) if runtime_pointer else registered
+    validate_runtime(runtime, root, development=True)
+    with exclusive(data):
+        demand_idle(runtime, data)
+        with closing(sqlite3.connect((data / 'relay.sqlite').as_uri() + '?mode=ro', uri=True)) as database:
+            sessions = [json.loads(row[0]) for row in database.execute('SELECT payload FROM sessions')]
+        if session_ids:
+            selected = {str(value) for value in session_ids}
+            sessions = [session for session in sessions if session['id'] in selected]
+            if {session['id'] for session in sessions} != selected:
+                raise ValueError('A selected session is absent; no adapter was updated')
+        files = payload_files(application / 'wsl')
+        for session in sessions:
+            template = session['template']
+            result = subprocess.run(
+                ['wsl.exe', '-d', template['distribution'], '-u', template['user'], '--exec', 'python3', '-c', script],
+                input=json.dumps({'session': session, 'files': files}), text=True, encoding='utf-8', errors='replace',
+                capture_output=True, timeout=20, creationflags=subprocess.CREATE_NO_WINDOW)
+            if result.returncode:
+                raise RuntimeError(result.stderr)
+            print(result.stdout.strip())
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--data', type=Path, required=True)
+    parser.add_argument('--session-id', type=uuid.UUID, action='append', help='Refresh only these retained session identities; repeat for an explicit set')
+    parser.add_argument('--runtime-pointer', type=Path, help='Explicit prepared guard runtime for installations predating maintenance-idle')
+    args = parser.parse_args()
+    synchronize(args.data, args.session_id, args.runtime_pointer)
+
+
+if __name__ == '__main__':
+    main()

@@ -32,7 +32,7 @@ def exclusive(data):
     kernel.CreateFileW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
     kernel.CreateFileW.restype = ctypes.c_void_p; kernel.CloseHandle.argtypes = [ctypes.c_void_p]
     handle = kernel.CreateFileW(str(data / 'host.lock'), 0xC0000000, 0, None, 4, 0x80, None)
-    if handle == ctypes.c_void_p(-1).value: raise RuntimeError('Another host owns the directory; no migration or rollback performed')
+    if handle == ctypes.c_void_p(-1).value: raise RuntimeError('Another host owns the directory; offline maintenance refused')
     try: yield
     finally: kernel.CloseHandle(handle)
 
