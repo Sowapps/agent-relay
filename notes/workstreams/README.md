@@ -5,6 +5,7 @@
 
 ## Records
 
+- [Session adapter maintenance](2026-11-11-session-adapter-maintenance.md): shared C# inactivity guard and isolated WSL synchronization.
 - [Durable work guard](2026-11-10-durable-work-guard.md): shared C# maintenance check and isolated migration/deployment tests.
 - [Windows startup entry ownership](2026-11-09-startup-registration-owner.md): C# startup operations and storage-migration rollback.
 - [Stable startup and operating procedures](2026-11-09-stable-startup.md): on-demand recovery, retained scope and recurring-issue follow-up.
