@@ -2,6 +2,8 @@ using AgentRelay.Core;
 using AgentRelay.Infrastructure;
 using System.IO.Pipes;
 
+if (args.Length == 2 && args[0] == "process-fixture") { await ProcessScenarios.FixtureAsync(args[1]); return; }
+if (args.Length == 1 && args[0] == "process-check") { await ProcessScenarios.RunAsync(); return; }
 if (args.Length == 2 && args[0] == "design-contracts") { DesignScenarios.Contracts(Path.GetFullPath(args[1])); return; }
 if (args.Length == 2 && args[0] == "design-fixture") { await DesignScenarios.Seed(Path.GetFullPath(args[1])); return; }
 if (args.Length == 2 && args[0] == "design-error-fixture") { await DesignScenarios.Seed(Path.GetFullPath(args[1]), includeFailures: true); return; }
@@ -28,6 +30,7 @@ if (args.Length == 3 && args[0] == "monitor-review") { await UiRenderScenarios.R
 if (args.Length == 3 && args[0] == "monitor-usability") { await UiRenderScenarios.Usability(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); Console.WriteLine("NATIVE_USABILITY=PASS"); return; }
 var data = Path.GetFullPath(args.Single());
 DateDisplayScenarios.Run();
+await ProcessScenarios.RunAsync();
 StartupTransferScenarios.Run();
 StorageScenarios.Run(Path.Combine(data, "storage"));
 await RawPipeScenarios.Run(data+"-raw-pipe");

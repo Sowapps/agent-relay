@@ -7,6 +7,7 @@ internal sealed record LaunchOptions(string Mode, string DataDirectory, string? 
     public static LaunchOptions Parse(string[] arguments)
     {
         var mode = arguments.Length > 0 && !arguments[0].StartsWith('-') ? arguments[0] : "tray";
+        if (mode == "wsl-maintenance") return Maintenance(arguments);
         if (mode is not ("tray" or "startup" or "startup-enable" or "startup-disable" or "startup-status" or "startup-transfer" or "startup-entry" or "send" or "read" or "mcp" or "mcp-worker" or "mcp-contract" or "prepare" or "submit" or "result" or "history" or "inbox" or "profiles" or "start-profile" or "admin" or "initialize" or "deployment-quiesce" or "maintenance-idle")) throw new ArgumentException("Unsupported application mode.");
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         bool show = false, onDemand = false, apply = false, allowUninitialized = false;
@@ -40,5 +41,13 @@ internal sealed record LaunchOptions(string Mode, string DataDirectory, string? 
             throw new ArgumentException("Maintenance requires an explicit absolute data directory.");
         return new(mode, Path.GetFullPath(data), values.GetValueOrDefault("--message"), id, show, lifetime,
             values.GetValueOrDefault("--profile"), values.GetValueOrDefault("--kind"), values.GetValueOrDefault("--command"), values.TryGetValue("--connection-id", out var connection) ? Guid.Parse(connection) : null, values.GetValueOrDefault("--input"), values.GetValueOrDefault("--window-title"), onDemand, previous, apply, allowUninitialized);
+    }
+
+    private static LaunchOptions Maintenance(string[] arguments)
+    {
+        if (arguments.Length != 3 || arguments[1] != "--data-dir" || !Path.IsPathFullyQualified(arguments[2]))
+            throw new ArgumentException("WSL maintenance requires one explicit absolute data directory.");
+        AgentRelay.Infrastructure.RuntimePaths.DemandActive(arguments[2]);
+        return new("wsl-maintenance", Path.GetFullPath(arguments[2]), null, null, false, null, null, null, null);
     }
 }

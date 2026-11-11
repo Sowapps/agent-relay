@@ -11,13 +11,13 @@ import importlib.util
 import json
 from pathlib import Path
 import sqlite3
-import subprocess
 import time
 from unittest.mock import patch
 import uuid
 
 from deployment import exclusive, read, write
 from runtime_layout import reject_pilotage_paths, validate_runtime
+from wsl_maintenance import run_script, WslMaintenanceError
 
 spec = importlib.util.spec_from_file_location('session_adapter_sync', Path(__file__).with_name('sync-session-adapters.py'))
 sync = importlib.util.module_from_spec(spec)
@@ -86,22 +86,17 @@ def main():
 
     def native(action):
         payload = {'action': action, 'user': args.user, 'sessions': sessions, 'files': files}
-        result = subprocess.run(
-            ['wsl.exe', '-d', args.distribution, '-u', 'root', '--exec', 'python3', '-c', NATIVE],
-            input=json.dumps(payload), text=True, encoding='utf-8', errors='replace', capture_output=True,
-            timeout=30, creationflags=subprocess.CREATE_NO_WINDOW)
-        assert result.returncode == 0, result.stderr
-        return json.loads(result.stdout)
+        result = run_script(runtime, data, args.distribution, 'root', NATIVE, payload, 30)
+        return json.loads(result['output'])
 
-    original_run = subprocess.run
+    original_run = sync.run_script
     wsl_calls = []
     native_prepared = False
 
-    def guarded_run(command, **kwargs):
-        if command[0] == 'wsl.exe':
-            refused(lambda: enter_competing_owner(data), 'Another host owns')
-            wsl_calls.append(command[:5])
-        return original_run(command, **kwargs)
+    def guarded_run(*arguments):
+        refused(lambda: enter_competing_owner(data), 'Another host owns')
+        wsl_calls.append(arguments[2:4])
+        return original_run(*arguments)
 
     try:
         write(data / 'mcp-runtime.json', runtime)
@@ -112,7 +107,7 @@ def main():
                 database.execute('INSERT INTO sessions(id,payload) VALUES (?,?)',
                                  (session['id'], json.dumps(session)))
             database.commit()
-        with patch.object(sync.subprocess, 'run', side_effect=guarded_run):
+        with patch.object(sync, 'run_script', side_effect=guarded_run):
             with exclusive(data):
                 refused(lambda: sync.synchronize(data), 'Another host owns')
             for state in ['pending', 'running']:
@@ -131,7 +126,7 @@ def main():
         before = native('inspect')
         pointer_before = (data / 'mcp-runtime.json').read_bytes()
         database_before = (data / 'relay.sqlite').read_bytes()
-        with patch.object(sync.subprocess, 'run', side_effect=guarded_run):
+        with patch.object(sync, 'run_script', side_effect=guarded_run):
             sync.synchronize(data, [sessions[0]['id']])
         after = native('inspect')
         expected = {name: hashlib.sha256(base64.b64decode(value)).hexdigest() for name, value in files.items()}
@@ -144,11 +139,11 @@ def main():
             validate_runtime(legacy_runtime, sync.root, development=True)
             write(data / 'mcp-runtime.json', legacy_runtime)
             pointer_before = (data / 'mcp-runtime.json').read_bytes()
-            with patch.object(sync.subprocess, 'run', side_effect=guarded_run):
+            with patch.object(sync, 'run_script', side_effect=guarded_run):
                 refused(lambda: sync.synchronize(data), 'Unsupported application mode')
             assert len(wsl_calls) == 1, 'Unsupported runtime invoked WSL'
             override = args.runtime_pointer
-        with patch.object(sync.subprocess, 'run', side_effect=guarded_run):
+        with patch.object(sync, 'run_script', side_effect=guarded_run):
             sync.synchronize(data, [sessions[1]['id']], override)
         assert all(hashes == expected for hashes in native('inspect').values())
         assert (data / 'mcp-runtime.json').read_bytes() == pointer_before
@@ -161,6 +156,8 @@ def main():
                       databaseAndRuntimeUnchanged=True, synchronizedSessions=len(wsl_calls))
     except BaseException as error:
         report['error'] = str(error) or type(error).__name__
+        if isinstance(error, WslMaintenanceError):
+            report['diagnostic'] = error.diagnostic
         raise
     finally:
         try:
@@ -170,6 +167,8 @@ def main():
         except BaseException as error:
             report['passed'] = False
             report['cleanupError'] = str(error) or type(error).__name__
+            if isinstance(error, WslMaintenanceError):
+                report['cleanupDiagnostic'] = error.diagnostic
             raise
         finally:
             report['seconds'] = round(time.monotonic() - started, 3)

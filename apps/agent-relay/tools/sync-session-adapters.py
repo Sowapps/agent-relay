@@ -8,7 +8,6 @@ from contextlib import closing
 import json
 from pathlib import Path
 import sqlite3
-import subprocess
 import sys
 import uuid
 
@@ -16,6 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'wsl'))
 from native_layout import payload_files
 from deployment import demand_idle, exclusive, read
 from runtime_layout import app_var, read_runtime, validate_runtime
+from wsl_maintenance import run_script
 
 application = Path(__file__).resolve().parents[1]
 root = application.parents[1]
@@ -54,13 +54,9 @@ def synchronize(data, session_ids=None, runtime_pointer=None):
         files = payload_files(application / 'wsl')
         for session in sessions:
             template = session['template']
-            result = subprocess.run(
-                ['wsl.exe', '-d', template['distribution'], '-u', template['user'], '--exec', 'python3', '-c', script],
-                input=json.dumps({'session': session, 'files': files}), text=True, encoding='utf-8', errors='replace',
-                capture_output=True, timeout=20, creationflags=subprocess.CREATE_NO_WINDOW)
-            if result.returncode:
-                raise RuntimeError(result.stderr)
-            print(result.stdout.strip())
+            result = run_script(runtime, data, template['distribution'], template['user'], script,
+                                {'session': session, 'files': files}, 20)
+            print(result['output'].strip())
 
 
 def main():

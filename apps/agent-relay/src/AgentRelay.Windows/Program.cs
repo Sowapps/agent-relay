@@ -11,7 +11,7 @@ internal static class Program
         try
         {
             var options = LaunchOptions.Parse(arguments);
-            if (options.Mode is "mcp" or "mcp-worker" or "startup-entry" or "maintenance-idle")
+            if (options.Mode is "mcp" or "mcp-worker" or "startup-entry" or "maintenance-idle" or "wsl-maintenance")
             {
                 Console.InputEncoding = new System.Text.UTF8Encoding(false);
                 Console.OutputEncoding = new System.Text.UTF8Encoding(false);
@@ -28,6 +28,13 @@ internal static class Program
 
     private static async Task<int> RunClientAsync(LaunchOptions options)
     {
+        if (options.Mode == "wsl-maintenance")
+        {
+            var request = RelayJson.Deserialize<WslMaintenanceRequest>(await Console.In.ReadToEndAsync());
+            var result = await WslMaintenance.RunAsync(request, CancellationToken.None);
+            Console.WriteLine(RelayJson.Serialize(result));
+            return result.TimedOut || result.ExitCode != 0 ? 1 : 0;
+        }
         if (options.Mode == "maintenance-idle")
         {
             await SqliteWorkStore.DemandIdleAsync(options.DataDirectory, options.AllowUninitialized, CancellationToken.None);
