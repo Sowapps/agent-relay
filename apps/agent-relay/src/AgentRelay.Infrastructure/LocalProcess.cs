@@ -5,8 +5,20 @@ namespace AgentRelay.Infrastructure;
 
 public sealed record ProcessOutput(int ExitCode, string Output, string Error);
 
+public sealed class LocalProcessTimeoutException(string output, string error, bool inputCompleted, double seconds)
+    : TimeoutException("The local process exceeded its wait limit; completion is not confirmed.")
+{
+    public string Output { get; } = LocalProcess.DiagnosticTail(output);
+    public string Error { get; } = LocalProcess.DiagnosticTail(error);
+    public string ErrorPrefix { get; } = error[..Math.Min(error.Length, 256)];
+    public bool InputCompleted { get; } = inputCompleted;
+    public double Seconds { get; } = seconds;
+}
+
 public static class LocalProcess
 {
+    internal static string DiagnosticTail(string value) => value.Length > 1800 ? value[^1800..] : value;
+
     public static async Task<ProcessOutput> RunAsync(string executable, IEnumerable<string> arguments, string? input,
         TimeSpan timeout, CancellationToken token)
     {
@@ -15,20 +27,69 @@ public static class LocalProcess
             RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
             StandardInputEncoding = new UTF8Encoding(false), StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8 };
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
+        var watch = Stopwatch.StartNew();
         using var process = Process.Start(start) ?? throw new IOException("The local process could not start.");
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
-        deadline.CancelAfter(timeout);
+        var remaining = timeout - watch.Elapsed;
+        deadline.CancelAfter(remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero);
+        using var captureStop = new CancellationTokenSource();
+        var output = new Capture();
+        var error = new Capture();
+        var readers = Task.WhenAll(output.ReadAsync(process.StandardOutput.BaseStream, captureStop.Token),
+            error.ReadAsync(process.StandardError.BaseStream, captureStop.Token));
+        var inputCompleted = false;
         try
         {
-            var output = process.StandardOutput.ReadToEndAsync(deadline.Token);
-            var error = process.StandardError.ReadToEndAsync(deadline.Token);
-            if (input is not null) await process.StandardInput.WriteAsync(input);
+            if (input is not null)
+                await process.StandardInput.BaseStream.WriteAsync(Encoding.UTF8.GetBytes(input), deadline.Token);
             process.StandardInput.Close();
+            inputCompleted = true;
             await process.WaitForExitAsync(deadline.Token).ConfigureAwait(false);
-            return new(process.ExitCode, await output, await error);
+            await readers.WaitAsync(deadline.Token);
+            return new(process.ExitCode, output.Text, error.Text);
         }
         catch (OperationCanceledException) when (!token.IsCancellationRequested)
-        { throw new TimeoutException($"The local process exceeded its {timeout.TotalSeconds:0}s wait limit; completion is not confirmed."); }
-        finally { if (!process.HasExited) process.Kill(true); }
+        {
+            if (!process.HasExited) process.Kill(true);
+            try { await readers.WaitAsync(TimeSpan.FromSeconds(2)); }
+            catch (Exception captureError) when (captureError is TimeoutException or IOException) { }
+            throw new LocalProcessTimeoutException(output.Text, error.Text,
+                inputCompleted, watch.Elapsed.TotalSeconds);
+        }
+        finally
+        {
+            if (!process.HasExited) process.Kill(true);
+            captureStop.Cancel();
+            try { await readers; }
+            catch (Exception captureError) when (captureError is OperationCanceledException or IOException) { }
+        }
+    }
+
+    private sealed class Capture
+    {
+        private readonly MemoryStream bytes = new();
+
+        public string Text
+        {
+            get
+            {
+                byte[] value;
+                lock (bytes) value = bytes.ToArray();
+                if (value.Length >= 2 && (value[0] == 0xff && value[1] == 0xfe || value[1] == 0))
+                    return Encoding.Unicode.GetString(value).TrimStart('\ufeff');
+                try { return new UTF8Encoding(false, true).GetString(value).TrimStart('\ufeff'); }
+                catch (DecoderFallbackException) { return Encoding.Latin1.GetString(value); }
+            }
+        }
+
+        public async Task ReadAsync(Stream stream, CancellationToken token)
+        {
+            var buffer = new byte[4096];
+            int length;
+            while ((length = await stream.ReadAsync(buffer, token)) != 0)
+            {
+                lock (bytes) bytes.Write(buffer, 0, length);
+            }
+        }
     }
 }

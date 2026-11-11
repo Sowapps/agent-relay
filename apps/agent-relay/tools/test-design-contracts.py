@@ -12,9 +12,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'wsl'))
 from native_layout import load_layout, payload_files, layout_from_payload
 from native_errors import NativeFailure, envelope
 import host_identity
+import wsl_maintenance
 
 
 class DesignContractTests(unittest.TestCase):
+    def test_runtime_timeout_preserves_bounded_diagnostic_without_replay(self):
+        runtime = {'executable': str(Path('local/fixture/AgentRelay.Windows.exe').resolve())}
+        failure = subprocess.TimeoutExpired('fixture', 1, output=b'partial-runtime-output', stderr=b'partial-runtime-error')
+        with patch.object(wsl_maintenance.subprocess, 'run', side_effect=failure) as invoke:
+            with self.assertRaises(wsl_maintenance.WslMaintenanceError) as caught:
+                wsl_maintenance.run_script(runtime, Path('local/fixture'), 'fictional-distro', 'fictional-user', 'pass', {}, 1)
+        diagnostic = caught.exception.diagnostic
+        self.assertEqual(diagnostic['phase'], 'runtime_unconfirmed')
+        self.assertEqual(diagnostic['output'], 'partial-runtime-output')
+        self.assertEqual(diagnostic['runtimeError'], 'partial-runtime-error')
+        self.assertTrue(diagnostic['effectsPossible'])
+        invoke.assert_called_once()
+
     def test_changed_native_scripts_and_embedded_programs_parse(self):
         application = Path(__file__).resolve().parents[1]
         for path in (application / 'wsl').glob('*.py'):
