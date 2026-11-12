@@ -5,6 +5,7 @@
 
 ## Records
 
+- [Stable 1.1.1 preparation and deployment](2026-11-12-stable-1.1.1.md): installed comparison, qualified stable archive and retained-installation rollout.
 - [Goal tracking procedure correction](2026-11-12-goal-tracking-procedure.md): demonstrated old-goal closure/new-goal creation and mandatory functional tracking.
 - [Seven-lot development cleanup](2026-11-12-seven-lot-code-cleanup.md): authorized maintenance, service/boundary/UI review and unified qualification.
 - [WSL launch diagnostics](2026-11-11-wsl-launch-diagnostics.md): retained timeout diagnostics and deadline ownership.

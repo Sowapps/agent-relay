@@ -18,7 +18,7 @@ from deployment import write
 from pilotage_stable import EXE, registration_state
 from release_artifact import (
     EXTRACTED_DIRECTORY, VERIFICATION_FILE, archive_path, extract_archive,
-    ordinary_directory, ordinary_file, read_json, sha256, verified_archive,
+    ordinary_directory, ordinary_file, read_json, sha256, verified_archive, validate_version,
 )
 from runtime_layout import app_var, pilotage_stable_root, reject_pilotage_paths
 
@@ -119,9 +119,7 @@ def candidate_evidence(directory, version):
 def qualify(report, folder, baseline_directory=None, legacy_baseline=False):
     if report['dirty']:
         raise ValueError('Qualification requires a clean, identified Git commit')
-    version = ET.parse(TOOLS.parent / 'Version.props').findtext('.//Version')
-    if not version or '-rc.' not in version:
-        raise ValueError('Qualification entry point requires an RC version')
+    version = validate_version(ET.parse(TOOLS.parent / 'Version.props').findtext('.//Version'))
     ordinary_directory(RELEASES)
     script = TOOLS / 'release.ps1'
     output = phase(report, folder, 'package', powershell(script, '-Action', 'Package', '-Offline'))
