@@ -205,8 +205,7 @@ internal static class StartupRegistration
             foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
             {
                 var relative = Path.GetRelativePath(source, file);
-                if (relative.Split(Path.DirectorySeparatorChar)[0] is "documentation" or "presentation" or "wsl" or "tools") continue;
-                if (Path.GetExtension(file).ToLowerInvariant() is not (".dll" or ".exe" or ".json")) continue;
+                if (!AgentRelay.Infrastructure.RetainedLauncherPayload.Includes(relative, documentation: false)) continue;
                 var target = Path.Combine(stage, relative);
                 Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                 if (!File.Exists(Path.Combine(source, "runtime.json")) || !CreateHardLink(target, file, IntPtr.Zero)) File.Copy(file, target);

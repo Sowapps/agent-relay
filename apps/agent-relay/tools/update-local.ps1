@@ -4,6 +4,10 @@ param([Parameter(Mandatory)][string]$DataDirectory,[string]$ReportDirectory,[swi
 $ErrorActionPreference='Stop'
 $root=Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent
 $data=[IO.Path]::GetFullPath($DataDirectory)
+$pointer=Join-Path $data 'mcp-runtime.json'
+if((Test-Path -LiteralPath $pointer) -and (Get-Content -LiteralPath $pointer -Raw | ConvertFrom-Json).distribution -eq 'portable-win-x64'){
+    throw 'Portable installations require Update-AgentRelay.cmd with a qualified release. update-local.ps1 is for development scopes; no files were updated.'
+}
 $scope=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($data.ToUpperInvariant()))).Substring(0,12)
 $reports=if($ReportDirectory){[IO.Path]::GetFullPath($ReportDirectory)}else{Join-Path $root ('var/apps/agent-relay/deployment/update-'+$scope)}
 & (Join-Path $PSScriptRoot 'publish-local.ps1') -DataDirectory $data -ReportDirectory $reports -Show:$Show

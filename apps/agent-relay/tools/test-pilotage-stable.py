@@ -126,31 +126,30 @@ def rehearse_upgrade(config, release, receipt, report, data, project, endpoint, 
     initial_startup = workflow.startup_state(workflow.locations(receipt)[0], data)
     assert initial_startup is False, 'A fictional installation should not have a sign-in entry'
     previous = workflow.candidate_table(receipt, report)
-    runtime = {'executable': previous['command'], 'connectionId': report['bindingId']}
     before = workflow.source_fingerprint(data)
     updated = None
     try:
+        # Updating the broker binary is different from swapping only its worker. Do not
+        # keep an old mapped executable open and pretend that its bytes were upgraded.
+        updated = workflow.upgrade(config, release, version, project, endpoint, thread, sandbox, rehearsal=True)
+        upgraded = read_json(updated)
+        assert upgraded['startupEnabled'] is initial_startup
+        assert workflow.registration_state(config)[2] == data and config.read_bytes() == registered
+        assert workflow.candidate_table(updated, upgraded) == previous
+        assert workflow.source_fingerprint(data)['relay-projects.json'] == before['relay-projects.json']
+        runtime = {'executable': previous['command'], 'connectionId': report['bindingId']}
         with (sandbox / 'retained-client.stderr.log').open('w', encoding='utf-8') as errors:
             with RelayMcp(runtime, data, workflow.ROOT, errors) as client:
-                assert client.tool('get_connection_status')['version'] == report['version']
-                updated = workflow.upgrade(config, release, version, project, endpoint, thread, sandbox, rehearsal=True)
-                upgraded = read_json(updated)
-                assert upgraded['startupEnabled'] is initial_startup
-                assert workflow.registration_state(config)[2] == data and config.read_bytes() == registered
-                assert workflow.candidate_table(updated, upgraded) == previous
-                assert workflow.source_fingerprint(data)['relay-projects.json'] == before['relay-projects.json']
                 status = client.tool('get_connection_status')
-                assert status['version'] == version and status['clientRefreshRequired'] is True
-                client.call('tools/list')
-                assert client.tool('get_connection_status')['clientRefreshRequired'] is False
+                assert status['version'] == status['brokerVersion'] == version and status['clientRefreshRequired'] is False
                 assert client.tool('list_projects')['configuration']['projects'][0]['id'] == project
                 repeated = workflow.upgrade(config, release, version, project, endpoint, thread, sandbox, rehearsal=True)
                 repeated_report = read_json(repeated)
                 assert repeated_report['hostPid'] == upgraded['hostPid']
                 assert repeated_report['runtimeExecutable'] == upgraded['runtimeExecutable']
                 assert repeated_report['deploymentTransaction'] is None
-                assert workflow.status(config, receipt, report)['stage'] == 'superseded'
-                return str(updated)
+        assert workflow.status(config, receipt, report)['stage'] == 'superseded'
+        return str(updated)
     finally:
         if updated:
             executable, _ = workflow.locations(updated, read_json(updated))

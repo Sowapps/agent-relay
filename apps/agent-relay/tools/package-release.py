@@ -10,6 +10,12 @@ p.add_argument('--version',required=True);a=p.parse_args()
 payload=a.payload.resolve();notices=payload/'third-party';notices.mkdir()
 app=Path(__file__).resolve().parents[1]
 root=app.parents[1]
+update_tools = ['complete_update.py', 'deployment.py', 'host_identity.py', 'release_artifact.py',
+                'runtime_layout.py', 'relay_mcp.py', 'stdio_rpc.py', 'verify-release.py']
+updater = payload / 'tools/updater'
+updater.mkdir(parents=True)
+for name in update_tools:
+ shutil.copy2(app / 'tools' / name, updater / name)
 (payload/'app/installation.json').write_text(json.dumps({'version':1,'root':'..'}),encoding='utf-8')
 # Keep repository prose as the only source; adapt links to the extracted layout.
 def distribution_links(text):
@@ -54,6 +60,7 @@ release_tools = ['release.ps1', 'package-release.py', 'verify-release.py', 'rele
                  'relay_mcp.py', 'stdio_rpc.py', 'runtime_layout.py', 'provision-wsl.py', 'test-startup.ps1']
 inputs += list(app.glob('*.props')) + [root/'README.md',root/'README.fr.md',app/'NuGet.Config']
 inputs += [app/'tools'/name for name in release_tools]
+inputs += [app/'tools'/name for name in update_tools if name not in release_tools]
 source_inputs={file.relative_to(root).as_posix():sha256(file) for file in sorted(inputs)}
 manifest={'version':a.version,'platform':'win-x64','selfContained':True,'sourceInputs':source_inputs,'files':files}
 (payload/MANIFEST_FILE).write_text(json.dumps(manifest,indent=2),encoding='utf-8')

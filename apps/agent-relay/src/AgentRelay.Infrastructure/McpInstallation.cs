@@ -20,9 +20,8 @@ public static class McpInstallation
             foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
             {
                 var relative = Path.GetRelativePath(source, file);
-                if (relative.Split(Path.DirectorySeparatorChar)[0] is "presentation" or "wsl" or "tools") continue;
                 if (relative == "installation.json" || relative == "mcp-launcher.ready") continue;
-                if (!relative.StartsWith("documentation" + Path.DirectorySeparatorChar, StringComparison.Ordinal) && Path.GetExtension(file).ToLowerInvariant() is not (".dll" or ".exe" or ".json")) continue;
+                if (!RetainedLauncherPayload.Includes(relative, documentation: true)) continue;
                 var target = Path.Combine(stage, relative); Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                 if (!CreateHardLink(target, file, IntPtr.Zero)) File.Copy(file, target);
             }

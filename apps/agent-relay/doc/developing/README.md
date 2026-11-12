@@ -5,6 +5,8 @@
 
 ## References
 
+- [Complete portable update](complete-update.md): one installed version, full component activation, idempotence, interruption recovery and rollback.
+
 - [Navigable interface prototype](../../prototype/README.md): reproducible reference, simulation tools and prototype-first correction workflow.
 
 - [Runtime storage and migration](runtime-storage.md): installation-root var ownership, explicit developer outputs, private staging and guarded migration.

@@ -69,6 +69,19 @@ def declared_checksum(archive):
     return checksums[0]
 
 
+def qualified_archive(directory, version, *, allow_rc=False):
+    """Select exact qualified release bytes; stable consumers cannot silently take an RC."""
+    archive = archive_path(directory, version)
+    if '-rc.' in version and not allow_rc:
+        raise ValueError('Stable updates accept stable releases only')
+    verification = read_json(directory / VERIFICATION_FILE)
+    digest = declared_checksum(archive)
+    if (verification.get('passed') is not True or verification.get('version') != version
+            or verification.get('archiveSha256') != digest):
+        raise ValueError('The selected archive has no matching verification')
+    return archive, digest
+
+
 @contextmanager
 def verified_archive(path, expected_digest):
     """Hash and consume the same open archive so a replaced path cannot select another ZIP."""

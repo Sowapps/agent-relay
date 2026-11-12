@@ -11,7 +11,7 @@ internal static class Program
         try
         {
             var options = LaunchOptions.Parse(arguments);
-            if (options.Mode is "mcp" or "mcp-worker" or "startup-entry" or "maintenance-idle" or "wsl-maintenance")
+            if (options.Mode is "mcp" or "mcp-worker" or "startup-entry" or "maintenance-idle" or "wsl-maintenance" or "installation-update")
             {
                 Console.InputEncoding = new System.Text.UTF8Encoding(false);
                 Console.OutputEncoding = new System.Text.UTF8Encoding(false);
@@ -28,6 +28,14 @@ internal static class Program
 
     private static async Task<int> RunClientAsync(LaunchOptions options)
     {
+        if (options.Mode == "installation-update")
+        {
+            var request = RelayJson.Deserialize<InstallationUpdateRequest>(await Console.In.ReadToEndAsync());
+            if (!string.Equals(Path.GetFullPath(request.Data), options.DataDirectory, StringComparison.OrdinalIgnoreCase))
+                throw new ArgumentException("The update request and selected data scope disagree.");
+            Console.WriteLine(RelayJson.Serialize(new InstallationUpdate(request.Installation, request.Data).Run(request.Action, request.Candidate)));
+            return 0;
+        }
         if (options.Mode == "wsl-maintenance")
         {
             var request = RelayJson.Deserialize<WslMaintenanceRequest>(await Console.In.ReadToEndAsync());

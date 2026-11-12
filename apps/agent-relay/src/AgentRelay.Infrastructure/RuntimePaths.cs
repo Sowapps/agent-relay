@@ -21,8 +21,11 @@ public static class RuntimePaths
     public static string DefaultDataDirectory(string? binaryDirectory = null)
     {
         var root = InstallationRoot(binaryDirectory) ?? throw new IOException("L’installation doit déclarer sa racine. Utilisez son lanceur ou un --data-dir explicite ; aucun dossier local/ ou profil utilisateur n’est choisi automatiquement.");
-        return Path.Combine(root, "var", "apps", "agent-relay", "default");
+        return PortableDataDirectory(root);
     }
+
+    public static string ApplicationDirectory(string installation) => Path.Combine(Path.GetFullPath(installation), "var", "apps", "agent-relay");
+    public static string PortableDataDirectory(string installation) => Path.Combine(ApplicationDirectory(installation), "default");
 
     public static IEnumerable<string> ProtectedRoots(string data)
     {
