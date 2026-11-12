@@ -12,8 +12,8 @@ import sqlite3
 import subprocess
 import time
 import uuid
-import re
 from host_identity import identity, resolve_host
+from release_artifact import validate_version
 
 STATE_FILES = ('relay.sqlite', 'mcp-runtime.json', 'relay-config.json', 'relay-projects.json',
                'mcp-contract.json', 'mcp-contract-history.json')
@@ -131,7 +131,7 @@ def publish(data, prepared, reports, show, *, expected_data=None, guard_runtime=
         validate(guard_runtime, root, development)
     contract_path = Path(runtime_command(runtime)[0]).parent / 'mcp-contract.json'
     contract = read(contract_path)
-    if not re.fullmatch(r'\d+\.\d+\.\d+(?:-rc\.[1-9]\d*)?', contract['version']): raise ValueError('Only stable and RC versions may be deployed')
+    validate_version(contract['version'])
     data.mkdir(parents=True, exist_ok=True)
     with PromotionFreeze(data) as freeze:
         result = publish_prepared(data, reports, runtime, contract, root, development, show, freeze,

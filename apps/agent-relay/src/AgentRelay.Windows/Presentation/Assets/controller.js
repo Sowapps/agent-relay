@@ -97,7 +97,9 @@
   else if(action==='show-evidence'){const evidence=$('#operation-evidence');if(evidence){evidence.open=true;evidence.scrollIntoView({block:'nearest'});}}
   else if(action==='rename-session'){
    const session=data.sessions.find(s=>s.id===id);if(!session)return;
-   modal('Renommer la session',`<label for="session-name">Nom de la session</label><input id="session-name" maxlength="120" value="${C.escape(session.name)}">`,C.button('Renommer','confirm-rename',`data-id="${C.escape(id)}"`,'primary'));
+   const maximum=data.sessionNameMaximumLength;
+   const limit=Number.isSafeInteger(maximum)&&maximum>0?` maxlength="${maximum}"`:'';
+   modal('Renommer la session',`<label for="session-name">Nom de la session</label><input id="session-name"${limit} value="${C.escape(session.name)}">`,C.button('Renommer','confirm-rename',`data-id="${C.escape(id)}"`,'primary'));
    $('#session-name').focus();
   }
   else if(action==='confirm-rename'){const name=$('#session-name').value.trim();if(name&&!ui.renamePending){ui.renamePending=true;host('session-control',{id,control:'rename:'+name});}}

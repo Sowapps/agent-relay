@@ -49,3 +49,15 @@ def read_runtime(data):
         target = json.loads((data / 'migrated-to.json').read_text(encoding='utf-8-sig'))['destination']
         raise ValueError('This scope was migrated. Reconnect with the reviewed configuration for ' + target)
     return json.loads((data / 'mcp-runtime.json').read_text(encoding='utf-8-sig'))
+
+
+def maintenance_runtime(data, root, pointer=None):
+    """Select a reviewed maintenance runtime without rebinding the selected scope."""
+    data, root = Path(data).resolve(), Path(root).resolve()
+    if not any(data.is_relative_to(folder) and data != folder
+               for folder in [app_var(root), root / 'local/apps/agent-relay']):
+        raise ValueError('Select explicit declared relay data')
+    registered = read_runtime(data)
+    runtime = json.loads(Path(pointer).read_text(encoding='utf-8-sig')) if pointer else registered
+    validate_runtime(runtime, root, development=True)
+    return runtime

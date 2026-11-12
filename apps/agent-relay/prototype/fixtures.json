@@ -491,6 +491,7 @@
     }
   ],
   "schemaVersion": 1,
+  "sessionNameMaximumLength": 120,
   "relayVersion": "1.1.0-rc.1",
   "relay": "ready",
   "startup": {

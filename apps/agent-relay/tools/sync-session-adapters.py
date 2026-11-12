@@ -13,8 +13,8 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'wsl'))
 from native_layout import payload_files
-from deployment import demand_idle, exclusive, read
-from runtime_layout import app_var, read_runtime, validate_runtime
+from deployment import demand_idle, exclusive
+from runtime_layout import maintenance_runtime
 from wsl_maintenance import run_script
 
 application = Path(__file__).resolve().parents[1]
@@ -36,12 +36,7 @@ print(json.dumps({'sessionId':s['id'],'files':len(c['files']),'modelPrompts':0})
 
 def synchronize(data, session_ids=None, runtime_pointer=None):
     data = data.resolve()
-    if not any(data.is_relative_to(folder) and data != folder
-               for folder in [app_var(root), root / 'local/apps/agent-relay']):
-        raise ValueError('Select explicit declared relay data')
-    registered = read_runtime(data)
-    runtime = read(runtime_pointer.resolve()) if runtime_pointer else registered
-    validate_runtime(runtime, root, development=True)
+    runtime = maintenance_runtime(data, root, runtime_pointer)
     with exclusive(data):
         demand_idle(runtime, data)
         with closing(sqlite3.connect((data / 'relay.sqlite').as_uri() + '?mode=ro', uri=True)) as database:

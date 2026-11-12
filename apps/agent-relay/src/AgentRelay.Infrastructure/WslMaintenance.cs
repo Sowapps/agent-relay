@@ -28,7 +28,7 @@ public static class WslMaintenance
             var started = result.Error.StartsWith(marker, StringComparison.Ordinal);
             return new(result.ExitCode, result.ExitCode == 0 ? result.Output : LocalProcess.DiagnosticTail(result.Output),
                 LocalProcess.DiagnosticTail(RemoveMarker(result.Error, marker)), false,
-                started ? "native_operation" : "native_start_unconfirmed", true, watch.Elapsed.TotalSeconds,
+                started ? "native_operation" : "native_start_unconfirmed", result.InputCompleted, watch.Elapsed.TotalSeconds,
                 result.ExitCode == 0 ? true : null);
         }
         catch (LocalProcessTimeoutException error)

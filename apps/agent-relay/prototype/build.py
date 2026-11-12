@@ -21,5 +21,5 @@ html=html.replace('/* PRESENTATION */',styles).replace('// PRESENTATION',scripts
 args.output.parent.mkdir(parents=True,exist_ok=True);args.output.write_text(html,encoding='utf-8',newline='\n')
 if args.record_reference:
  (folder/'reviewed.html').write_text(html,encoding='utf-8',newline='\n')
- (folder/'reference.json').write_text(json.dumps({'sha256':hashlib.sha256(html.encode()).hexdigest(),'source':'shared presentation + prototype shell/fixtures/simulation','status':'qualified implementation reference; operator visual acceptance separate'},indent=2)+'\n',encoding='utf-8')
+ (folder/'reference.json').write_text(json.dumps({'sha256':hashlib.sha256(html.encode()).hexdigest(),'source':'shared presentation + prototype shell/fixtures/simulation','status':'qualified implementation reference; operator visual acceptance separate'},indent=2)+'\n',encoding='utf-8',newline='\n')
 print(str(args.output))
