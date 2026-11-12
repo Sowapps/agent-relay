@@ -5,6 +5,7 @@ using System.IO.Pipes;
 if (args.Length == 2 && args[0] == "process-fixture") { await ProcessScenarios.FixtureAsync(args[1]); return; }
 if (args.Length == 1 && args[0] == "process-check") { await ProcessScenarios.RunAsync(); return; }
 if (args.Length == 2 && args[0] == "design-contracts") { DesignScenarios.Contracts(Path.GetFullPath(args[1])); return; }
+if (args.Length == 2 && args[0] == "installation-update") { InstallationUpdateScenarios.Run(Path.GetFullPath(args[1])); return; }
 if (args.Length == 2 && args[0] == "design-fixture") { await DesignScenarios.Seed(Path.GetFullPath(args[1])); return; }
 if (args.Length == 2 && args[0] == "design-error-fixture") { await DesignScenarios.Seed(Path.GetFullPath(args[1]), includeFailures: true); return; }
 
@@ -33,6 +34,7 @@ DateDisplayScenarios.Run();
 await ProcessScenarios.RunAsync();
 StartupTransferScenarios.Run();
 StorageScenarios.Run(Path.Combine(data, "storage"));
+InstallationUpdateScenarios.Run(Path.Combine(data, "installation-update"));
 await RawPipeScenarios.Run(data+"-raw-pipe");
 MonitorScenarios.Run();
 AttentionReviewScenarios.Run(Path.Combine(data,"attention-reviews"));

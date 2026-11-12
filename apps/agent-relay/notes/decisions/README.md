@@ -5,6 +5,8 @@
 
 ## Records
 
+- [Complete and recoverable portable update](2026-11-12-complete-update.md): full component manifest, retained installation identity, C# recovery journal and client acknowledgement boundary.
+
 - [Shared stable relay startup](2026-11-09-stable-relay-startup.md): scoped cold startup, one host and sign-in preference continuity.
 - [Design ownership and shared contracts](2026-11-05-design-ownership.md): responsibility levels, shared definitions, focused collaborators and boundary ownership.
 - [Final design audit handoff](../../../../notes/workstreams/2026-11-06-design-audit-handoff.md): audit decisions and verification records for A01–A11.

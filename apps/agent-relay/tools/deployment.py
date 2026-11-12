@@ -27,11 +27,11 @@ def write(path, value):
 
 
 @contextmanager
-def exclusive(data):
+def exclusive(data, name='host.lock'):
     kernel = ctypes.WinDLL('kernel32', use_last_error=True)
     kernel.CreateFileW.argtypes = [ctypes.c_wchar_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p]
     kernel.CreateFileW.restype = ctypes.c_void_p; kernel.CloseHandle.argtypes = [ctypes.c_void_p]
-    handle = kernel.CreateFileW(str(data / 'host.lock'), 0xC0000000, 0, None, 4, 0x80, None)
+    handle = kernel.CreateFileW(str(data / name), 0xC0000000, 0, None, 4, 0x80, None)
     if handle == ctypes.c_void_p(-1).value: raise RuntimeError('Another host owns the directory; offline maintenance refused')
     try: yield
     finally: kernel.CloseHandle(handle)
@@ -47,6 +47,20 @@ def snapshot(data, destination, *, files=STATE_FILES):
         shutil.copytree(data / 'connections', destination / 'connections')
     if (data / 'relay.sqlite').exists():
         with closing(sqlite3.connect(data / 'relay.sqlite')) as source, closing(sqlite3.connect(destination / 'relay.sqlite')) as target: source.backup(target)
+
+
+def restore_snapshot(data, backup, failed):
+    """Restore a coherent stopped-scope snapshot; callers hold host ownership and admission."""
+    failed.mkdir()
+    for name in (*STATE_FILES, 'relay.sqlite-wal', 'relay.sqlite-shm', 'connections'):
+        target = data / name
+        if target.exists():
+            target.replace(failed / name)
+    for name in STATE_FILES:
+        if (backup / name).exists():
+            shutil.copy2(backup / name, data / name)
+    if (backup / 'connections').exists():
+        shutil.copytree(backup / 'connections', data / 'connections')
 
 
 def validate(runtime, root, development=False):
@@ -124,6 +138,8 @@ def publish(data, prepared, reports, show, *, expected_data=None, guard_runtime=
     if expected_data is not None and data != expected_data.resolve():
         raise ValueError('Selected data scope differs from the approved promotion target')
     reject_pilotage_paths(root, data, prepared, reports)
+    if (data / 'mcp-runtime.json').is_file() and read(data / 'mcp-runtime.json').get('distribution') == 'portable-win-x64':
+        raise ValueError('Portable installations require the complete update procedure; runtime-only publication was refused')
     for path in [data, prepared, reports]:
         if not any(path.is_relative_to(base) for base in [app_var(root), root / 'local/apps/agent-relay']): raise ValueError('Deployment paths escaped the declared application roots')
     runtime = read(prepared / 'mcp-runtime.json'); development=data.is_relative_to(root / 'local/apps/agent-relay'); validate(runtime, root, development)
@@ -227,12 +243,7 @@ def replace_runtime(data, reports, runtime, contract, history, transaction, root
         if started is not None: started.terminate(); started.wait(timeout=10)
         if backup_ready:
             with exclusive(data):
-                for name in (*STATE_FILES, 'relay.sqlite-wal', 'relay.sqlite-shm', 'connections'):
-                    target = data / name
-                    if target.exists(): target.replace(transaction / ('failed-' + name))
-                for name in STATE_FILES:
-                    if (backup / name).exists(): shutil.copy2(backup / name, data / name)
-                if (backup / 'connections').exists(): shutil.copytree(backup / 'connections', data / 'connections')
+                restore_snapshot(data, backup, transaction / 'failed-state')
         if was_running:
             restored = launch(previous, data, transaction, show); write(metadata, dict(previous, pid=restored.pid)); write(report_metadata, read(metadata))
         write(transaction / 'result.json', {'healthy': False, 'rollbackPerformed': True})
