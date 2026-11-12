@@ -58,7 +58,29 @@ internal static class InstallationUpdateScenarios
             Refuses<IOException>(() => update.Run("status"));
         File.WriteAllText(Path.Combine(candidate, "README.md"), "tampered");
         Refuses("update_candidate_invalid", () => update.Run("prepare", candidate));
+        var reported = InstallationUpdateDiagnostics.Capture(data, new RelayException("update_conflict", "fixture conflict", false));
+        Check(reported.Code == "update_conflict" && reported.DetailsPath is not null, "expected refusals have retained identifiable details");
+        Check(InstallationUpdateDiagnostics.Read(data, reported.DiagnosticId).Detail.Contains("fixture conflict", StringComparison.Ordinal)
+            && InstallationUpdateDiagnostics.Latest(data)?.DiagnosticId == reported.DiagnosticId, "diagnostic lookup and agent summary retain the same identity");
+        var unavailable = Path.Combine(root, "diagnostics-unavailable");
+        Directory.CreateDirectory(unavailable);
+        File.WriteAllText(Path.Combine(unavailable, "mcp-runtime.json"), "{}");
+        File.WriteAllText(Path.Combine(unavailable, "logs"), "directory blocked by a fixture file");
+        var fallback = InstallationUpdateDiagnostics.Capture(unavailable, new IOException("original failure preserved"));
+        Check(fallback.DetailsPath is null && fallback.DiagnosticStorageError is not null
+            && fallback.InlineDetail!.Contains("original failure preserved", StringComparison.Ordinal), "diagnostic storage failure is explicit and preserves the primary error");
+        var journal = Path.Combine(RuntimePaths.ApplicationDirectory(installation), "update", "current.json");
+        var valid = File.ReadAllText(journal);
+        var invalid = JsonNode.Parse(valid)!;
+        invalid["phase"] = "unknown_future_phase";
+        File.WriteAllText(journal, invalid.ToJsonString());
+        Refuses("update_recovery_required", () => update.Run("rollback"));
+        Check(File.Exists(Path.Combine(data, "promotion.lock")), "an unknown phase never guesses a recovery or releases admission");
+        File.WriteAllText(journal, valid);
+        update.Run("rollback-release");
+        Check(!File.Exists(Path.Combine(data, "promotion.lock")), "only the verified rollback's own barrier is released");
         Console.WriteLine("COMPLETE_INSTALLATION_UPDATE=PASS (all components, locked file, resume, activation refusal, rollback, data preservation, exclusive lock, manifest tampering)");
+        Console.WriteLine("UPDATE_DIAGNOSTICS=PASS (expected error ID, retained details, agent summary, explicit logging failure)");
     }
 
     private static void Manifest(string candidate)

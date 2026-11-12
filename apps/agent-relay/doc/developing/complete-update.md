@@ -39,9 +39,15 @@ The durable phases are preparing, prepared, applying, files_applied, awaiting_cl
 
 ## Status, resume and rollback
 
-Repeat the same command and exact candidate to resume after interruption. Add --action status for the retained phase and receipt, or --action rollback to restore an unfinished stopped transaction. Neither action installs another version. A completed matching update verifies its state and keeps the same host and files. A repeated verified rollback does not stop the restored host again.
+Repeat the same command and exact candidate to continue applying it. Before publishing intent, the engine retains an independently runnable recovery tool and its exact file hashes. `--data <absolute-installed-data> --action status`, `--action resume` and `--action rollback` use those checked bytes and require neither the original ZIP, download directory nor a valid active app. An incomplete candidate stage without its source can be inspected or rolled back; the updater never invents missing candidate files. Neither action initializes another installation. A completed matching update keeps the same host/files. A verified rollback left with its own admission barrier is finalized before another candidate can be prepared, including if the process died before writing its adapter acknowledgement. Another operation's barrier is never removed.
 
 Recovery validates the actual files, owned barrier and snapshot. It does not delete another operation's lock. An unknown/malformed journal, external file change or missing rollback material requires review. Never clear promotion.lock merely because the updater process ended.
+
+## Errors and diagnostic retrieval
+
+Expected refusals and unexpected errors reach the calling agent/human as a structured error with code, diagnosticId, message, recovery and detailsPath. CLI failure exits nonzero without a raw Python traceback. C# owns classification and retained detail records under the selected data's logs/update/. Adapter failures are submitted to that same owner. If the C# transport or diagnostic storage fails, the adapter explicitly reports the additional failure and provides retained or inline fallback details; it never replaces the original error with a logging exception.
+
+Retrieve an incident with `--data <absolute-installed-data> --action diagnostic --diagnostic-id <update-ID>`, without an archive. get_connection_status includes lastUpdateError, a historical summary with the same code/ID and timestamp, so a consuming MCP agent can identify the issue and request the retained detail through the local maintainer. It is not necessarily an active failure. Technical records are private and bounded; do not add tokens, credentials or complete agent requests. Reports retain both the primary and rollback/retention failures when recovery itself fails. A missing coherent snapshot is never replaced by a new snapshot of partially migrated data.
 
 Before admission reopens, failure restores managed files, the coherent data snapshot and prior startup preference, then verifies the previous host when it had been running. File restoration alone is files_restored, not rolled_back. If recovery fails, retain the barrier and snapshot and report the exact ports.json path; do not report success or start another transaction.
 

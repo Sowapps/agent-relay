@@ -26,6 +26,14 @@ public static class RuntimePaths
 
     public static string ApplicationDirectory(string installation) => Path.Combine(Path.GetFullPath(installation), "var", "apps", "agent-relay");
     public static string PortableDataDirectory(string installation) => Path.Combine(ApplicationDirectory(installation), "default");
+    public static string PortableInstallationForData(string data)
+    {
+        var path = Path.TrimEndingDirectorySeparator(Path.GetFullPath(data));
+        var root = new DirectoryInfo(path).Parent?.Parent?.Parent?.Parent?.FullName;
+        if (root is null || !string.Equals(PortableDataDirectory(root), path, StringComparison.OrdinalIgnoreCase))
+            throw new IOException("The data directory does not belong to the portable installation layout.");
+        return root;
+    }
 
     public static IEnumerable<string> ProtectedRoots(string data)
     {
