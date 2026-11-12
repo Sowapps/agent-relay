@@ -116,7 +116,7 @@ def candidate_evidence(directory, version):
             'bytes': archive.stat().st_size, 'checks': str(checks)}
 
 
-def qualify(report, folder):
+def qualify(report, folder, baseline_directory=None, legacy_baseline=False):
     if report['dirty']:
         raise ValueError('Qualification requires a clean, identified Git commit')
     version = ET.parse(TOOLS.parent / 'Version.props').findtext('.//Version')
@@ -139,6 +139,10 @@ def qualify(report, folder):
     phase(report, folder, 'mcp-cold-start', python_script('test-mcp-startup.py', '--release-directory', directory))
     if git('rev-parse', 'HEAD') != report['commit'] or git('status', '--porcelain'):
         raise ValueError('Source changed during cold-start qualification')
+    if baseline_directory:
+        rehearse_candidate(report, folder, baseline_directory, legacy_baseline)
+        if git('rev-parse', 'HEAD') != report['commit'] or git('status', '--porcelain'):
+            raise ValueError('Source changed during update rehearsal')
 
 
 def stage_runtime(candidate):
@@ -161,6 +165,14 @@ def rehearse(report, folder, receipt, baseline_directory, legacy_baseline=False)
     archive = Path(candidate['archive'])
     if candidate != candidate_evidence(archive.parent, candidate['version']):
         raise ValueError('Qualification receipt differs from the archive evidence')
+    report['candidate'] = candidate
+    rehearse_candidate(report, folder, baseline_directory, legacy_baseline)
+
+
+def rehearse_candidate(report, folder, baseline_directory, legacy_baseline=False):
+    """Share the same archive update check with standalone and combined qualification."""
+    candidate = report['candidate']
+    archive = Path(candidate['archive'])
     extracted = archive.parent / EXTRACTED_DIRECTORY
     fixture = ordinary_directory(extracted / 'var/apps/agent-relay/default')
     reject_pilotage_paths(ROOT, fixture)
@@ -180,15 +192,19 @@ def rehearse(report, folder, receipt, baseline_directory, legacy_baseline=False)
     arguments = ['--prepared', folder, '--previous-prepared', previous, '--fixture', fixture, '--binding', binding]
     if legacy_baseline:
         arguments.append('--expect-legacy-refusal')
-    phase(report, folder, 'legacy-promotion' if legacy_baseline else 'rollback',
-          python_script('deployment-acceptance.py', *arguments))
+    output = phase(report, folder, 'legacy-promotion' if legacy_baseline else 'rollback',
+                   python_script('deployment-acceptance.py', *arguments))
+    lines = [json.loads(line) for line in output.splitlines() if line.startswith('{')]
+    if not lines or lines[-1].get('passed') is not True or not lines[-1].get('report'):
+        raise ValueError('Update rehearsal did not retain a passing result')
+    report['rehearsalReceipt'] = lines[-1]['report']
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=(*OPERATIONS, 'status'))
     parser.add_argument('--receipt', type=Path)
-    parser.add_argument('--baseline-directory', type=Path, help='Use a verified baseline archive for rehearsal')
+    parser.add_argument('--baseline-directory', type=Path, help='Verified baseline for standalone or combined qualification/rehearsal')
     parser.add_argument('--legacy-baseline', action='store_true', help='Rehearse a legacy live refusal and offline upgrade')
     parser.add_argument('--observe-stable', type=Path, metavar='CODEX_CONFIG',
                         help='Compare the named stable registration and selected hashes before and after')
@@ -204,8 +220,10 @@ def main():
         parser.error('--operation and --json are for status')
     if args.action == 'rehearse' and (not args.receipt or not args.baseline_directory):
         parser.error('rehearse requires --receipt and --baseline-directory')
-    if (args.receipt or args.baseline_directory or args.legacy_baseline) and args.action != 'rehearse':
-        parser.error('Receipt and baseline options are for rehearse')
+    if args.receipt and args.action != 'rehearse':
+        parser.error('Receipt is for rehearse')
+    if (args.baseline_directory or args.legacy_baseline) and args.action not in ('qualify', 'rehearse'):
+        parser.error('Baseline options are for qualify or rehearse')
     if args.legacy_baseline and not args.baseline_directory:
         parser.error('--legacy-baseline requires an explicit baseline archive')
     output = operation_directory(DELIVERY, args.action) / uuid.uuid4().hex
@@ -223,7 +241,7 @@ def main():
         before = stable_snapshot(args.observe_stable.absolute()) if args.observe_stable else None
         report['stableObserved'] = before is not None
         if args.action == 'qualify':
-            qualify(report, output)
+            qualify(report, output, args.baseline_directory, args.legacy_baseline)
         elif args.action == 'rehearse':
             rehearse(report, output, args.receipt, args.baseline_directory, args.legacy_baseline)
         else:

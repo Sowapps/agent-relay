@@ -51,6 +51,7 @@ internal static class PresentationSnapshot
         var response = new
         {
             schemaVersion = 1,
+            sessionNameMaximumLength = SessionNames.MaximumLength,
             relayVersion = McpIdentity.Current.Version,
             mcpConnections = mcpConnections ?? [],
             revision = observations.Sum(item => item.Revision),

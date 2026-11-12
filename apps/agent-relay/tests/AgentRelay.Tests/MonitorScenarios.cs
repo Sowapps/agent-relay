@@ -25,6 +25,8 @@ internal static class MonitorScenarios
         var b = new AgentRelay.Windows.Monitoring.ProjectObservation(other); b.Operations.Add(first with { Request = first.Request with { Id = Guid.NewGuid(), Scope = new(other, owner, endpoint) } });
         var snapshot = AgentRelay.Windows.Presentation.PresentationSnapshot.Build(config,
             [new(owner, "External client", "Custom transport"), new(endpoint, "Future connector", "Remote connection", Capabilities: [RelayCapabilities.ManageSession, RelayCapabilities.SendMessage, "session.inspect"])], [a, b], true, null, now);
+        if (snapshot.GetProperty("sessionNameMaximumLength").GetInt32() != SessionNames.MaximumLength)
+            throw new Exception("Presentation lost the shared session-name rule.");
         if (snapshot.GetProperty("tasks").EnumerateArray().Select(item => item.GetProperty("id").GetString()).Distinct().Count() != 2)
             throw new Exception("Presentation merged identical task IDs from different projects.");
         if (snapshot.GetProperty("messages")[0].GetProperty("taskId").ValueKind != System.Text.Json.JsonValueKind.Null)

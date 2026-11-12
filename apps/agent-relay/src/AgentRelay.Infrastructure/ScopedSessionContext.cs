@@ -19,7 +19,8 @@ public sealed class ScopedSessionContext(ProjectSettingsStore projects, SessionS
         var endpoint = value.Endpoints.SingleOrDefault(item => item.Id == definition.Endpoint.Id);
         var workspace = value.Workspaces.SingleOrDefault(item => item.Id == definition.Workspace.Id);
         if (endpoint is null || workspace is null || endpoint.AdapterId != definition.Endpoint.AdapterId || endpoint.BindingId != definition.Endpoint.BindingId ||
-            workspace.EndpointId != definition.Workspace.EndpointId || workspace.Location != definition.Workspace.Location)
+            workspace.EndpointId != definition.Workspace.EndpointId || workspace.Location != definition.Workspace.Location ||
+            workspace.ConcurrentWrites != definition.Workspace.ConcurrentWrites)
             throw new RelayException("capability_denied", "Endpoint or workspace context changed; create a new session instead of silently moving an existing one.");
         if (definition.AllowLocalWork)
         {

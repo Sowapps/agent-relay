@@ -65,6 +65,16 @@ internal static class ProjectScenarios
         var final = Path.Combine(localFiles, "target.bin"); await File.WriteAllTextAsync(final, "keep");
         var partial = RuntimePaths.TransferPartial(data, operation.Id); Directory.CreateDirectory(Path.GetDirectoryName(partial)!); await File.WriteAllTextAsync(partial, "partial");
         var bridge = new WslBridge(); var settings = new SettingsStore(data); var sessions = new SessionService(data, settings, new(settings, bridge), bridge);
+        var current = store.Load();
+        var retainedWorkspace = current.Workspaces.Single(item => item.Id == workspace);
+        var definition = new SessionDefinition(Guid.NewGuid(), "Retained context", scope,
+            current.Endpoints.Single(item => item.Id == secondary), retainedWorkspace, false);
+        var context = new ScopedSessionContext(store, sessions);
+        context.ValidateDefinition(definition);
+        store.Save(current with { Workspaces = current.Workspaces.Select(item => item.Id == workspace
+            ? item with { ConcurrentWrites = !item.ConcurrentWrites } : item).ToArray() });
+        Refused(() => context.ValidateDefinition(definition));
+        store.Save(current);
         var fileAdapter = new FileTransferService(sessions, bridge, database);
         var placeholder = new WslProfile("unused", "Unused", "Unused", "unused", "/srv/agent-relay-unused", "codex", []);
         var inspected = await fileAdapter.PartialAsync(operation, "download", "target.bin", localFiles, placeholder, false, CancellationToken.None);

@@ -1,6 +1,6 @@
 """Qualify owned WSL relocation, private transfer staging and cross-filesystem refusal without any agent/model.
 
-Usage: --distribution <explicit distro> --user <explicit user> --report <developer output>.
+Usage: --runtime-pointer <current runtime> --distribution <explicit distro> --user <explicit user> --report <developer output>.
 Creates and removes only uniquely marked qualification roots, preserving a JSON result.
 """
 import argparse
