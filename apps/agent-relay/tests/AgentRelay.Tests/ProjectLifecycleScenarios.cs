@@ -79,6 +79,18 @@ internal static class ProjectLifecycleScenarios
         var afterRestart=new RelayApplication(new(new ProjectSettingsStore(data)),work,fake,journal,projectStates:new ProjectSettingsStore(data));
         if(afterRestart.Discover(caller).Projects.Single().Enabled)throw new Exception("Archived state did not persist.");
         var beforeCalls=fake.Executed;fake.Pause=false;
+        using (var cancelled = new CancellationTokenSource())
+        {
+            cancelled.Cancel();
+            try
+            {
+                await afterRestart.SetProjectStateAsync(caller, a, true, false, cancelled.Token);
+                throw new Exception("Cancelled project reactivation changed state.");
+            }
+            catch (OperationCanceledException) when (cancelled.IsCancellationRequested) { }
+            if (settings.Load().Projects.Single(project => project.Id == a).Enabled)
+                throw new Exception("Cancelled project reactivation was persisted.");
+        }
         await afterRestart.SetProjectStateAsync(caller,a,true,false,token);
         await Refuses("state_conflict",()=>afterRestart.SetProjectStateAsync(caller,a,false,false,token));
         if(fake.Executed!=beforeCalls||!settings.Load().Projects.Single(p=>p.Id==a).Enabled||!settings.Load().Memberships.SequenceEqual(configuration.Memberships,new MembershipComparer()))throw new Exception("Reactivation replayed work or altered permissions.");

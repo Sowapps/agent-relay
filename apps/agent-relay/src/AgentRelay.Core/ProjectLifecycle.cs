@@ -10,6 +10,7 @@ public sealed partial class RelayApplication
 
     private async Task<RelayProject> ChangeProjectState(CallerIdentity? caller, Guid projectId, bool enabled, bool expectedEnabled, CancellationToken token)
     {
+        token.ThrowIfCancellationRequested();
         using var admission = Admission.Enter(projectId);
         using var snapshot = policy.Pin();
         if (caller is not null) policy.Demand(caller, projectId, RelayCapabilities.ManageProject);
@@ -24,7 +25,6 @@ public sealed partial class RelayApplication
         }
         if (!project.Enabled || project.ArchiveRequested) return project;
         if (project.Enabled != expectedEnabled) throw new RelayException("state_conflict", "Project state changed. Refresh before deciding.");
-        token.ThrowIfCancellationRequested();
         // Persist intent before checking work: the request outlives the caller, UI and host process.
         return writer.SetLifecycle(project, true, true, null);
     }

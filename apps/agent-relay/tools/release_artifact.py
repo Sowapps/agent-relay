@@ -40,9 +40,15 @@ def ordinary_file(path):
     return path
 
 
-def archive_path(directory, version):
+def validate_version(version):
+    """Own the stable/RC version grammar used by packaging and local deployment."""
     if not isinstance(version, str) or not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[1-9][0-9]*)?', version):
         raise ValueError('Expected a stable or RC release version')
+    return version
+
+
+def archive_path(directory, version):
+    validate_version(version)
     return directory / f'agent-relay-{version}-win-x64.zip'
 
 

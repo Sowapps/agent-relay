@@ -3,7 +3,7 @@ using System.Text;
 
 namespace AgentRelay.Infrastructure;
 
-public sealed record ProcessOutput(int ExitCode, string Output, string Error);
+public sealed record ProcessOutput(int ExitCode, string Output, string Error, bool InputCompleted = true);
 
 public sealed class LocalProcessTimeoutException(string output, string error, bool inputCompleted, double seconds)
     : TimeoutException("The local process exceeded its wait limit; completion is not confirmed.")
@@ -40,17 +40,23 @@ public static class LocalProcess
         var inputCompleted = false;
         try
         {
+            IOException? inputFailure = null;
             if (input is not null)
-                await process.StandardInput.BaseStream.WriteAsync(Encoding.UTF8.GetBytes(input), deadline.Token);
+            {
+                try { await process.StandardInput.BaseStream.WriteAsync(Encoding.UTF8.GetBytes(input), deadline.Token); }
+                catch (IOException failure) { inputFailure = failure; }
+            }
             process.StandardInput.Close();
-            inputCompleted = true;
+            inputCompleted = inputFailure is null;
             await process.WaitForExitAsync(deadline.Token).ConfigureAwait(false);
             await readers.WaitAsync(deadline.Token);
-            return new(process.ExitCode, output.Text, error.Text);
+            if (inputFailure is not null && process.ExitCode == 0)
+                throw new IOException("The process closed its input before accepting the request. Completion is not confirmed. " + DiagnosticTail(error.Text), inputFailure);
+            return new(process.ExitCode, output.Text, error.Text, inputCompleted);
         }
         catch (OperationCanceledException) when (!token.IsCancellationRequested)
         {
-            if (!process.HasExited) process.Kill(true);
+            StopOwned(process);
             try { await readers.WaitAsync(TimeSpan.FromSeconds(2)); }
             catch (Exception captureError) when (captureError is TimeoutException or IOException) { }
             throw new LocalProcessTimeoutException(output.Text, error.Text,
@@ -58,11 +64,17 @@ public static class LocalProcess
         }
         finally
         {
-            if (!process.HasExited) process.Kill(true);
+            StopOwned(process);
             captureStop.Cancel();
             try { await readers; }
             catch (Exception captureError) when (captureError is OperationCanceledException or IOException) { }
         }
+    }
+
+    private static void StopOwned(Process process)
+    {
+        try { if (!process.HasExited) process.Kill(true); }
+        catch (InvalidOperationException) when (process.HasExited) { }
     }
 
     private sealed class Capture

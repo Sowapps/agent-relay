@@ -7,6 +7,12 @@ internal static class ProcessScenarios
     {
         Console.InputEncoding = new System.Text.UTF8Encoding(false);
         Console.OutputEncoding = new System.Text.UTF8Encoding(false);
+        if (mode == "reject")
+        {
+            Console.Error.Write("early-refusal-É");
+            Environment.ExitCode = 7;
+            return;
+        }
         if (mode == "echo") { Console.Write(await Console.In.ReadToEndAsync()); return; }
         Console.Write("partial-output");
         Console.Error.Write("partial-error");
@@ -21,6 +27,10 @@ internal static class ProcessScenarios
         var executable = Environment.ProcessPath ?? throw new InvalidOperationException("The test host executable is unavailable.");
         var normal = await LocalProcess.RunAsync(executable, arguments, "Échange 😀", TimeSpan.FromSeconds(5), CancellationToken.None);
         if (normal.ExitCode != 0 || normal.Output != "Échange 😀") throw new Exception("Process UTF-8 round trip failed.");
+        arguments[^1] = "reject";
+        var rejected = await LocalProcess.RunAsync(executable, arguments, new string('x', 2_000_000), TimeSpan.FromSeconds(5), CancellationToken.None);
+        if (rejected.ExitCode != 7 || rejected.Error != "early-refusal-É" || rejected.InputCompleted)
+            throw new Exception("Early process refusal lost its diagnostic or claimed input acceptance.");
         arguments[^1] = "wait";
         foreach (var input in new string?[] { null, new string('x', 2_000_000) })
         {

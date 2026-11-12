@@ -7,10 +7,18 @@ import unittest
 import zipfile
 
 from delivery_reports import REPORT_FILE, latest_reports
-from release_artifact import archive_path, extract_archive, sha256, verified_archive
+from release_artifact import archive_path, extract_archive, sha256, verified_archive, validate_version
 
 
 class DeliveryEvidenceTests(unittest.TestCase):
+    def test_packaging_and_deployment_share_stable_rc_grammar(self):
+        for version in ['1.0.0', '1.2.3-rc.1']:
+            self.assertEqual(validate_version(version), version)
+            self.assertIn(version, archive_path(Path('.'), version).name)
+        for version in ['1.0.0-beta.1', '1.0.0-rc.0', '../1.0.0', '１.０.０', None]:
+            with self.subTest(version=version), self.assertRaises(ValueError):
+                validate_version(version)
+
     def setUp(self):
         fixture_root = Path(__file__).resolve().parents[3] / 'local/apps/agent-relay/tests'
         fixture_root.mkdir(parents=True, exist_ok=True)
