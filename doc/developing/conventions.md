@@ -26,6 +26,8 @@ Async operations returning Task use the Async suffix and accept CancellationToke
 
 Expected failures carry a stable code and explicit effect/recovery semantics. Translate external failures once at their boundary; UI text is a projection of that code. Serialize through the existing owner and choose explicit UTF-8 for redirected streams. Keep protocol timestamps invariant and human dates under the display owner.
 
+At human/agent boundaries, surface expected refusals and unexpected errors with an identifiable reference and retrievable bounded technical details. Keep the user message separate from the diagnostic, exclude request bodies/tokens/credentials, and make diagnostic-storage failure explicit while preserving the primary error. Do not silently suppress an error or replace it with a later logging/rollback exception (evidence `2026-11-12-identifiable-errors`).
+
 ## Other source languages
 
 Python uses snake_case functions/locals, PascalCase classes, explicit UTF-8 file I/O, pathlib and subprocess argument lists. Keep executable CLI behavior under main/entry-point guards when a module is reusable. Prefer normal multiline blocks over semicolon chains; use ordinary imports rather than dynamic imports for static dependencies.

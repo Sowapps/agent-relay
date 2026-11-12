@@ -6,7 +6,8 @@ using AgentRelay.Core;
 
 namespace AgentRelay.Infrastructure;
 
-public sealed record InstallationUpdateRequest(string Action, string Installation, string Data, string? Candidate = null);
+public sealed record InstallationUpdateRequest(string Action, string Installation, string Data, string? Candidate = null,
+    UpdateAdapterFailure? Failure = null);
 public sealed record InstallationUpdateFile(string Name, string? Before, string? After);
 public sealed record InstallationUpdateClient(Guid? BindingId, string Client);
 public sealed record InstallationUpdateState(int Schema, string Id, string CandidateHash, string Installation, string Data, string Version,
@@ -49,6 +50,7 @@ public sealed class InstallationUpdate
             "verify" => Verify(),
             "rollback" => Rollback(),
             "rollback-finish" => FinishRollback(),
+            "rollback-release" => ReleaseRollback(),
             _ => throw new ArgumentException("Expected prepare, status, apply, verify or rollback.")
         };
     }
@@ -139,6 +141,7 @@ public sealed class InstallationUpdate
             .Select(item => new InstallationUpdateClient(item.BindingId, item.Client)).Distinct().ToArray();
         var state = new InstallationUpdateState(1, id, digest, installation, data, version, contractHash, "preparing", files, clients,
             DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 0, watch.Elapsed.TotalSeconds);
+        CacheRecoveryRunner(state, candidate, declared);
         Save(state);
         return PrepareFiles(state, candidate, expected);
     }
@@ -194,7 +197,7 @@ public sealed class InstallationUpdate
         }
         catch (Exception error)
         {
-            Save(state with { Error = error.Message, ApplySeconds = state.ApplySeconds + watch.Elapsed.TotalSeconds });
+            RetainFailure(state with { Error = error.Message, ApplySeconds = state.ApplySeconds + watch.Elapsed.TotalSeconds }, error);
             throw;
         }
     }
@@ -251,7 +254,7 @@ public sealed class InstallationUpdate
         }
         catch (Exception error)
         {
-            Save(state with { Phase = "recovery_required", Error = error.Message, RollbackSeconds = watch.Elapsed.TotalSeconds });
+            RetainFailure(state with { Phase = "recovery_required", Error = error.Message, RollbackSeconds = watch.Elapsed.TotalSeconds }, error);
             throw;
         }
     }
@@ -265,6 +268,47 @@ public sealed class InstallationUpdate
         if (state.Files.Any(file => OptionalHash(Inside(installation, file.Name)) != file.Before))
             throw Failure("update_recovery_required", "Restored components do not match their before-images.");
         return Save(state with { Phase = "rolled_back", Error = null });
+    }
+
+    private InstallationUpdateState ReleaseRollback()
+    {
+        var state = Read();
+        if (state.Phase != "rolled_back") throw Failure("update_recovery_required", "Finish rollback before releasing its admission barrier.");
+        if (state.Files.Any(file => OptionalHash(Inside(installation, file.Name)) != file.Before))
+            throw Failure("update_recovery_required", "Restored files changed; the recovery barrier was retained.");
+        var marker = Path.Combine(data, "promotion.lock");
+        if (File.Exists(marker)) { DemandBarrier(state); File.Delete(marker); }
+        return state;
+    }
+
+    /// <summary>Persist an independently runnable, verified recovery tool before publishing intent.</summary>
+    private void CacheRecoveryRunner(InstallationUpdateState state, string candidate, Dictionary<string, string> declared)
+    {
+        var runner = Path.Combine(directory, state.Id, "runner");
+        Directory.CreateDirectory(runner);
+        var hashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var source in Directory.EnumerateFiles(Path.Combine(candidate, "app"), "*", SearchOption.AllDirectories))
+        {
+            var name = Path.GetRelativePath(Path.Combine(candidate, "app"), source).Replace('\\', '/');
+            if (!RetainedLauncherPayload.Includes(name, documentation: true) || name == "installation.json") continue;
+            var target = Inside(runner, name);
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            using var input = File.OpenRead(source);
+            using (var output = new FileStream(target, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            { input.CopyTo(output); output.Flush(true); }
+            var actual = Hash(target);
+            if (!declared.TryGetValue("app/" + name, out var expected) || actual != expected)
+                throw Failure("update_candidate_invalid", "Candidate changed while preparing its independent recovery runtime.");
+            hashes.Add(name, actual);
+        }
+        var descriptor = Path.Combine(runner, "installation.json");
+        AtomicText(descriptor, RelayJson.Serialize(new { version = 1, root = Path.GetRelativePath(runner, installation) }));
+        hashes.Add("installation.json", Hash(descriptor));
+        AtomicText(Path.Combine(directory, "recovery.json"), RelayJson.Serialize(new
+        {
+            schema = 1, transactionId = state.Id, installation, data,
+            executable = Path.Combine(runner, "AgentRelay.Windows.exe"), files = hashes
+        }));
     }
 
     private InstallationUpdateState Verify()
@@ -334,8 +378,10 @@ public sealed class InstallationUpdate
     private InstallationUpdateState Read()
     {
         var state = RelayJson.Deserialize<InstallationUpdateState>(File.ReadAllText(journal));
-        if (state.Schema != 1 || state.Id.Length != 12 || !state.Id.All(Uri.IsHexDigit) || !Same(state.Installation, installation) || !Same(state.Data, data))
-            throw Failure("update_recovery_required", "Update journal ownership or schema is invalid.");
+        if (state.Schema != 1 || state.Id.Length != 12 || !state.Id.All(Uri.IsHexDigit) || !Same(state.Installation, installation) || !Same(state.Data, data)
+            || state.Phase is not ("preparing" or "prepared" or "applying" or "files_applied" or "awaiting_clients" or "complete"
+                or "rolling_back" or "files_restored" or "rolled_back" or "recovery_required"))
+            throw Failure("update_recovery_required", "Update journal ownership, schema or phase is invalid. No recovery effect was attempted.");
         foreach (var file in state.Files) ValidateManagedName(file.Name);
         return state;
     }
@@ -351,6 +397,12 @@ public sealed class InstallationUpdate
         }
         File.Move(pending, journal, true);
         return state;
+    }
+
+    private void RetainFailure(InstallationUpdateState state, Exception primary)
+    {
+        try { Save(state); }
+        catch (Exception retention) { throw new AggregateException("Update failed and its journal could not be written. Both failures require review.", primary, retention); }
     }
 
     private void DemandStage(InstallationUpdateState state)

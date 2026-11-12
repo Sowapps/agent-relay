@@ -95,7 +95,8 @@ public static class McpFacade
             {
                 var status = new McpConnectionStatus(identity.Version, identity.ContractHash, identity.Generation, handshake,
                     Environment.GetEnvironmentVariable("AGENT_RELAY_MCP_INSTANCE"), Environment.GetEnvironmentVariable("AGENT_RELAY_MCP_BROKER_VERSION"),
-                    catalog != identity.ContractHash, false, "Ask the owning client to reload its MCP catalog; a closed process alone does not reconnect it.");
+                    catalog != identity.ContractHash, false, "Ask the owning client to reload its MCP catalog; a closed process alone does not reconnect it.",
+                    InstallationUpdateDiagnostics.Latest(data));
                 return new { structuredContent = status, content = new[] { new { type = "text", text = RelayJson.Serialize(status) } } };
             }
             if (parameters.TryGetProperty("_meta", out var brokerMeta) && brokerMeta.TryGetProperty("agentRelayContract", out _) && catalog != identity.ContractHash && !tool.AllowStaleCatalog)

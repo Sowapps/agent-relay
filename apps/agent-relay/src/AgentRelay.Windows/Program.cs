@@ -20,6 +20,13 @@ internal static class Program
         }
         catch (Exception error)
         {
+            if (arguments.FirstOrDefault() == "installation-update")
+            {
+                var index = Array.IndexOf(arguments, "--data-dir");
+                var data = index >= 0 && index + 1 < arguments.Length ? arguments[index + 1] : null;
+                Console.Error.WriteLine(RelayJson.Serialize(InstallationUpdateDiagnostics.Capture(data, error)));
+                return 1;
+            }
             var code = error is RelayException relay ? relay.Code : error is OperationCanceledException ? "unavailable_or_timeout" : "application_error";
             Console.Error.WriteLine(RelayJson.Serialize(new RelayFailure(code, error.Message, (error as RelayException)?.EffectsPossible)));
             return 1;
@@ -33,6 +40,18 @@ internal static class Program
             var request = RelayJson.Deserialize<InstallationUpdateRequest>(await Console.In.ReadToEndAsync());
             if (!string.Equals(Path.GetFullPath(request.Data), options.DataDirectory, StringComparison.OrdinalIgnoreCase))
                 throw new ArgumentException("The update request and selected data scope disagree.");
+            if (request.Action == "report-error")
+            {
+                Console.WriteLine(RelayJson.Serialize(InstallationUpdateDiagnostics.Capture(options.DataDirectory,
+                    request.Failure ?? throw new ArgumentException("Missing adapter failure details."))));
+                return 0;
+            }
+            if (request.Action == "read-error")
+            {
+                Console.WriteLine(RelayJson.Serialize(InstallationUpdateDiagnostics.Read(options.DataDirectory,
+                    request.Candidate ?? throw new ArgumentException("Missing diagnostic identifier."))));
+                return 0;
+            }
             Console.WriteLine(RelayJson.Serialize(new InstallationUpdate(request.Installation, request.Data).Run(request.Action, request.Candidate)));
             return 0;
         }
