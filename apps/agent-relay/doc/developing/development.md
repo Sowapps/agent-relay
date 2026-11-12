@@ -112,6 +112,8 @@ Windows sign-in startup is a preference per data scope. An in-place upgrade keep
 
 For complete updates, use `test-complete-update.py --baseline-directory <verified-stable> --candidate-directory <packaged-RC>` and the [complete update procedure](complete-update.md). The historical retained-broker pointer-switch test is not proof of updating the broker binary itself. Use `test-mcp-startup.py --release-directory <verified-RC>` for portable cold-start, concurrency, credential and maintenance checks.
 
+When the owning client must exit to release mapped MCP binaries, `stable_update_wait.py arm` accepts the same config/release/version/project/endpoint/thread arguments as upgrade and prepares only the verified C# transaction. `run --receipt <armed-result.json>` passively waits up to 15 minutes for exact installation/data-scope mcp/mcp-worker processes to exit, then invokes the same pilotage_stable.upgrade. Run this waiting driver separately with a hidden process before asking the human to close Codex. It never kills clients, changes a registration or substitutes a new backend. On timeout it reports an identifiable failure without applying the update. Read the retained deployment receipt after reopening Codex, then obtain the actual same-chat catalog confirmation.
+
 ## Current limits
 
 The local echo is a deterministic regression adapter. The application uses the [MVP command/agent workflow](mvp-architecture.md), with native clients and a separate inbound message capability.
