@@ -55,4 +55,6 @@ After successful activation reopens admission, an old database must never overwr
 
 ## Proportionate qualification
 
+Client refresh has a separate [qualified Codex behavior and completion rule](codex-mcp-refresh.md). Explicit reload succeeded on the installed isolated backend; terminating a stdio child did not reconnect it. Do not replace these measured distinctions with a generic uncertainty claim or infer existing-desktop reachability from an isolated test.
+
 The focused C# installation-update scenarios exercise full inventory, a real Windows file lock, restart reconciliation, paired file restoration, user-data preservation, exclusive journal access and manifest tampering. test-complete-update.py tests actual portable hosts/brokers on fictional copied projects: normal update, repeat without host/file replacement, and failed candidate health with coherent database rollback. Archive/MCP verification remains separate from these transaction tests. No test authorizes touching the installed stable, WSL or a model.

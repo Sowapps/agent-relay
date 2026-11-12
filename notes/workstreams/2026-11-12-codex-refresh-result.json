@@ -1,0 +1,29 @@
+{
+  "observedAt": "2026-11-12T21:23:27.509712+00:00",
+  "codexVersion": "codex-cli 0.167.0-alpha.4.1",
+  "scope": "isolated installed Codex app-server, ephemeral protocol threads, synthetic MCP; not existing desktop backend",
+  "modelTurns": 0,
+  "checks": {
+    "explicitReloadUpdatesCatalog": true,
+    "explicitReloadReconnectsSameConfig": true,
+    "notificationOnlyCatalogUnchangedWithinSeconds": 6,
+    "closedTransportDidNotReconnectBeforeExplicitReload": true
+  },
+  "existingDesktopControl": {
+    "client": "codex",
+    "modelTurns": 0,
+    "sameClientVerified": false,
+    "requiresClientReload": null,
+    "state": "unsupported",
+    "message": "The running Codex client exposes no reachable control socket. Check get_connection_status from that client; reload its connection if it retains an old contract. No daemon or replacement backend was started."
+  },
+  "artifacts": {
+    "isolated-refresh.json": "20f90196af4db328e3bd3043f972714749a29b3e8dcac44919fa4a630596668e",
+    "isolated-close.json": "4e7a816abafc1b3738d0e285f3a5f10f33186dcaca32f0e25c87f87da36222e5",
+    "test-codex-refresh.py": "da336f0d91b31f9743d3a08dca1c8b1ab1987b05c876a8fdc7b74aff49f68310",
+    "test-codex-close.py": "a4c0781637345a2cbb7c3e3bd14ca9f3a9466f5a4e940aaa1338154a6a4385df",
+    "fake-mcp.py": "5bbc10b19270e7f099b25890424c3bdf0145e74045b4b8e116b9dbcb6eca9a66",
+    "live-baseline.json": "6be084a3b5b5980d31f1f86464b6ca773967179a785df3aef64a4e5b732d6b20",
+    "control-capability.json": "aaebe19e635cf7cc11bbb7a9099ed3ec46e60f1f1a8084140691c26167821809"
+  }
+}

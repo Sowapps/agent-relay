@@ -5,6 +5,8 @@
 
 ## References
 
+- [Codex MCP refresh qualification](codex-mcp-refresh.md): tested reconnection/catalog behavior and the owning-client control boundary.
+
 - [Complete portable update](complete-update.md): one installed version, full component activation, idempotence, interruption recovery and rollback.
 
 - [Navigable interface prototype](../../prototype/README.md): reproducible reference, simulation tools and prototype-first correction workflow.
