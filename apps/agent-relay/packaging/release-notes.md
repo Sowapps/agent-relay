@@ -1,7 +1,9 @@
-# Agent Relay v1.1.1-rc.1
+# Agent Relay v1.1.2
 
-This release candidate starts the shared relay on the first authenticated MCP call that needs it. Concurrent requests share the startup and public discovery stays passive. An unavailable installation returns a recovery action before admitting project work.
+Updates replace all managed application, documentation, MCP and startup-launcher components in the existing installation. Repeating a completed update preserves the running host and installed files. Projects, permissions, credentials, history and the startup preference are retained.
 
-The retained stable launcher and data scope can follow a validated runtime update. A sign-in preference stays with that scope. A separately authorized transfer can move a legacy entry to the stable scope and verify both entries.
+Recovery uses a separately retained, integrity-checked tool and coherent snapshots. Status, resume and rollback do not require the original download. Interrupted rollback finishes its own admission barrier before another update starts. New work is never overwritten with an old database after admission reopens.
+
+Update failures have a stable code, diagnostic reference and retrievable details. MCP connection status exposes a historical error summary. A mapped client binary can cause safe rollback; client catalog reload remains explicit and unconfirmed clients are never reported current. No agent request is replayed automatically.
 
 This package targets Windows x64 and includes .NET. See the portable release guide for prerequisites and recovery. Verify the ZIP against SHA256SUMS.txt.

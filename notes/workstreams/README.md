@@ -5,6 +5,8 @@
 
 ## Records
 
+- [Stable 1.1.2 preparation and complete rollout](2026-11-12-stable-1.1.2.md): exact archive qualification, in-place managed-component update and actual client readiness.
+
 - [Complete-update recovery and identifiable errors](2026-11-12-update-recovery-errors.md): rollback-boundary recovery, archive-independent maintenance and real connected-client qualification.
 
 - [Stable 1.1.1 preparation and deployment](2026-11-12-stable-1.1.1.md): installed comparison, qualified stable archive and retained-installation rollout.
