@@ -28,6 +28,7 @@ _spec=importlib.util.spec_from_file_location('relay_register',Path(__file__).wit
 _registration=importlib.util.module_from_spec(_spec);_spec.loader.exec_module(_registration)
 from runtime_layout import app_var, validate_runtime, runtime_command
 from relay_mcp import RelayMcp
+from wsl_maintenance import run_script
 
 CORE = ['relay-config.json', 'relay-projects.json', 'connections', 'attention-reviews.json']
 RETIRE = [*CORE, 'relay.sqlite', 'relay.sqlite-wal', 'relay.sqlite-shm', 'prepared', 'presentation-cache',
@@ -119,18 +120,12 @@ def plans(source, destination):
     return {'native': groups, 'windows': windows, 'projectIds': [project['id'] for project in projects['projects']]}
 
 
-def native_call(group, action, transaction):
+def native_call(runtime, data, group, action, transaction):
     adapters = payload_files(Path(__file__).parents[1] / 'wsl')
     payload = dict(group, action=action, transaction=transaction, adapters=adapters)
-    result = subprocess.run(['wsl.exe', '-d', group['distribution'], '-u', 'root', '--exec', '/usr/bin/python3', '-c',
-                             Path(__file__).with_name('native-storage.py').read_text()],
-                            input=json.dumps(payload).encode(), capture_output=True, timeout=60,
-                            creationflags=subprocess.CREATE_NO_WINDOW)
-    if result.returncode:
-        output = result.stderr or result.stdout
-        message = output.decode('utf-16-le' if b'\x00' in output else 'utf-8', errors='replace')
-        raise RuntimeError('Owned native storage ' + action + ' failed: ' + message[-1800:])
-    return json.loads(result.stdout)
+    result = run_script(runtime, data, group['distribution'], 'root',
+                        Path(__file__).with_name('native-storage.py').read_text(encoding='utf-8'), payload, 60)
+    return json.loads(result['output'])
 
 
 def client_changes(paths, source, destination, runtime, default_connection):
@@ -242,7 +237,7 @@ def migrate(args):
     if old_runtime.get('connectionId'): runtime['connectionId'] = old_runtime['connectionId']
     changes = client_changes(args.config, source, destination, runtime, runtime.get('connectionId'))
     transaction_id = uuid.uuid4().hex
-    native_probe = [native_call(group, 'probe', transaction_id) for group in plan['native']] if args.check_native or args.apply else []
+    native_probe = [native_call(runtime, source, group, 'probe', transaction_id) for group in plan['native']] if args.check_native or args.apply else []
     report = {'applied': False, 'source': str(source), 'destination': str(destination), 'projects': plan['projectIds'], 'native': plan['native'],
               'windows': plan['windows'], 'clientConfigurations': [str(change['path']) for change in changes], 'nativeProbe': native_probe,
               'modelCalls': 0, 'userWorkspacesMoved': False, 'requiresClientReload': True,
@@ -274,7 +269,7 @@ def migrate(args):
             if fingerprint(source) != before: raise RuntimeError('History changed since preflight; migration refused')
             prepare(source, destination, runtime, plan)
             for group in plan['native']:
-                native_attempted.append(group); native_call(group, 'apply', transaction_id)
+                native_attempted.append(group); native_call(runtime, source, group, 'apply', transaction_id)
             assert fingerprint(destination) == before
             assert (destination / 'relay-projects.json').read_bytes() == (source / 'relay-projects.json').read_bytes()
             if args.fail_after_prepare: raise RuntimeError('Qualification-only injected failure')
@@ -289,7 +284,7 @@ def migrate(args):
                 startup_entry(runtime, destination, action='enable', expected=None)
             else:
                 startup_entry(runtime, destination, action='disable', expected=None)
-            for group in plan['native']: native_call(group, 'commit', transaction_id)
+            for group in plan['native']: native_call(runtime, source, group, 'commit', transaction_id)
             startup_entry(runtime, source, action='disable', expected=None)
             for name in RETIRE:
                 path = source / name
@@ -336,7 +331,7 @@ def migrate(args):
                     startup_entry(runtime, source, action='restore', expected=None, entry=old_startup)
             except Exception as problem: rollback_errors.append(str(problem))
         for group in reversed(native_attempted):
-            try: native_call(group, 'rollback', transaction_id)
+            try: native_call(runtime, source, group, 'rollback', transaction_id)
             except Exception as problem: rollback_errors.append(str(problem))
         if destination.exists() and not keep_candidate:
             # Keep the failed candidate in var for diagnosis. Do not remove possibly valuable data.

@@ -10,6 +10,9 @@ from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'wsl'))
 from native_layout import load_layout, payload_files
+from deployment import read
+from runtime_layout import validate_runtime, reject_pilotage_paths
+from wsl_maintenance import run_script
 import subprocess
 import uuid
 
@@ -76,13 +79,15 @@ print(json.dumps(result))
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--distribution', required=True); parser.add_argument('--user', required=True); parser.add_argument('--report', required=True, type=Path)
+    parser.add_argument('--runtime-pointer', required=True, type=Path)
     args = parser.parse_args(); application = Path(__file__).resolve().parents[1]
     payload = {'id': uuid.uuid4().hex, 'user': args.user, 'migration': Path(__file__).with_name('native-storage.py').read_text(),
                'adapters': payload_files(application / 'wsl')}
-    result = subprocess.run(['wsl.exe', '-d', args.distribution, '-u', 'root', '--exec', '/usr/bin/python3', '-c', SCRIPT],
-                            input=json.dumps(payload).encode(), capture_output=True, timeout=60, creationflags=subprocess.CREATE_NO_WINDOW)
-    if result.returncode:
-        output = result.stderr or result.stdout
-        raise RuntimeError(output.decode('utf-16-le' if b'\x00' in output and not b'Traceback' in output else 'utf-8', errors='replace'))
-    report = json.loads(result.stdout); args.report.parent.mkdir(parents=True, exist_ok=True)
+    root = application.parents[1]
+    runtime = read(args.runtime_pointer.resolve())
+    validate_runtime(runtime, root, development=True)
+    reject_pilotage_paths(root, args.report.resolve())
+    args.report.parent.mkdir(parents=True, exist_ok=True)
+    result = run_script(runtime, args.report.parent.resolve(), args.distribution, 'root', SCRIPT, payload, 60)
+    report = json.loads(result['output'])
     args.report.write_text(json.dumps(report, indent=2)); print(json.dumps(report))

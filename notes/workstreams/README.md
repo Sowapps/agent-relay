@@ -5,6 +5,7 @@
 
 ## Records
 
+- [Seven-lot development cleanup](2026-11-12-seven-lot-code-cleanup.md): authorized maintenance, service/boundary/UI review and unified qualification.
 - [WSL launch diagnostics](2026-11-11-wsl-launch-diagnostics.md): retained timeout diagnostics and deadline ownership.
 - [Session adapter maintenance](2026-11-11-session-adapter-maintenance.md): shared C# inactivity guard and isolated WSL synchronization.
 - [Durable work guard](2026-11-10-durable-work-guard.md): shared C# maintenance check and isolated migration/deployment tests.

@@ -56,6 +56,8 @@ With native-test authorization, `test-wsl-maintenance.py --runtime-pointer <curr
 
 ## Dependency gate and resolved issues
 
+Legacy technical profile refresh uses `sync-wsl.py --settings <scope/relay-config.json> [--runtime-pointer <current-pointer>]`. It shares named-session maintenance runtime selection, the C# idle guard, exclusive host lock and WSL transport. It rejects helper symlinks and publishes each helper atomically. `test-maintenance-callers.py` qualifies this path on an isolated WSL profile. Native storage qualification now requires `test-native-storage.py --runtime-pointer <current-pointer> --distribution <distro> --user <user> --report <developer-result.json>` and uses the same C# transport for its owned copy/commit/rollback check.
+
 The tools/qualification fixture exercises the pinned SQLite native provider and a CurrentUserOnly pipe before application integration.
 SQLite connections use WAL and synchronous FULL. Package restore and all CLI caches remain under the existing isolated toolchain environment.
 
