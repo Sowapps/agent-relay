@@ -1,0 +1,16 @@
+{
+  "codexVersion": "codex-cli 0.167.0-alpha.4.1",
+  "modelTurns": 0,
+  "reloadCalls": 0,
+  "originalExited": true,
+  "successorAlive": true,
+  "sameConnectionSuccessorResponded": true,
+  "ownedFixtureCleanup": "completed",
+  "seconds": 2.718,
+  "fixtureSha256": "2a2cb14b228865cfc8840c2dea0f964db8a1ba21f4c13f40ea2787ea78da4715",
+  "toolSchemaUnchanged": true,
+  "beforeGeneration": 1,
+  "afterGeneration": 2,
+  "rawReportSha256": "b0fb63b4e72e1ec67f688f65b26ab836279779181cbbe5c8a7e3157413f6326b",
+  "scope": "Isolated installed Codex app-server; synthetic Python/Windows stdio succession; no production C# handover or existing-desktop migration proof"
+}

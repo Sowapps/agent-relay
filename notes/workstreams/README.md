@@ -5,6 +5,8 @@
 
 ## Records
 
+- [U0 transport feasibility](2026-11-13-u0-transport-feasibility.md): successful isolated cooperative stdio succession and unresolved initial legacy-client migration.
+
 - [Complete-update target design](2026-11-13-update-target-design.md): target-first architecture, challenge passes, dependency-ordered lots and first-point preparation; no implementation.
 
 - [Owning-client refresh continuation](2026-11-13-owning-client-refresh.md): actual stdio boundary and retained update-adapter failure diagnostics.

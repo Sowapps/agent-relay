@@ -5,6 +5,8 @@
 
 `app.ps1` is the application's command driver selected by the shared workspace registry.
 
+`python apps/agent-relay/tools/qualification/codex-stdio-handover.py` runs a synthetic cooperative transport-succession experiment using the installed Codex executable and the existing CodexRpc adapter. It creates a unique persistent local report directory, separate CODEX_HOME and ephemeral protocol thread, never a model turn. Only fixture processes are stopped after command-line identity checks. A successful result proves that tested stream behavior, not production C# upgrade or migration of an existing desktop chat. See the [U0 qualification record](../../../notes/workstreams/2026-11-13-u0-transport-feasibility.md) before rerunning; use retained valid proof unless a new question or changed environment warrants execution.
+
 `release.ps1 -Action Lock|Package|Verify|Tag|Publish` owns the versioned portable release workflow. Package chooses a fresh artifact directory; Verify/Tag/Publish take that exact Directory. See [release workflow](../doc/developing/releases.md). External publication requires explicit authorization; Tag/Publish refuse dirty or changed source, unmatched checks and existing divergent tags/releases.
 It provides read-only diagnostics and invokes the shared application build/test/run composition in AppCommands.psm1.
 RuntimeStaging.psm1 verifies and reuses content-addressed executable copies so active windows do not lock compiler outputs.
