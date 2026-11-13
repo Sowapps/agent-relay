@@ -19,6 +19,21 @@ DEVELOPMENT_SERVER = 'agent_relay_dev'
 LEGACY_STABLE_SERVER = 'agent_relay_personal_assistant'
 
 
+def connection_identity(table):
+    """Parse an explicit configured scope; this does not authenticate or grant rights."""
+    if not isinstance(table, dict) or not isinstance(table.get('command'), str) or not table['command']:
+        raise ValueError('The named connection needs an explicit executable')
+    args = table.get('args')
+    if not isinstance(args, list) or not all(isinstance(value, str) for value in args) or 'mcp' not in args or any(
+            args.count(flag) != 1 or args.index(flag) == len(args) - 1
+            for flag in ('--data-dir', '--connection-id')):
+        raise ValueError('The named connection needs explicit relay data and a scoped credential')
+    data = Path(args[args.index('--data-dir') + 1])
+    if not data.is_absolute() or '..' in data.parts:
+        raise ValueError('The named connection needs an absolute data path')
+    return data, str(uuid.UUID(args[args.index('--connection-id') + 1]))
+
+
 def toml_value(value):
     if isinstance(value, bool):
         return str(value).lower()

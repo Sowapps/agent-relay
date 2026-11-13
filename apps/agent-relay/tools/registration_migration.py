@@ -54,7 +54,7 @@ def prepare(shared, workspace, folder, *, stable_source,
     dev = tables[1].get(shared_name) or tables[1].get(dev_name)
     if not stable or not dev or not all(isinstance(value, dict) and value.get('command') and value.get('args') for value in (stable, dev)):
         raise ValueError('Explicit stable source and workspace development registrations are required')
-    if stable == dev:
+    if registration.connection_identity(stable) == registration.connection_identity(dev):
         raise ValueError('Stable and development registrations must be distinct')
     if tables[0].get(shared_name) not in (None, stable, dev):
         raise ValueError('The shared destination differs from both reviewed registrations')

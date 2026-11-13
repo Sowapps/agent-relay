@@ -46,16 +46,8 @@ def registration_state(config, server=SERVER):
     table = servers.get(server)
     if table is None:
         raise ValueError(f'No named connection {server} in the selected configuration')
-    args = table['args']
-    if not isinstance(args, list) or 'mcp' not in args or any(
-        args.count(flag) != 1 or args.index(flag) == len(args) - 1
-        for flag in ('--data-dir', '--connection-id')
-    ):
-        raise ValueError('The named connection needs explicit relay data and a scoped credential')
-    data = Path(args[args.index('--data-dir') + 1])
-    if not data.is_absolute() or '..' in data.parts:
-        raise ValueError('The named connection needs an absolute data path')
-    return raw, table, ordinary_directory(data), str(uuid.UUID(args[args.index('--connection-id') + 1]))
+    data, binding = registration.connection_identity(table)
+    return raw, table, ordinary_directory(data), binding
 
 
 def route(table):

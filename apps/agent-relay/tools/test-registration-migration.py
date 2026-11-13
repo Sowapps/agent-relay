@@ -133,6 +133,16 @@ def main():
     assert not (root / 'refused').exists()
     rejected(lambda: migration.prepare(shared, shared, root / 'same-file', stable_source=workflow.LEGACY_SERVER), 'different')
     results['ambiguous_alias_and_same_file_refused'] = True
+    shared, workspace, plan, _ = fixture(root / 'missing-scope')
+    parsed = tomllib.loads(shared.read_text())['mcp_servers'][workflow.LEGACY_SERVER]
+    parsed['args'] = ['mcp']
+    shared.write_text(owner.replace_servers(shared.read_text(), {workflow.LEGACY_SERVER: parsed}), encoding='utf-8')
+    rejected(lambda: migration.prepare(shared, workspace, root / 'missing-refused', stable_source=workflow.LEGACY_SERVER), 'scoped credential')
+    parsed['args'] = tomllib.loads(workspace.read_text())['mcp_servers']['agent_relay']['args']
+    parsed['extra'] = 'Different options must not disguise the same identity'
+    shared.write_text(owner.replace_servers(shared.read_text(), {workflow.LEGACY_SERVER: parsed}), encoding='utf-8')
+    rejected(lambda: migration.prepare(shared, workspace, root / 'same-identity-refused', stable_source=workflow.LEGACY_SERVER), 'distinct')
+    results['missing_scope_and_option_disguised_same_identity_refused'] = True
     report = {'passed': True, 'cases': results, 'seconds': round(time.monotonic() - started, 3),
               'modelCalls': 0, 'liveConfigurationsWritten': False, 'stableTouched': False,
               'sourceHashes': {name: hashlib.sha256((Path(__file__).parent / name).read_bytes()).hexdigest()

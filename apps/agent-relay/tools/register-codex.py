@@ -2,7 +2,7 @@
 
 from codex_registration import (
     DEVELOPMENT_SERVER, LEGACY_STABLE_SERVER, SHARED_SERVER,
-    main, replace_if_unchanged, replace_servers, toml_value, update,
+    connection_identity, main, replace_if_unchanged, replace_servers, toml_value, update,
 )
 
 
