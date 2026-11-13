@@ -49,9 +49,13 @@
       "agentrelay.infrastructure": {
         "type": "Project",
         "dependencies": {
-          "AgentRelay.Core": "[1.0.0-rc.1, )",
+          "AgentRelay.Core": "[1.2.0-rc.1, )",
+          "AgentRelay.Protocol": "[1.2.0-rc.1, )",
           "Microsoft.Data.Sqlite": "[10.0.14, )"
         }
+      },
+      "agentrelay.protocol": {
+        "type": "Project"
       },
       "Microsoft.Data.Sqlite": {
         "type": "CentralTransitive",

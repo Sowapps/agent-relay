@@ -92,7 +92,7 @@ internal static class ProjectApplicationScenarios
         Console.WriteLine("PASS: production pipe bound identity, project-only discovery/read, admin refusal and live revocation");
     }
 
-    private sealed class MemoryAdapter(SqliteWorkStore store) : IRelaySessions, IWorkExecutor
+    internal sealed class MemoryAdapter(SqliteWorkStore store) : IRelaySessions, IWorkExecutor
     {
         private readonly Dictionary<Guid, SessionSnapshot> sessions = new();
         public Task<SessionSnapshot> OpenAsync(SessionDefinition definition, CancellationToken token)

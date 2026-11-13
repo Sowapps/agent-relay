@@ -50,6 +50,9 @@
       },
       "agentrelay.core": {
         "type": "Project"
+      },
+      "agentrelay.protocol": {
+        "type": "Project"
       }
     }
   }

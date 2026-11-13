@@ -5,6 +5,10 @@
 
 ## Records
 
+- [U1 stable MCP contract](2026-11-13-u1-stable-contract.md): fixed protocol library, operation revisions, compatibility manifests and isolated checks; no stable effects.
+
+- [Conditional autonomous U1–U5 execution](2026-11-13-autonomous-u1-u5.md): scoped delegation, exact wait deadline, lot recovery and automatic analysis-only TR after U5.
+
 - [IR-01 shared stable registration](2026-11-13-shared-stable-registration.md): implemented paired copied-settings migration, generic maintenance selection, measured checks and remaining live-client/writer gates.
 
 - [Initial MCP reconnection](2026-11-13-initial-mcp-reconnection.md): actual settings capture, shared/dev registration mismatch, protection baseline and recorded operator rules.

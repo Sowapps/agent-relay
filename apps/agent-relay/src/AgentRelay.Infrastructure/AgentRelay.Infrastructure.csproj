@@ -4,6 +4,7 @@
     <InternalsVisibleTo Include="AgentRelay.Tests" />
     <EmbeddedResource Include="../../wsl/native-layout.json" LogicalName="AgentRelay.Infrastructure.native-layout.json" />
     <ProjectReference Include="../AgentRelay.Core/AgentRelay.Core.csproj" />
+    <ProjectReference Include="../AgentRelay.Protocol/AgentRelay.Protocol.csproj" />
     <PackageReference Include="Microsoft.Data.Sqlite" />
   </ItemGroup>
 </Project>

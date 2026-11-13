@@ -33,7 +33,7 @@ public static class PipeDeadlines
 
 public static class PipeFrames
 {
-    public const int MaximumBytes = 1024 * 1024;
+    public const int MaximumBytes = AgentRelay.Protocol.McpWireLimits.MaximumFrameBytes;
 
     public static async Task WriteAsync<T>(Stream stream, T value, CancellationToken token)
     {

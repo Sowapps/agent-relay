@@ -5,6 +5,8 @@
 
 ## References
 
+- [Stable MCP contracts](mcp-contract.md): fixed envelopes, versioned operation routing, authority boundaries and separate compatibility identities.
+
 - [Shared stable registration migration](registration-migration.md): exact named identities, paired copied-settings recovery, explicit maintenance selection and live-activation limits.
 
 - [Codex MCP refresh qualification](codex-mcp-refresh.md): tested reconnection/catalog behavior and the owning-client control boundary.

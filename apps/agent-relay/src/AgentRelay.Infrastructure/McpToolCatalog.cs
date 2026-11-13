@@ -1,10 +1,11 @@
 using System.Text.Json;
 using AgentRelay.Core;
+using AgentRelay.Protocol;
 
 namespace AgentRelay.Infrastructure;
 
 // One registration owns each published schema and its translation into a host action.
-internal static class McpToolCatalog
+public static class McpToolCatalog
 {
     private static object Text(int maximum = 200) => new { type = "string", maxLength = maximum };
     private static object Id() => new { type = "string", format = "uuid" };
@@ -15,10 +16,10 @@ internal static class McpToolCatalog
         => Register(name, description, properties, [], null, true);
 
     private static Registration Register(string name, string description, object properties, string[] required,
-        Func<Arguments, ProjectAction>? route, bool allowStaleCatalog)
+        Func<Arguments, ProjectAction>? route, bool allowStaleCatalog, int revision = 1)
     {
         var schema = new { type = "object", properties, required, additionalProperties = false };
-        return new(name, new { name, description, inputSchema = schema }, JsonSerializer.SerializeToElement(schema, RelayJson.Options), route, allowStaleCatalog);
+        return new(name, new { name, description, inputSchema = schema }, JsonSerializer.SerializeToElement(schema, RelayJson.Options), route, allowStaleCatalog, revision, description);
     }
     private static object Session() => new { session_id = Id() };
     private static object Message() => new { session_id = Id(), text = Text(8000), request_id = Id(), task_id = Id() };
@@ -83,18 +84,28 @@ internal static class McpToolCatalog
             new { session_id = Id(), source = Location(), destination = Location(), replace = new { type = "boolean" }, request_id = Id() }, "session_id", "source", "destination")
     ];
 
-    private static readonly Dictionary<string, Registration> ByName = Registrations.ToDictionary(item => item.Name, StringComparer.Ordinal);
-    internal static object[] Definitions => Registrations.Select(item => item.Definition).ToArray();
+    private static readonly Dictionary<string, Registration> ByName = Registrations.GroupBy(item => item.Name, StringComparer.Ordinal)
+        .ToDictionary(group => group.Key, group => group.MaxBy(item => item.Revision)!, StringComparer.Ordinal);
+    private static readonly McpOperationRegistry registry = new(Registrations.Where(item => item.Route is not null)
+        .Select(item => new McpOperationRegistration(item.Name, item.Revision, item.Description, item.Schema,
+            arguments => item.Route!(new(arguments)))));
+    public static IReadOnlyList<McpOperationDescriptor> Operations => registry.Descriptors;
+    public static string OperationsHash => registry.Hash;
+    public static McpOperationManifest Manifest => new(OperationsHash, Operations);
+    internal static object[] Definitions => ByName.Values.Select(item => item.Definition).ToArray();
+
+    /// <summary>Resolve schema/revision only; the host must authenticate and apply current project policy.</summary>
+    public static ProjectAction ResolveOperation(McpInvocation invocation) => registry.Resolve(invocation);
 
     internal static Registration Resolve(string name, JsonElement arguments)
     {
         if (!ByName.TryGetValue(name, out var registration)) throw new RelayException("tool_denied", "Unknown tool.");
-        Validate(arguments, registration.Schema);
+        McpOperationRegistry.Validate(arguments, registration.Schema);
         return registration;
     }
 
     internal sealed record Registration(string Name, object Definition, JsonElement Schema,
-        Func<Arguments, ProjectAction>? Route, bool AllowStaleCatalog);
+        Func<Arguments, ProjectAction>? Route, bool AllowStaleCatalog, int Revision, string Description);
 
     private static ProjectAction Discover(Arguments _) => new("configuration");
     private static ProjectAction GetSession(Arguments a) => new("get_session", SessionId: a.Id("session_id"));
@@ -118,24 +129,4 @@ internal static class McpToolCatalog
         internal bool Replace => Value.TryGetProperty("replace", out var replace) && replace.GetBoolean();
     }
 
-    private static void Validate(JsonElement value, JsonElement schema)
-    {
-        var type = schema.GetProperty("type").GetString();
-        if ((type == "object" && value.ValueKind != JsonValueKind.Object) || (type == "string" && value.ValueKind != JsonValueKind.String) ||
-            (type == "integer" && (value.ValueKind != JsonValueKind.Number || !value.TryGetInt64(out _))) ||
-            (type == "boolean" && value.ValueKind is not (JsonValueKind.True or JsonValueKind.False))) throw new RelayException("invalid_request", "MCP argument type does not match its schema.");
-        if (type == "object")
-        {
-            var properties = schema.GetProperty("properties");
-            foreach (var required in schema.GetProperty("required").EnumerateArray()) if (!value.TryGetProperty(required.GetString()!, out _)) throw new RelayException("invalid_request", "Missing argument: " + required.GetString());
-            foreach (var property in value.EnumerateObject())
-            {
-                if (!properties.TryGetProperty(property.Name, out var child)) throw new RelayException("invalid_request", "Unknown argument: " + property.Name);
-                Validate(property.Value, child);
-            }
-        }
-        if (type == "string" && schema.TryGetProperty("format", out _) && (!value.TryGetGuid(out var identifier) || identifier == Guid.Empty)) throw new RelayException("invalid_request", "Expected a nonempty UUID.");
-        if (type == "string" && schema.TryGetProperty("maxLength", out var length) && value.GetString()!.Length > length.GetInt32()) throw new RelayException("invalid_request", "MCP text exceeds its stated limit.");
-        if (type == "integer" && ((schema.TryGetProperty("minimum", out var minimum) && value.GetInt64() < minimum.GetInt64()) || (schema.TryGetProperty("maximum", out var maximum) && value.GetInt64() > maximum.GetInt64()))) throw new RelayException("invalid_request", "MCP numeric argument is outside its bounds.");
-    }
 }

@@ -43,14 +43,18 @@
       "agentrelay.infrastructure": {
         "type": "Project",
         "dependencies": {
-          "AgentRelay.Core": "[1.0.0, )",
+          "AgentRelay.Core": "[1.2.0-rc.1, )",
+          "AgentRelay.Protocol": "[1.2.0-rc.1, )",
           "Microsoft.Data.Sqlite": "[10.0.14, )"
         }
+      },
+      "agentrelay.protocol": {
+        "type": "Project"
       },
       "agentrelay.windows": {
         "type": "Project",
         "dependencies": {
-          "AgentRelay.Infrastructure": "[1.0.0, )",
+          "AgentRelay.Infrastructure": "[1.2.0-rc.1, )",
           "Microsoft.Web.WebView2": "[1.0.4314.35, )"
         }
       },

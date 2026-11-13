@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using AgentRelay.Core;
+using AgentRelay.Protocol;
 
 namespace AgentRelay.Infrastructure;
 
@@ -12,18 +13,22 @@ public sealed record McpFailureEnvelope(McpFailureData Error);
 public sealed record McpConnectionStatus(string Version, string ContractHash, string Generation, McpHostStatus Host, string? InstanceId, string? BrokerVersion, bool ClientRefreshRequired, bool AutomaticClientReload, string Recovery,
     UpdateFailureSummary? LastUpdateError = null);
 public sealed record McpHostStatus(McpIdentity Identity, Guid ConnectionId, Guid EndpointId, Guid[] ProjectIds);
+public sealed record McpContractCompatibility(McpTransportRequirement Transport, string OperationsHash, string DocumentationHash);
 public sealed record McpIdentity(string Version, string ContractHash, string Generation)
 {
+    public McpContractCompatibility? Compatibility { get; init; }
     private static readonly Lazy<McpIdentity> current = new(Create);
     public static McpIdentity Current => current.Value;
     private static McpIdentity Create()
     {
         var version = typeof(McpIdentity).Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion.Split('+')[0];
         if (!Regex.IsMatch(version, @"^\d+\.\d+\.\d+(?:-rc\.[1-9]\d*)?$")) throw new InvalidDataException("Only stable and numbered RC versions are supported.");
-        var contract = Hash(JsonSerializer.Serialize(new { revision = 2, envelopes = EnvelopeSchema(), tools = McpFacade.ToolDefinitions, guides = McpFacade.GuideContents() }, RelayJson.Options));
-        var assemblies = new[] { "AgentRelay.Core.dll", "AgentRelay.Infrastructure.dll", "AgentRelay.Windows.dll" };
+        var contract = Hash(JsonSerializer.Serialize(new { revision = 3, transport = McpStableProtocol.Requirement,
+            operations = McpToolCatalog.OperationsHash, envelopes = EnvelopeSchema(), tools = McpFacade.ToolDefinitions, guides = McpFacade.GuideContents() }, RelayJson.Options));
+        var assemblies = new[] { "AgentRelay.Core.dll", "AgentRelay.Protocol.dll", "AgentRelay.Infrastructure.dll", "AgentRelay.Windows.dll" };
         var generation = Hash(version + contract + string.Join("", assemblies.Select(name => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(Path.Combine(AppContext.BaseDirectory, name)))))));
-        return new(version, contract, generation);
+        return new(version, contract, generation) { Compatibility = new(McpStableProtocol.Requirement,
+            McpToolCatalog.OperationsHash, Hash(JsonSerializer.Serialize(McpFacade.GuideContents(), RelayJson.Options))) };
     }
     private static object EnvelopeSchema()
     {
@@ -62,6 +67,7 @@ public static class McpErrors
         };
         var recovery = code switch
         {
+            "operation_unknown" or "operation_revision_unsupported" => "discover_operations",
             "client_catalog_outdated" or "connection_outdated" or "relay_migrated" => "reload_client_connection",
             "runtime_contract_mismatch" => "inspect_relay_runtime",
             "relay_start_failed" => "start_relay_or_contact_maintainer",

@@ -2,6 +2,8 @@ using AgentRelay.Core;
 using AgentRelay.Infrastructure;
 using System.IO.Pipes;
 
+if (args.Length == 2 && args[0] == "stable-mcp-contract") { await McpContractScenarios.RunAsync(Path.GetFullPath(args[1])); return; }
+
 if (args.Length == 2 && args[0] == "process-fixture") { await ProcessScenarios.FixtureAsync(args[1]); return; }
 if (args.Length == 1 && args[0] == "process-check") { await ProcessScenarios.RunAsync(); return; }
 if (args.Length == 2 && args[0] == "design-contracts") { DesignScenarios.Contracts(Path.GetFullPath(args[1])); return; }
