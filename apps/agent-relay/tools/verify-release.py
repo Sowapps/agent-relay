@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import uuid
 import subprocess
 import time
 
@@ -19,7 +20,7 @@ from release_artifact import (
 )
 
 
-EXPECTED_TOOLS = 26
+EXPECTED_TOOLS = 4
 EXPECTED_RESOURCES = 5
 
 
@@ -102,8 +103,8 @@ def prepare_fixture(extracted, executable, data, invoke):
         else:
             raise ValueError('Missing or administrator connection was exportable')
     fragment = read_json(data / 'mcp.windows.json')['mcpServers']['agent_relay']
-    require(Path(fragment['command']) == data / 'mcp-launcher/AgentRelay.Windows.exe'
-            and fragment['args'][0] == 'mcp', 'Portable fragment did not select its own MCP launcher')
+    require(Path(fragment['command']).name.lower() == 'pwsh.exe'
+            and str(extracted / read_json(extracted / 'portable-layout.json')['entryScript']) in fragment['args'], 'Portable fragment did not select its fixed common entry')
     return [fragment['command'], *fragment['args']], [item['projectId'] for item in contexts]
 
 
@@ -117,12 +118,13 @@ def verify_mcp(extracted, command, project_ids, version, environment, errors):
             contents = client.call('resources/read', {'uri': item['uri']})['contents'][0]
             expected = (extracted / 'app/documentation' / item['name']).read_text(encoding='utf-8-sig')
             require(contents['text'].replace('\r\n', '\n') == expected, f"MCP resource differs: {item['uri']}")
-        found = client.tool('list_projects')
+        found = client.operation('list_projects')
         require([p['id'] for p in found['configuration']['projects']] == project_ids[:1],
                 'Scoped connection did not discover exactly its own project')
-        empty = client.tool('list_results', {'project_id': project_ids[0]})
+        empty = client.operation('list_results', {'project_id': project_ids[0]})
         require(empty['operations']['items'] == [], 'Fresh project unexpectedly contains operations')
-        denied = client.call('tools/call', {'name': 'list_results', 'arguments': {'project_id': project_ids[1]}})
+        denied = client.call('tools/call', {'name': 'invoke_operation', 'arguments': dict(call_id=str(uuid.uuid4()),
+            operation_id='list_results', revision=1, arguments={'project_id': project_ids[1]})})
         require(denied.get('isError'), 'Scoped connection read a foreign project')
         require(len(client.call('tools/list')['tools']) == EXPECTED_TOOLS, 'Connection failed after scope refusal')
         try:
@@ -151,7 +153,8 @@ def verify_runtime(directory, extracted, version):
     data = extracted / 'var/apps/agent-relay/default'
     environment = {key: value for key, value in os.environ.items() if not key.startswith(('DOTNET_', 'NUGET_'))}
     environment.update(DOTNET_ROOT=str(extracted / 'no-sdk-installed'), DOTNET_MULTILEVEL_LOOKUP='0',
-                       PATH=str(Path(os.environ['SystemRoot']) / 'System32'))
+                       PATH=str(Path(os.environ['SystemRoot']) / 'System32'),
+                       AGENT_RELAY_PWSH=shutil.which('pwsh.exe') or shutil.which('pwsh') or '')
     invoke = partial(run, cwd=extracted, environment=environment)
     command, project_ids = prepare_fixture(extracted, executable, data, invoke)
     resources = []

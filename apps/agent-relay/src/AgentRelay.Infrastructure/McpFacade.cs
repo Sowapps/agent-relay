@@ -97,6 +97,12 @@ public static class McpFacade
             else tool = McpToolCatalog.Resolve(name, arguments);
             if (connectionId is null || connectionId == Guid.Empty) throw new RelayException("authentication_required", "An explicit participant connection is required.", effectsPossible: false);
             var secret = ConnectionStore.ReadSecret(data, connectionId);
+            if (stableSurface && await InstallationUpdateRecovery.RequestAsync(data, connectionId.Value, secret, CancellationToken.None, start: name != "get_connection_status") is { } pending)
+            {
+                if (name == "get_connection_status") return Content(new { version = McpIdentity.Current.Version, state = "maintenance", update = InstallationUpdateStatus.Read(data),
+                    recovery = "The retained transaction is pending. Ask the relay maintainer to resume or inspect its diagnostic; no project request was admitted." });
+                throw new RelayException("maintenance", "The retained update " + pending.Id + " is resuming (" + pending.Phase + "). No project work was admitted; read connection status and ask the relay maintainer if recovery reports an error.", false);
+            }
             var hello = startup is null
                 ? await client.RequestRawAsync(new("mcp_handshake", AccessToken: secret), CancellationToken.None)
                 : await startup.HandshakeAsync(client, connectionId.Value, secret, CancellationToken.None);
@@ -114,7 +120,7 @@ public static class McpFacade
                 var status = new McpConnectionStatus(identity.Version, identity.ContractHash, identity.Generation, handshake,
                     Environment.GetEnvironmentVariable("AGENT_RELAY_MCP_INSTANCE"), Environment.GetEnvironmentVariable("AGENT_RELAY_MCP_BROKER_VERSION"),
                     !stableSurface && catalog != identity.ContractHash, false, stableSurface ? "Compatible stable transport; discover current operations without reloading the client." : "Ask the owning client to reload its MCP catalog; a closed process alone does not reconnect it.",
-                    InstallationUpdateDiagnostics.Latest(data));
+                    InstallationUpdateDiagnostics.Latest(data), InstallationUpdateStatus.Read(data));
                 return new { structuredContent = status, content = new[] { new { type = "text", text = RelayJson.Serialize(status) } } };
             }
             if (!stableSurface && parameters.TryGetProperty("_meta", out var brokerMeta) && brokerMeta.TryGetProperty("agentRelayContract", out _) && catalog != identity.ContractHash && !tool!.AllowStaleCatalog)

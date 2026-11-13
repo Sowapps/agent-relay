@@ -9,7 +9,7 @@ internal static class Program
         if(args.Length!=4)throw new ArgumentException("Provide prototype assets, fixture JSON, check script and output directory.");
         var assets=Path.GetFullPath(args[0]);var output=Path.GetFullPath(args[3]);Directory.CreateDirectory(output);
         Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
-        using var window=new Form {Text="Agent Relay · Prototype qualification",ClientSize=new Size(1120,728),StartPosition=FormStartPosition.CenterScreen};
+        using var window=new Form {Text="Agent Relay · Test de rendu · Maquette",ClientSize=new Size(1120,728),StartPosition=FormStartPosition.CenterScreen};
         var type=Assembly.Load("AgentRelay.Windows").GetType("AgentRelay.Windows.Presentation.RelayWebView",true)!;
         using var view=(Control)Activator.CreateInstance(type,true)!;view.Dock=DockStyle.Fill;window.Controls.Add(view);
         object? Invoke(string name,params object?[] values)=>type.GetMethod(name,BindingFlags.Instance|BindingFlags.NonPublic|BindingFlags.Public)!.Invoke(view,values);

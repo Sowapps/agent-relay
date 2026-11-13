@@ -10,7 +10,7 @@ namespace AgentRelay.Windows;
 
 internal sealed record StartupPreferenceState(bool? Enabled, string? Error = null);
 internal sealed record StartupEntry(string Value, RegistryValueKind Kind);
-internal sealed record StartupEntrySnapshot(StartupEntry? Entry, StartupEntry EnabledEntry);
+internal sealed record StartupEntrySnapshot(StartupEntry? Entry, StartupEntry EnabledEntry, StartupEntry[]? AcceptedEntries = null);
 internal sealed record StartupEntryChange([property: JsonRequired] StartupEntry? Expected, string Action, StartupEntry? Entry = null);
 
 internal interface IStartupPreference
@@ -52,16 +52,26 @@ internal static class StartupRegistration
     internal static string Name(string data) => "AgentRelay-" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(Path.TrimEndingDirectorySeparator(Path.GetFullPath(data)).ToUpperInvariant())))[..12];
     private static string Launcher(string data) => Path.Combine(Path.GetFullPath(data), "startup-launcher", "AgentRelay.Windows.exe");
     private static string Quote(string value) => '"' + value + new string('\\', value.Length - value.TrimEnd('\\').Length) + '"';
-    internal static string Command(string data) => Quote(Launcher(data)) + " startup";
+    private static string LegacyCommand(string data) => Quote(Launcher(data)) + " startup";
+    private static bool UsesTransport(string data) => File.Exists(AgentRelay.Infrastructure.RuntimePaths.TransportSelection(data));
+    internal static string Command(string data)
+    {
+        if (!UsesTransport(data)) return LegacyCommand(data);
+        var launch = AgentRelay.Infrastructure.McpTransportInstallation.HostLaunch(data);
+        return Quote(launch.Command) + " " + string.Join(" ", launch.Args.Select(Quote));
+    }
     private static StartupEntry EnabledEntry(string data) => new(Command(data), RegistryValueKind.String);
     public static bool Enabled(string data)
     { using var key = Registry.CurrentUser.OpenSubKey(RegistryPath); return ReadValue(key, Name(data)) is string; }
     internal static void DemandOwnedEntry(string data) => _ = Capture(data);
     internal static void ValidateInstalledLauncher(string data)
     {
-        using var key = Registry.CurrentUser.OpenSubKey(RegistryPath);
-        if (ReadValue(key, Name(data)) is string command && MatchesCommand(command, Command(data)) && !File.Exists(Launcher(data)))
-            throw new IOException("Le lanceur de démarrage conservé est introuvable.");
+        var snapshot = Capture(data);
+        if (snapshot.Entry is null) return;
+        if (MatchesCommand(snapshot.Entry.Value, LegacyCommand(data)))
+        { if (!File.Exists(Launcher(data))) throw new IOException("Le lanceur de démarrage conservé est introuvable."); }
+        else if (!File.Exists(AgentRelay.Infrastructure.RuntimePaths.TransportEntryScript(data)) || !File.Exists(AgentRelay.Infrastructure.RuntimePaths.TransportBootstrapExecutable(data)))
+            throw new IOException("L’entrée commune du relais doit être préparée avant le démarrage automatique.");
     }
     public static void Set(string data, bool enabled)
     {
@@ -82,8 +92,9 @@ internal static class StartupRegistration
             string text when key is not null => new StartupEntry(text, key.GetValueKind(name)),
             _ => throw new IOException("The startup entry is not a Windows launch command. Review it before migrating.")
         };
-        DemandOwnedEntry(enabled, entry);
-        return new(entry, enabled);
+        var accepted = new[] { enabled, new StartupEntry(LegacyCommand(data), RegistryValueKind.String) }.Distinct().ToArray();
+        DemandOwnedEntry(enabled, entry, accepted);
+        return new(entry, enabled, accepted);
     }
 
     /// <summary>Applies a reviewed scoped change and returns the exact registry entry.</summary>
@@ -116,14 +127,14 @@ internal static class StartupRegistration
             "restore" when change.Entry is not null => change.Entry,
             _ => throw new ArgumentException("Expected a valid enable, disable or restore change.")
         };
-        DemandOwnedEntry(before.EnabledEntry, desired);
+        DemandOwnedEntry(before.EnabledEntry, desired, before.AcceptedEntries);
         return desired;
     }
 
-    private static void DemandOwnedEntry(StartupEntry enabled, StartupEntry? entry)
+    private static void DemandOwnedEntry(StartupEntry enabled, StartupEntry? entry, StartupEntry[]? accepted = null)
     {
         if (entry is not null && (entry.Kind is not (RegistryValueKind.String or RegistryValueKind.ExpandString)
-            || !MatchesCommand(entry.Value, enabled.Value)))
+            || !(accepted ?? [enabled]).Any(item => MatchesCommand(entry.Value, item.Value))))
             throw new IOException("The startup entry does not select the retained launcher for this scope. Review it before migrating.");
     }
 
@@ -149,7 +160,12 @@ internal static class StartupRegistration
     {
         if (Command(data).Length > 260) throw new IOException("Le chemin du dossier de données est trop long pour le démarrage Windows. Choisissez un emplacement plus court.");
         _ = ResolveRuntime(data);
-        PrepareLauncher(data);
+        if (UsesTransport(data))
+        {
+            if (!File.Exists(AgentRelay.Infrastructure.RuntimePaths.TransportEntryScript(data)) || !File.Exists(AgentRelay.Infrastructure.RuntimePaths.TransportBootstrapExecutable(data)))
+                throw new IOException("Préparez l’entrée commune du relais avant d’activer son démarrage.");
+        }
+        else PrepareLauncher(data);
     }
 
     internal static ProcessStartInfo ResolveRuntime(string data)

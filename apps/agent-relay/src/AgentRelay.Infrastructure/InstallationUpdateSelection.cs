@@ -6,7 +6,8 @@ using AgentRelay.Protocol;
 namespace AgentRelay.Infrastructure;
 
 public sealed record InstallationActivation(string ReleaseRoot, string PreviousPointer, string? PreviousTransport,
-    Guid[] TransportInstances, bool StartupEnabled, bool AdmissionReleased = false, bool? WasRunning = null, string? SelectionHash = null);
+    Guid[] TransportInstances, bool StartupEnabled, bool AdmissionReleased = false, bool? WasRunning = null, string? SelectionHash = null,
+    InstallationStartupSnapshot? Startup = null, bool ResumeAuthorized = false, DateTimeOffset? AuthorizedAt = null);
 
 public sealed partial class InstallationUpdate
 {
@@ -28,7 +29,7 @@ public sealed partial class InstallationUpdate
             if (prior.CandidateHash == digest && prior.Phase != "rolled_back")
             {
                 if (prior.Phase == "preparing") return StageSelected(prior, candidate, manifestPath);
-                DemandStage(prior);
+                if (prior.Phase != "complete") DemandStage(prior);
                 if (prior.Phase == "complete") DemandPublished(prior);
                 return prior;
             }
@@ -56,14 +57,20 @@ public sealed partial class InstallationUpdate
         if (operations.RegistryHash != contract.Compatibility.OperationsHash) throw Failure("update_candidate_invalid", "Operation manifest disagrees with candidate identity.");
         var root = RuntimePaths.ReleaseDirectory(installation, digest);
         var slot = Path.GetRelativePath(installation, root).Replace('\\', '/');
+        if (declared.Keys.Count(name => name.StartsWith("transport/", StringComparison.Ordinal)) != 1)
+            throw Failure("update_candidate_invalid", "The fixed entry requires the qualified single-file transport payload.");
         var expected = declared.ToDictionary(item => item.Key.StartsWith("app/", StringComparison.Ordinal) || item.Key.StartsWith("transport/", StringComparison.Ordinal)
             ? slot + "/" + item.Key : item.Key, item => item.Value, StringComparer.OrdinalIgnoreCase);
+        expected[slot + "/app/installation.json"] = McpStableProtocol.Hash(RuntimePaths.InstallationDescriptor(installation, Path.Combine(root, "app")));
+        expected[Path.GetRelativePath(installation, RuntimePaths.TransportBootstrapExecutable(data)).Replace('\\', '/')] = declared["transport/AgentRelay.Transport.exe"];
+        expected[Path.GetRelativePath(installation, RuntimePaths.TransportEntryScript(data)).Replace('\\', '/')] = McpStableProtocol.Hash(McpTransportInstallation.EntryScript(data));
         expected.Add(slot + "/release-manifest.json", digest);
         var files = expected.OrderBy(item => item.Key, StringComparer.Ordinal).Select(item => new InstallationUpdateFile(item.Key, OptionalHash(Inside(installation, item.Key)), item.Value)).ToArray();
         var id = Guid.NewGuid().ToString("N")[..12];
+        var startup = runtime.CaptureStartup(currentExecutable);
         var state = new InstallationUpdateState(2, id, digest, installation, data, version, contractHash, "preparing", files, [], DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 0, 0,
             Activation: new(root, previous, File.Exists(RuntimePaths.TransportSelection(data)) ? File.ReadAllText(RuntimePaths.TransportSelection(data)) : null,
-                McpTransportPresences.Read(RuntimePaths.TransportStateDirectory(data)).Where(item => item.State is not ("offline" or "closed")).Select(item => item.InstanceId).ToArray(), runtime.StartupEnabled(currentExecutable)));
+                McpTransportPresences.Read(RuntimePaths.TransportStateDirectory(data)).Where(item => item.State is not ("offline" or "closed")).Select(item => item.InstanceId).ToArray(), startup.Enabled, Startup: startup));
         Directory.CreateDirectory(Path.Combine(directory, id));
         CacheRecoveryRunner(state, candidate, declared);
         Save(state);
@@ -78,8 +85,18 @@ public sealed partial class InstallationUpdate
         {
             if (OptionalHash(Inside(Stage(state), file.Name)) == file.After) continue;
             var sourceName = file.Name.StartsWith(slot + "/", StringComparison.Ordinal) ? file.Name[(slot.Length + 1)..] : file.Name;
+            if (file.Name == slot + "/app/installation.json")
+                AtomicText(Inside(Stage(state), file.Name), RuntimePaths.InstallationDescriptor(installation, Path.Combine(state.Activation.ReleaseRoot, "app")));
+            else if (IsBootstrapFile(file.Name))
+            {
+                if (Same(Inside(installation, file.Name), RuntimePaths.TransportEntryScript(data))) AtomicText(Inside(Stage(state), file.Name), McpTransportInstallation.EntryScript(data));
+                else Replace(Inside(Stage(state), file.Name), Inside(candidate, "transport/AgentRelay.Transport.exe"));
+            }
+            else
+            {
             var source = sourceName == "release-manifest.json" ? manifestPath : Inside(candidate, sourceName);
             Replace(Inside(Stage(state), file.Name), source);
+            }
             if (OptionalHash(Inside(Stage(state), file.Name)) != file.After) throw Failure("update_candidate_invalid", "Candidate changed during preparation.");
         }
         return Save(state with { Phase = "prepared", BytesPrepared = state.Files.Sum(file => new FileInfo(Inside(Stage(state), file.Name)).Length), PreparationSeconds = state.PreparationSeconds + watch.Elapsed.TotalSeconds });
@@ -92,7 +109,11 @@ public sealed partial class InstallationUpdate
         if (state.Phase is "rolling_back" or "files_restored" or "recovery_required") return RollbackSelected(state);
         if (state.Phase == "rolled_back") return state;
         if (state.Phase == "preparing") throw Failure("update_candidate_invalid", "The candidate stage is incomplete. Repeat preparation with the same verified source.");
-        DemandStage(state);
+        if (!activation.ResumeAuthorized)
+        {
+            state = AuthorizeSelected();
+            activation = state.Activation!;
+        }
         if (state.Phase == "complete")
         {
             DemandPublished(state);
@@ -116,13 +137,14 @@ public sealed partial class InstallationUpdate
             if (state.Phase is "prepared" or "awaiting_work")
             {
                 var host = runtime.Inspect(previousExecutable);
-                state = Save(state with { Phase = "awaiting_work", Activation = activation = activation with { WasRunning = activation.WasRunning ?? (host is not null) } });
+                state = SaveIfChanged(state with { Phase = "awaiting_work", Activation = activation = activation with { WasRunning = activation.WasRunning ?? (host is not null) } });
                 try
                 {
                     if (host is not null) runtime.ConfirmDrain();
                     DemandUpdateIdle();
                 }
-                catch (RelayException error) when (error.Code == "busy") { return Save(state with { Error = error.Message }); }
+                catch (RelayException error) when (error.Code is "busy" or "update_uncertain_work")
+                { return SaveIfChanged(state with { Error = error.Message, ErrorCode = error.Code }); }
                 if (host is not null) runtime.Stop(host);
                 using (RelayLocation.OpenHostOwnership(data))
                 {
@@ -134,29 +156,19 @@ public sealed partial class InstallationUpdate
             InstallationSnapshot.Verify(snapshot);
             if (state.Phase is "snapshot_ready" or "applying")
             {
+                DemandStage(state);
                 using var host = RelayLocation.OpenHostOwnership(data);
-                state = Save(state with { Phase = "applying", Error = null });
-                foreach (var file in state.Files)
+                state = Save(state with { Phase = "applying", Error = null, ErrorCode = null });
+                foreach (var file in state.Files.Where(file => !IsBootstrapFile(file.Name)))
                 {
-                    var target = Inside(installation, file.Name);
-                    var actual = OptionalHash(target);
-                    if (actual == file.After) continue;
-                    if (actual != file.Before) throw Failure("update_conflict", "An installed file changed outside this transaction: " + file.Name);
-                    if (file.Before is not null)
-                    {
-                        var backup = Backup(state, file.Name);
-                        Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
-                        if (!File.Exists(backup)) File.Copy(target, backup);
-                        if (Hash(backup) != file.Before) throw Failure("update_recovery_required", "Before-image changed.");
-                    }
-                    Replace(target, Inside(Stage(state), file.Name));
+                    PublishFile(state, file);
                 }
                 state = Save(state with { Phase = "selecting" });
             }
             if (state.Phase == "selecting")
             {
                 using var host = RelayLocation.OpenHostOwnership(data);
-                DemandPublished(state);
+                DemandPublished(state, includeBootstrap: false);
                 var selected = ComposeSelection(state);
                 var selectionText = JsonSerializer.Serialize(selected, McpProcessSelections.Json);
                 var current = File.ReadAllText(Path.Combine(data, "mcp-runtime.json"));
@@ -170,22 +182,23 @@ public sealed partial class InstallationUpdate
                 PublishKnownText(Path.Combine(data, "mcp-contract-history.json"), beforeHistory, ContractHistory(beforeHistory, state.Version, state.ContractHash));
                 state = Save(state with { Phase = "selected", Activation = activation = activation with { SelectionHash = McpStableProtocol.Hash(selectionText) } });
             }
-            if (state.Phase is "selected" or "awaiting_transports")
+            if (state.Phase is "selected" or "awaiting_transports" or "publishing_bootstrap")
             {
+                if (state.Phase != "selected" && !TransportsReady(state)) return AwaitTransports(state);
                 DemandSelection(state);
                 var executable = Path.Combine(activation.ReleaseRoot, "app", "AgentRelay.Windows.exe");
                 if (runtime.Inspect(executable) is null) runtime.Start(executable);
                 runtime.DemandReady(executable, state.Version, state.ContractHash);
                 InstallationSnapshot.DemandPreserved(data, snapshot);
                 if (runtime.StartupEnabled(executable) != activation.StartupEnabled) throw Failure("update_startup_changed", "The existing startup preference changed during activation.");
-                var selected = ComposeSelection(state);
-                var leases = McpTransportPresences.Read(RuntimePaths.TransportStateDirectory(data));
-                bool Current(McpTransportPresence item) => item.State == "current" &&
-                    item.GatewayIdentity == McpProcessSelections.Identity(selected.Gateway) && item.SelectedWorkerIdentity == McpProcessSelections.Identity(selected.Worker) &&
-                    (item.ActiveWorkerIdentity is null || item.ActiveWorkerIdentity == item.SelectedWorkerIdentity);
-                if (activation.TransportInstances.Any(id => !leases.Any(item => item.InstanceId == id && Current(item))) || leases.Any(item => item.State is not ("offline" or "closed") && !Current(item)))
-                    return Save(state with { Phase = "awaiting_transports", Error = "Required live transport identities have not acknowledged this selection. Admission remains suspended; resume without a client restart or expiry." });
-                state = Save(state with { Phase = "reopening", Error = null, Activation = activation = activation with { AdmissionReleased = true } });
+                if (!TransportsReady(state)) return AwaitTransports(state);
+                state = Save(state with { Phase = "publishing_bootstrap", Error = null });
+                try { foreach (var file in state.Files.Where(file => IsBootstrapFile(file.Name))) PublishFile(state, file); }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                { return SaveIfChanged(state with { ErrorCode = "update_bootstrap_pending", Error = "Bootstrap publication is pending; inspect file access or an overlapping launch, then resume. " + error.Message }); }
+                DemandPublished(state);
+                if (activation.Startup is { } startupBefore) runtime.ReconcileStartup(executable, startupBefore, restore: false);
+                state = Save(state with { Phase = "reopening", Error = null, ErrorCode = null, Activation = activation = activation with { AdmissionReleased = true } });
             }
             if (state.Phase == "reopening")
             {
@@ -284,6 +297,7 @@ public sealed partial class InstallationUpdate
                 return Save(state with { Error = "Previous transport identities are still returning; admission remains suspended." });
         }
         if (runtime.StartupEnabled(priorExecutable) != activation.StartupEnabled) throw Failure("update_startup_changed", "Restored startup preference differs.");
+        if (activation.Startup is { } startupBefore) runtime.ReconcileStartup(priorExecutable, startupBefore, restore: true);
         state = Save(state with { Phase = "rolled_back" });
         ReleaseSelectedBarrier(state);
         return state;
@@ -292,6 +306,36 @@ public sealed partial class InstallationUpdate
     private void DemandUpdateIdle()
     {
         SqliteWorkStore.DemandUpdateIdleAsync(data, CancellationToken.None).GetAwaiter().GetResult();
+    }
+
+    private InstallationUpdateState SaveIfChanged(InstallationUpdateState state)
+    {
+        var current = Read();
+        return RelayJson.Serialize(current) == RelayJson.Serialize(state) ? current : Save(state);
+    }
+
+    private InstallationUpdateState AuthorizeSelected()
+    {
+        var state = Read();
+        if (state.Activation is not { } activation || state.Phase == "preparing")
+            throw Failure("update_candidate_incomplete", "Only a fully prepared selected-release transaction can be authorized.");
+        if (activation.ResumeAuthorized || state.Phase is "complete" or "rolled_back") return state;
+        return Save(state with { Activation = activation with { ResumeAuthorized = true, AuthorizedAt = DateTimeOffset.UtcNow } });
+    }
+
+    private InstallationUpdateState AwaitTransports(InstallationUpdateState state) => SaveIfChanged(state with { Phase = "awaiting_transports", ErrorCode = "update_transport_pending",
+        Error = "Required live transport identities have not acknowledged this selection. Admission remains suspended; resume without a client restart or expiry." });
+
+    private bool TransportsReady(InstallationUpdateState state)
+    {
+        var selected = ComposeSelection(state, false);
+        var leases = McpTransportPresences.Read(RuntimePaths.TransportStateDirectory(data));
+        var gateway = McpProcessSelections.Identity(selected.Gateway); var worker = McpProcessSelections.Identity(selected.Worker);
+        bool Current(McpTransportPresence item) => item.State == "current" && item.GatewayIdentity == gateway && item.SelectedWorkerIdentity == worker &&
+            (item.ActiveWorkerIdentity is null || item.ActiveWorkerIdentity == item.SelectedWorkerIdentity);
+        // A confirmed closed/dead process no longer owns client stdio; stale-but-live is never retired.
+        return state.Activation!.TransportInstances.All(id => leases.Any(item => item.InstanceId == id && (Current(item) || item.State is "offline" or "closed"))) &&
+            !leases.Any(item => item.State is not ("offline" or "closed") && !Current(item));
     }
 
     private McpProcessSelection ComposeSelection(InstallationUpdateState state, bool validate = true)
@@ -304,8 +348,8 @@ public sealed partial class InstallationUpdate
             return new(Path.Combine(directory, executable), arguments, state.Files.Where(file => file.Name.StartsWith(prefix, StringComparison.Ordinal))
                 .ToDictionary(file => file.Name[prefix.Length..], file => file.After!));
         }
-        var selected = new McpProcessSelection(1, McpStableProtocol.Requirement,
-            Image("app", "AgentRelay.Windows.exe", ["mcp-stable-worker", "--data-dir", data]), Image("transport", "AgentRelay.Transport.exe", []));
+        var worker = Image("app", "AgentRelay.Windows.exe", ["mcp-stable-worker", "--data-dir", data]);
+        var selected = new McpProcessSelection(1, McpStableProtocol.Requirement, worker, Image("transport", "AgentRelay.Transport.exe", []), worker with { Arguments = ["tray", "--data-dir", data] });
         if (validate) { McpProcessSelections.Validate(selected.Worker); McpProcessSelections.Validate(selected.Gateway); }
         return selected;
     }
@@ -314,7 +358,7 @@ public sealed partial class InstallationUpdate
     {
         var pointer = JsonNode.Parse(state.Activation!.PreviousPointer)!;
         pointer["executable"] = selected.Worker.Executable;
-        pointer["mcpExecutable"] = selected.Gateway.Executable;
+        pointer["mcpExecutable"] = RuntimePaths.TransportBootstrapExecutable(data);
         pointer["transportSelection"] = RuntimePaths.TransportSelection(data);
         return pointer.ToJsonString();
     }
@@ -360,9 +404,11 @@ public sealed partial class InstallationUpdate
             !Same(activation.ReleaseRoot, RuntimePaths.ReleaseDirectory(installation, state.CandidateHash)) || activation.TransportInstances is null ||
             activation.TransportInstances.Any(id => id == Guid.Empty) || activation.TransportInstances.Distinct().Count() != activation.TransportInstances.Length ||
             activation.AdmissionReleased && state.Phase is not ("reopening" or "complete") ||
-            state.Files.Any(file => file.Name.StartsWith("var/", StringComparison.OrdinalIgnoreCase) && !Within(Inside(installation, file.Name), activation.ReleaseRoot)))
+            state.Files.Any(file => file.Name.StartsWith("var/", StringComparison.OrdinalIgnoreCase) && !Within(Inside(installation, file.Name), activation.ReleaseRoot) && !IsBootstrapFile(file.Name)))
             throw Failure("update_recovery_required", "Release selection ownership or admission boundary is invalid.");
     }
+
+    private bool IsBootstrapFile(string name) => Same(Inside(installation, name), RuntimePaths.TransportBootstrapExecutable(data)) || Same(Inside(installation, name), RuntimePaths.TransportEntryScript(data));
 
     private void DemandNativeCompatibility(Dictionary<string, string> declared, string executable)
     {

@@ -63,6 +63,15 @@ internal static class StartupTransferScenarios
 
         Refuses(() => target.Apply(new(null, "enable"), () => target.Entry = current));
         Check(target.Entry == current && target.Writes == 2, "an entry changed during preparation is not overwritten");
+        StartupEntry? selected = legacy;
+        StartupEntrySnapshot Capture() => new(selected, current, [legacy, current]);
+        void Apply(StartupEntryChange change) => StartupRegistration.Change(change, Capture, value => selected = value, () => { });
+        Apply(new(legacy, "enable"));
+        Check(selected == current, "known legacy command transitions to common entry");
+        Apply(new(current, "restore", legacy));
+        Check(selected == legacy, "rollback restores known legacy entry");
+        Refuses(() => Apply(new(legacy, "restore", new("unknown", RegistryValueKind.String))));
+        Check(selected == legacy, "unrelated entry is never restored");
         Console.WriteLine("STARTUP_MIGRATION_ENTRIES=PASS");
     }
 

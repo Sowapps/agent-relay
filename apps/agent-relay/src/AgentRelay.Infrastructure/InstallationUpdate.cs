@@ -13,7 +13,7 @@ public sealed record InstallationUpdateClient(Guid? BindingId, string Client);
 public sealed record InstallationUpdateState(int Schema, string Id, string CandidateHash, string Installation, string Data, string Version,
     string ContractHash, string Phase, InstallationUpdateFile[] Files, InstallationUpdateClient[] Clients,
     DateTimeOffset StartedAt, DateTimeOffset UpdatedAt, long BytesPrepared, double PreparationSeconds,
-    string? Error = null, double ApplySeconds = 0, double RollbackSeconds = 0, InstallationActivation? Activation = null);
+    string? Error = null, double ApplySeconds = 0, double RollbackSeconds = 0, InstallationActivation? Activation = null, string? ErrorCode = null);
 
 /// <summary>Owns the complete installed-file transaction, its durable intent and crash reconciliation.</summary>
 /// <remarks>Host drain/backup and client control are adapters. They cannot infer completion from a runtime swap.</remarks>
@@ -32,7 +32,7 @@ public sealed partial class InstallationUpdate
         this.data = Absolute(data);
         if (!Same(this.data, RuntimePaths.PortableDataDirectory(this.installation)))
             throw Failure("update_scope_invalid", "Update the existing portable installation and its retained data scope.");
-        directory = Path.Combine(RuntimePaths.ApplicationDirectory(this.installation), "update");
+        directory = RuntimePaths.UpdateDirectory(this.installation);
         journal = Path.Combine(directory, "current.json");
         this.runtime = runtime ?? new InstallationRuntime(this.data);
         RuntimePaths.DemandPrivatePath(journal);
@@ -43,22 +43,68 @@ public sealed partial class InstallationUpdate
         Directory.CreateDirectory(directory);
         using var ownership = new FileStream(Path.Combine(directory, "update.lock"), FileMode.OpenOrCreate,
             FileAccess.ReadWrite, FileShare.None);
-        return action switch
+        var watch = Stopwatch.StartNew();
+        var at = DateTimeOffset.UtcNow;
+        var before = File.Exists(journal) ? File.ReadAllText(journal) : null;
+        InstallationUpdateState? result = null;
+        Exception? failure = null;
+        try
         {
-            "prepare" => Prepare(candidate ?? throw new ArgumentException("Select an extracted verified candidate.")),
-            "resume" => ResumeSelected(),
-            "status" => Read(),
-            "apply" => Apply(),
-            "activate" => Activate(),
-            "verify" => Verify(),
-            "rollback" => Rollback(),
-            "rollback-finish" => FinishRollback(),
-            "rollback-release" => ReleaseRollback(),
-            _ => throw new ArgumentException("Expected prepare, status, apply, verify or rollback.")
-        };
+            result = action switch
+            {
+                "prepare" => PrepareCurrent(candidate ?? throw new ArgumentException("Select an extracted verified candidate.")),
+                "resume" => ResumeSelected(),
+                "authorize" => AuthorizeSelected(),
+                "status" => Read(),
+                "apply" => Apply(),
+                "activate" => Activate(),
+                "verify" => Verify(),
+                "rollback" => Rollback(),
+                "rollback-finish" => FinishRollback(),
+                "rollback-release" => ReleaseRollback(),
+                _ => throw new ArgumentException("Expected prepare, resume, authorize, status or an explicit legacy recovery action.")
+            };
+            return result;
+        }
+        catch (Exception error) { failure = error; throw; }
+        finally
+        {
+            if (action != "status")
+            {
+                try
+                {
+                    if (failure is not null || (File.Exists(journal) ? File.ReadAllText(journal) : null) != before)
+                    {
+                        var id = "update-command-" + Guid.NewGuid().ToString("N");
+                        var text = RelayJson.Serialize(new { id, action, startedAt = at, elapsedSeconds = watch.Elapsed.TotalSeconds,
+                            outcome = failure is null ? result?.Phase : "failed", transactionId = result?.Id,
+                            code = (failure as RelayException)?.Code, exceptionType = failure?.GetType().Name, modelCalls = 0 });
+                        AtomicText(Path.Combine(directory, "commands", id + ".json"), text);
+                        AtomicText(Path.Combine(directory, "last-command.json"), text);
+                    }
+                }
+                catch (Exception retention)
+                {
+                    if (failure is not null) throw new AggregateException("Update failed and command timing could not be retained.", failure, retention);
+                    throw;
+                }
+            }
+        }
     }
 
-    private InstallationUpdateState Prepare(string candidate)
+    private InstallationUpdateState PrepareCurrent(string candidate)
+    {
+        if (!File.Exists(Path.Combine(candidate, "transport", "AgentRelay.Transport.exe")))
+        {
+            var prior = File.Exists(journal) ? Read() : null;
+            if (prior is not { Schema: 1, Phase: not "rolled_back" } || prior.CandidateHash != Hash(Path.Combine(candidate, "release-manifest.json")))
+                throw Failure("update_initial_migration_required", "New updates require a stable-transport candidate. Legacy journals retain explicit recovery; no new legacy transaction was created.");
+        }
+        return Prepare(candidate);
+    }
+
+    // Legacy preparation remains internal for retained-schema qualification; callers use the guarded Run entry.
+    internal InstallationUpdateState Prepare(string candidate)
     {
         var watch = Stopwatch.StartNew();
         candidate = Absolute(candidate);
@@ -176,18 +222,7 @@ public sealed partial class InstallationUpdate
         {
             foreach (var file in state.Files)
             {
-                var target = Inside(installation, file.Name);
-                var actual = OptionalHash(target);
-                var backup = Backup(state, file.Name);
-                if (actual == file.After) continue;
-                if (actual != file.Before) throw Failure("update_conflict", "Installed file changed during update: " + file.Name);
-                if (file.Before is not null)
-                {
-                    Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
-                    if (!File.Exists(backup)) File.Copy(target, backup);
-                    if (Hash(backup) != file.Before) throw Failure("update_recovery_required", "Rollback copy is inconsistent: " + file.Name);
-                }
-                Replace(target, file.After is null ? null : Inside(Stage(state), file.Name));
+                PublishFile(state, file);
             }
             return Save(state with { Phase = "files_applied", ApplySeconds = state.ApplySeconds + watch.Elapsed.TotalSeconds });
         }
@@ -297,7 +332,7 @@ public sealed partial class InstallationUpdate
             hashes.Add(name, actual);
         }
         var descriptor = Path.Combine(runner, "installation.json");
-        AtomicText(descriptor, RelayJson.Serialize(new { version = 1, root = Path.GetRelativePath(runner, installation) }));
+        AtomicText(descriptor, RuntimePaths.InstallationDescriptor(installation, runner));
         hashes.Add("installation.json", Hash(descriptor));
         AtomicText(Path.Combine(directory, "recovery.json"), RelayJson.Serialize(new
         {
@@ -368,19 +403,24 @@ public sealed partial class InstallationUpdate
     }
 
     private string LauncherMetadata(string name) => name.EndsWith("installation.json", StringComparison.Ordinal)
-        ? RelayJson.Serialize(new { version = 1, root = Path.GetRelativePath(Path.GetDirectoryName(Inside(installation, name))!, installation) })
+        ? RuntimePaths.InstallationDescriptor(installation, Path.GetDirectoryName(Inside(installation, name))!)
         : "Managed retained launcher; updated with the complete installation.\n";
 
     private InstallationUpdateState Read()
     {
-        var state = RelayJson.Deserialize<InstallationUpdateState>(File.ReadAllText(journal));
-        if (state.Schema is not (1 or 2) || state.Schema == 1 && state.Activation is not null || state.Id.Length != 12 || !state.Id.All(Uri.IsHexDigit) || !Same(state.Installation, installation) || !Same(state.Data, data)
-            || state.Phase is not ("preparing" or "prepared" or "applying" or "files_applied" or "awaiting_clients" or "complete"
-                or "rolling_back" or "files_restored" or "rolled_back" or "recovery_required" or "awaiting_work" or "snapshot_ready" or "selecting" or "selected" or "awaiting_transports" or "reopening"))
-            throw Failure("update_recovery_required", "Update journal ownership, schema or phase is invalid. No recovery effect was attempted.");
+        var state = RelayJson.Deserialize<InstallationUpdateState>(AgentRelay.Protocol.McpPrivateFiles.ReadText(journal));
+        ValidateHeader(state, installation, data);
         foreach (var file in state.Files) ValidateManagedName(file.Name);
         if (state.Schema == 2) ValidateActivation(state);
         return state;
+    }
+
+    internal static void ValidateHeader(InstallationUpdateState state, string installation, string data)
+    {
+        if (state.Schema is not (1 or 2) || state.Schema == 1 && state.Activation is not null || state.Id is not { Length: 12 } || !state.Id.All(Uri.IsHexDigit) || !Same(state.Installation, installation) || !Same(state.Data, data)
+            || state.Phase is not ("preparing" or "prepared" or "applying" or "files_applied" or "awaiting_clients" or "complete"
+                or "rolling_back" or "files_restored" or "rolled_back" or "recovery_required" or "awaiting_work" or "snapshot_ready" or "selecting" or "selected" or "awaiting_transports" or "publishing_bootstrap" or "reopening"))
+            throw Failure("update_recovery_required", "Update journal ownership, schema or phase is invalid. No recovery effect was attempted.");
     }
 
     private InstallationUpdateState Save(InstallationUpdateState state)
@@ -409,9 +449,9 @@ public sealed partial class InstallationUpdate
                 throw Failure("update_candidate_invalid", "Prepared candidate is missing or changed: " + file.Name);
     }
 
-    private void DemandPublished(InstallationUpdateState state)
+    private void DemandPublished(InstallationUpdateState state, bool includeBootstrap = true)
     {
-        if (state.Files.Any(file => OptionalHash(Inside(installation, file.Name)) != file.After))
+        if (state.Files.Where(file => includeBootstrap || !IsBootstrapFile(file.Name)).Any(file => OptionalHash(Inside(installation, file.Name)) != file.After))
             throw Failure("update_conflict", "The complete installed payload does not match the transaction.");
     }
 
@@ -445,9 +485,26 @@ public sealed partial class InstallationUpdate
         finally { if (File.Exists(pending)) File.Delete(pending); }
     }
 
+    private void PublishFile(InstallationUpdateState state, InstallationUpdateFile file)
+    {
+        var target = Inside(installation, file.Name);
+        var actual = OptionalHash(target);
+        if (actual == file.After) return;
+        if (actual != file.Before) throw Failure("update_conflict", "Installed file changed during update: " + file.Name);
+        if (file.Before is not null)
+        {
+            var backup = Backup(state, file.Name);
+            Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
+            if (!File.Exists(backup)) File.Copy(target, backup);
+            if (Hash(backup) != file.Before) throw Failure("update_recovery_required", "Rollback copy is inconsistent: " + file.Name);
+        }
+        Replace(target, file.After is null ? null : Inside(Stage(state), file.Name));
+    }
+
     private static void AtomicText(string path, string text)
     {
         RuntimePaths.DemandPrivatePath(path);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         var pending = path + ".update-pending";
         using (var stream = new FileStream(pending, FileMode.Create, FileAccess.Write, FileShare.None))
         using (var writer = new StreamWriter(stream, new System.Text.UTF8Encoding(false), leaveOpen: true))
@@ -462,6 +519,7 @@ public sealed partial class InstallationUpdate
             .Select(launcher => Path.GetRelativePath(installation, Path.Combine(data, launcher)).Replace('\\', '/') + "/");
         if (name.StartsWith("var/", StringComparison.OrdinalIgnoreCase)
             && !launcherRoots.Any(root => name.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            && !IsBootstrapFile(name)
             && !name.StartsWith(Path.GetRelativePath(installation, Path.Combine(RuntimePaths.ApplicationDirectory(installation), "releases")).Replace('\\', '/') + "/", StringComparison.OrdinalIgnoreCase))
             throw Failure("update_scope_invalid", "Application data is not a distribution-owned update file.");
     }

@@ -29,7 +29,7 @@ internal static class InstallationUpdateScenarios
         File.WriteAllText(Path.Combine(candidate, "README.md"), "updated-readme");
         Manifest(candidate);
         var update = new InstallationUpdate(installation, data);
-        var prepared = update.Run("prepare", candidate);
+        var prepared = update.Prepare(candidate);
         Check(prepared.Phase == "prepared" && update.Run("prepare", candidate).Id == prepared.Id, "repeat preparation retains transaction");
         Check(prepared.Files.Any(file => file.Name == "README.md") && prepared.Files.Any(file => file.Name.EndsWith("mcp-launcher/documentation/quickstart.md")), "complete payload includes root docs and broker resources");
         Refuses("update_barrier_required", () => update.Run("apply"));
@@ -57,7 +57,7 @@ internal static class InstallationUpdateScenarios
         using (new FileStream(Path.Combine(installation, "var", "apps", "agent-relay", "update", "update.lock"), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
             Refuses<IOException>(() => update.Run("status"));
         File.WriteAllText(Path.Combine(candidate, "README.md"), "tampered");
-        Refuses("update_candidate_invalid", () => update.Run("prepare", candidate));
+        Refuses("update_candidate_invalid", () => update.Prepare(candidate));
         var reported = InstallationUpdateDiagnostics.Capture(data, new RelayException("update_conflict", "fixture conflict", false));
         Check(reported.Code == "update_conflict" && reported.DetailsPath is not null, "expected refusals have retained identifiable details");
         Check(InstallationUpdateDiagnostics.Read(data, reported.DiagnosticId).Detail.Contains("fixture conflict", StringComparison.Ordinal)

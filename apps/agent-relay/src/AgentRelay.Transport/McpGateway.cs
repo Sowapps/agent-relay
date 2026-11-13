@@ -30,6 +30,7 @@ public sealed class McpGateway : IAsyncDisposable
     private bool relinquished;
     private readonly DateTimeOffset started = McpProcessIdentity.StartedAt;
     private sealed class SelectionChanged : Exception;
+    private sealed class CloseRequested : Exception;
 
     public McpGateway(string selectionPath, string stateDirectory, Stream input, Stream output, McpTransferState? transfer = null)
     {
@@ -104,6 +105,7 @@ public sealed class McpGateway : IAsyncDisposable
                 }
                 await McpFrames.WriteAsync(output, JsonSerializer.Serialize(new { jsonrpc = "2.0", id, result }, McpProcessSelections.Json));
             }
+            catch (CloseRequested) { return; }
             catch (SelectionChanged)
             {
                 var next = ReadSelection();
@@ -137,6 +139,7 @@ public sealed class McpGateway : IAsyncDisposable
     {
         try
         {
+            if (McpTransportPresences.CloseRequested(stateDirectory, instance)) throw new CloseRequested();
             var selected = ReadSelection();
             var identity = McpProcessSelections.Identity(selected.Gateway);
             if (identity != gatewayIdentity && identity != failedGateway && input.CanTransfer) throw new SelectionChanged();
@@ -144,7 +147,8 @@ public sealed class McpGateway : IAsyncDisposable
             if (DateTimeOffset.UtcNow - lastPresence > TimeSpan.FromSeconds(1))
             {
                 McpTransportPresences.Write(stateDirectory, new(instance, Environment.ProcessId, binding, Version, gatewayIdentity!, workerIdentity,
-                    McpProcessSelections.Identity(selected.Worker), identity == gatewayIdentity ? "current" : "update_failed", DateTimeOffset.UtcNow, input.BufferedBytes, started));
+                    McpProcessSelections.Identity(selected.Worker), identity == gatewayIdentity ? "current" : "update_failed", DateTimeOffset.UtcNow, input.BufferedBytes, started,
+                    Environment.GetEnvironmentVariable("DOTNET_BUNDLE_EXTRACT_BASE_DIR"), ClientName()));
                 lastPresence = DateTimeOffset.UtcNow;
             }
             pollError = null;
@@ -160,13 +164,19 @@ public sealed class McpGateway : IAsyncDisposable
     {
         McpPrivateFiles.Demand(selectionPath);
         if (new FileInfo(selectionPath).Length > McpWireLimits.MaximumFrameBytes) throw new IOException("Selection exceeds its limit.");
-        var text = File.ReadAllText(selectionPath);
+        var text = McpPrivateFiles.ReadText(selectionPath);
         if (text != selectedText)
         {
             selection = McpProcessSelections.Parse(text);
             selectedText = text;
         }
         return selection!;
+    }
+
+    private string ClientName()
+    {
+        var name = initialization?["clientInfo"]?["name"]?.GetValue<string>() ?? "MCP client";
+        return new string(name.Where(character => !char.IsControl(character)).Take(200).ToArray());
     }
 
     private async Task EnsureWorkerAsync(McpProcessImage image)

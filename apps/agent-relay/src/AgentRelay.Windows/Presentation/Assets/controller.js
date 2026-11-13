@@ -78,7 +78,7 @@
   else if(action==='close-detail'){ui.detail=null;$('#detail-layer').innerHTML='';}
   else if(action==='task-project')navigate('project',el.dataset.project);
   else if(action==='startup-toggle'||action==='startup-retry'){const state=data.startup||{enabled:data.startupEnabled};if(ui.startupPending||typeof state.enabled!=='boolean')return;ui.startupTarget=action==='startup-retry'?ui.startupTarget:!state.enabled;ui.startupPending=true;ui.startupError=null;render();host('startup-preference',{enabled:ui.startupTarget});}
-  else if(action==='close-mcp'){modal('Fermer cette connexion MCP ?',"<p>La requête engagée pourra se terminer. Aucun travail ne sera rejoué et les permissions restent conservées.</p><p>Le client peut nécessiter un rechargement explicite pour se reconnecter.</p>",C.button('Fermer la connexion','confirm-close-mcp',`data-id="${C.escape(id)}"`,'primary'));}
+  else if(action==='close-mcp'){modal('Fermer cette connexion MCP ?',"<p>La requête engagée pourra se terminer. Aucun travail ne sera rejoué et les permissions restent conservées.</p><p>La reconnexion dépend du client. Une ancienne connexion nécessite une migration initiale par le mainteneur.</p>",C.button('Fermer la connexion','confirm-close-mcp',`data-id="${C.escape(id)}"`,'primary'));}
   else if(action==='confirm-close-mcp'){$('#app-modal').innerHTML='';host('close-mcp',{id});}
   else if(action==='settings-scope'){ui.settingScope=value;render();}
   else if(action==='project-settings'){const project=el.dataset.project||ui.project;if(project)navigate('project',project,'settings');}

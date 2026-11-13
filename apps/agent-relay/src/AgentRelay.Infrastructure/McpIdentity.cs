@@ -11,7 +11,7 @@ namespace AgentRelay.Infrastructure;
 public sealed record McpFailureData(string Code, string Message, string Recovery, string Execution, string? DiagnosticId);
 public sealed record McpFailureEnvelope(McpFailureData Error);
 public sealed record McpConnectionStatus(string Version, string ContractHash, string Generation, McpHostStatus Host, string? InstanceId, string? BrokerVersion, bool ClientRefreshRequired, bool AutomaticClientReload, string Recovery,
-    UpdateFailureSummary? LastUpdateError = null);
+    UpdateFailureSummary? LastUpdateError = null, InstallationUpdateView? Update = null);
 public sealed record McpHostStatus(McpIdentity Identity, Guid ConnectionId, Guid EndpointId, Guid[] ProjectIds,
     int? ProcessId = null, DateTimeOffset? ProcessStartedAt = null);
 public sealed record McpContractCompatibility(McpTransportRequirement Transport, string OperationsHash, string DocumentationHash);

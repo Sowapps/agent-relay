@@ -9,6 +9,7 @@ if (args.Length == 2 && args[0] == "selected-update") { SelectedUpdateScenarios.
 if (args.Length == 3 && args[0] == "selected-update-crash") { SelectedUpdateScenarios.Crash(Path.GetFullPath(args[1]), args[2]); return; }
 if (args.Length == 2 && args[0] == "installation-runtime") { await InstallationRuntimeScenarios.RunAsync(Path.GetFullPath(args[1])); return; }
 if (args.Length == 2 && args[0] == "update-host-fixture") { await InstallationRuntimeScenarios.FixtureAsync(Path.GetFullPath(args[1])); return; }
+if (args.Length == 4 && args[0] == "mcp-entry") { await McpEntryScenarios.RunAsync(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), Path.GetFullPath(args[3])); return; }
 
 if (args.Length == 2 && args[0] == "stable-mcp-contract") { await McpContractScenarios.RunAsync(Path.GetFullPath(args[1])); return; }
 
@@ -39,6 +40,7 @@ if (args.Length == 3 && args[0] == "monitor-render") { await UiRenderScenarios.R
 if (args.Length == 4 && args[0] == "monitor-conformance") { await UiRenderScenarios.Conformance(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), Path.GetFullPath(args[3])); Console.WriteLine("NATIVE_CONFORMANCE=PASS"); return; }
 if (args.Length == 3 && args[0] == "monitor-review") { await UiRenderScenarios.Review(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); Console.WriteLine("NATIVE_REVIEW=PASS"); return; }
 if (args.Length == 3 && args[0] == "monitor-usability") { await UiRenderScenarios.Usability(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); Console.WriteLine("NATIVE_USABILITY=PASS"); return; }
+if (args.Length == 1 && args[0] == "startup-contracts") { StartupTransferScenarios.Run(); return; }
 var data = Path.GetFullPath(args.Single());
 DateDisplayScenarios.Run();
 await ProcessScenarios.RunAsync();

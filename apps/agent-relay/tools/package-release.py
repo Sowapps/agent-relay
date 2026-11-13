@@ -53,6 +53,10 @@ assert (payload/'app/AgentRelay.Windows.exe').is_file()
 contract=subprocess.run([str(payload/'app/AgentRelay.Windows.exe'),'mcp-contract','--data-dir',str(payload/'contract-preparation-unused')],capture_output=True,text=True,encoding='utf-8',check=True,timeout=20,creationflags=subprocess.CREATE_NO_WINDOW)
 identity=json.loads(contract.stdout);assert identity['version']==a.version
 (payload/'app/mcp-contract.json').write_text(json.dumps(identity),encoding='utf-8')
+for mode, destination in [('mcp-operations', payload/'app/mcp-operations.json'), ('portable-layout', payload/'portable-layout.json')]:
+ metadata=subprocess.run([str(payload/'app/AgentRelay.Windows.exe'),mode,'--data-dir',str(payload/'contract-preparation-unused')],capture_output=True,text=True,encoding='utf-8',check=True,timeout=20,creationflags=subprocess.CREATE_NO_WINDOW)
+ destination.write_text(json.dumps(json.loads(metadata.stdout)),encoding='utf-8')
+assert {path.name for path in (payload/'transport').iterdir()} == {'AgentRelay.Transport.exe'}, 'Expected a single-file independent transport'
 files={file.relative_to(payload).as_posix():sha256(file) for file in sorted(payload.rglob('*')) if file.is_file()}
 assert not any(any(part in {'var','local','data','connections','presentation-cache','.codex','.git','bin','obj'} for part in Path(name).parts) for name in files)
 inputs=[file for folder in ['src','packaging','wsl','doc/using'] for file in (app/folder).rglob('*') if file.is_file() and not {'bin','obj','__pycache__'}.intersection(file.relative_to(app).parts)]

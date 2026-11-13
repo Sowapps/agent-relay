@@ -3,11 +3,30 @@
 **Utility:** lists the shipped participant-facing tool contract.  
 **Usage:** discover `tools/list` for the live schema; start with the [agent guide](agent-quickstart.md). Served as resource `agent-relay://docs/tools`.
 
-## Contract
+## Fixed tool envelope
+
+| Tool | Arguments | Purpose |
+| --- | --- | --- |
+| `get_connection_status` | `{}` | Bound identity, compatibility and common update state |
+| `discover_operations` | Optional `project_id`, `cursor`, `limit` (1–100), `registry_hash` | Current operation schemas/revisions and authorized context; follow returned cursors |
+| `invoke_operation` | `call_id`, `operation_id`, positive `revision`, object `arguments` | Invoke once using a discovered supported revision and existing project policy |
+| `get_result` | `request_id` | Read the retained work outcome without replay |
+
+`call_id` is correlation only. Preserve business `request_id` inside operation arguments separately. Discovery does not grant permission. The operation registry can change while this four-tool wire stays unchanged. Inspect actual `inputSchema`, supported revision and schema hash rather than memorizing a release's input format. `operation_revision_unsupported` requires rediscovery for a new submission, never automatic replay of uncertain work.
+
+For example, after discovery returns an operation ID/revision:
+
+```json
+{"tool":"invoke_operation","arguments":{"call_id":"<new-uuid>","operation_id":"list_projects","revision":"<discovered-positive-integer>","arguments":{}}}
+```
+
+Replace the revision placeholder with a JSON integer. All rows below are **operation** arguments passed inside this envelope; `get_connection_status` and `get_result` are also directly available as above. An older typed server needs the initial maintainer migration, not new project grants.
+
+## Operation arguments
 
 Parameters ending in `_id` are UUIDs, except `command_id` which is a configured command name. Generate request/session IDs locally; obtain resource IDs and rights from discovery. No tool creates administrative project definitions or grants itself rights.
 
-| Tool | Required arguments | Optional arguments / effect |
+| Operation | Required arguments | Optional arguments / effect |
 | --- | --- | --- |
 | get_connection_status | none | Version, contract hash, build generation, current scoped host and client-refresh requirement; no model |
 | list_projects | none | Authorized contexts and explicit rights |
@@ -58,10 +77,10 @@ The native secondary message server has a separate one-tool contract: send_messa
 
 get_connection_status requires no arguments and performs authenticated scoped host discovery, not an agent/model call. It reports version, contractHash, generation, host identity, broker instance/version and clientRefreshRequired. Optional lastUpdateError is a historical update-failure summary: code, readable message, diagnosticId, recovery and timestamp. The local maintainer can retrieve bounded details with the update command's diagnostic action and that ID, without the original archive. It is not necessarily an ongoing failure and grants no extra access. Product versions are stable X.Y.Z or numbered RC X.Y.Z-rc.N only. Different deployed contracts must use different versions; a build generation distinguishes internal changes without changing the contract. The public status never grants project rights.
 
-The retained native broker follows the selected runtime between calls and forwards raw JSON without dropping fields introduced by a newer worker. An interrupted call keeps its original outcome and is never replayed automatically. A successful tools/list confirms the catalog requested by this connection. The broker emits list-change notifications on a contract switch, whether detected while idle or during a request. Until the client lists the current tools, get_connection_status and list_projects remain available when the worker and host agree. Calls that require the current catalog return client_catalog_outdated before submission. Verify an existing chat from that same chat after an update.
+The generic C# transport keeps the same original stdio and four-tool inventory across selected worker/gateway changes. It performs cooperative readiness/ownership transfer at safe boundaries, preserves buffered bytes and never replays a forwarded request. Operation revisions and documentation are discovered from the selected worker; clients do not need a new tool catalogue for ordinary application updates. Unsupported wire changes must be explicitly qualified, not claimed seamless.
 
-Errors carry a readable message, a code, a recovery action, execution certainty and an optional diagnosticId. Unexpected details go to bounded private diagnostics without request bodies or credentials. For client_catalog_outdated, reload this connection's tools. For runtime_contract_mismatch, inspect the worker and host installation. The older connection_outdated code also requires checking connection status. For relay_migrated, reconnect to the current owned data scope. For authentication_required, review the explicit binding with operator authorization. For relay_unavailable, relay_timeout or mcp_transport_lost, inspect retained results before resubmitting. For storage_unavailable, check installation and data access. A transport error leaves the effect uncertain.
+The common update projection reports phase, pending state, blocker code, continuation and retained command timings. A prepared archive alone does not authorize execution. After explicit execution authorization, a matching retained transaction can resume through its verified recovery runner; uncertain work keeps admission suspended and needs explicit reconciliation. Completion includes bootstrap/startup publication and transport readiness, not only host health. No 15-minute expiry or Codex restart is part of this path.
 
-On a prepared portable installation, the first authenticated host-backed call can start the shared relay and wait for its authenticated handshake. Discovery of tools and public guides stays passive. Concurrent clients share the cold start. Maintenance blocks new startup and admission. A `relay_start_failed` response with `execution=not_started` directs agents to the [local recovery procedure](portable-release.md#recover-an-unavailable-relay). An agent without local command access should ask the Agent Relay maintainer or the user. A request sent to the host is never replayed automatically.
+Errors include readable text, stable code, recovery meaning, execution certainty and a diagnostic reference when available. `mcp_transport_lost` after forwarding means unconfirmed execution: inspect retained results, never replay automatically. A failure before forwarding is `not_started`; preserve its details. Authentication/binding errors require reviewed configuration, not a guessed principal. `update_status_unavailable` needs the relay maintainer to inspect the retained transaction. Public guides/tool discovery remain passive; an authenticated host-backed call can start the one configured relay when no update barrier is held.
 
-The Windows operator can inspect recent MCP broker connections at Réglages → Connexions MCP and request closure after the admitted call. Closing does not revoke permissions or guarantee reconnection. A Codex control adapter can request reload only through an existing reachable owning-backend socket; otherwise the update report explicitly requests client-side reload/restart. It never creates a daemon, starts a replacement backend or claims fresh-client verification proves the old conversation.
+Réglages → Connexions MCP shows generic transports and separately marked legacy connections, update progress and technical details. Closing a connection preserves grants and does not guarantee the client's reconnection. Legacy registration migration is a separate one-time maintainer action; do not treat an old client's cached typed catalog as the current generic contract.
