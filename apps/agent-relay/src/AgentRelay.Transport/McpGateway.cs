@@ -7,7 +7,7 @@ using AgentRelay.Protocol;
 namespace AgentRelay.Transport;
 
 public sealed record McpTransferState(string Selection, string StateDirectory, string GatewayIdentity,
-    JsonNode? Initialization, string? PendingFrame, byte[] Unread, Guid InstanceId);
+    JsonNode? Initialization, string? PendingFrame, byte[] Unread, Guid InstanceId, Guid? BindingId = null);
 
 /// <summary>Serialized stdio ownership and worker replacement. No application routing or credentials live here.</summary>
 public sealed class McpGateway : IAsyncDisposable
@@ -17,12 +17,19 @@ public sealed class McpGateway : IAsyncDisposable
     private readonly Stream output;
     private readonly McpFrames input;
     private readonly Guid instance;
+    private readonly Guid? binding;
     private string? pending, selectedText, gatewayIdentity, workerIdentity;
     private JsonNode? initialization;
     private McpProcessSelection? selection;
     private Process? worker;
     private McpFrames? responses;
     private Task? workerErrors;
+    private DateTimeOffset lastPresence;
+    private string? failedGateway;
+    private string? pollError;
+    private bool relinquished;
+    private readonly DateTimeOffset started = McpProcessIdentity.StartedAt;
+    private sealed class SelectionChanged : Exception;
 
     public McpGateway(string selectionPath, string stateDirectory, Stream input, Stream output, McpTransferState? transfer = null)
     {
@@ -31,6 +38,7 @@ public sealed class McpGateway : IAsyncDisposable
         this.output = output;
         this.input = new(input, transfer?.Unread);
         instance = transfer?.InstanceId ?? Guid.NewGuid();
+        binding = transfer?.BindingId;
         initialization = transfer?.Initialization?.DeepClone();
         pending = transfer?.PendingFrame;
         gatewayIdentity = transfer?.GatewayIdentity;
@@ -57,9 +65,11 @@ public sealed class McpGateway : IAsyncDisposable
                 gatewayIdentity ??= nextGateway;
                 if (nextGateway != gatewayIdentity)
                 {
+                    if (failedGateway == nextGateway) throw new McpProtocolException("transport_update_failed", "This successor already failed readiness; correct its selected bundle before retrying.");
                     var transfer = new McpTransferState(selectionPath, stateDirectory, nextGateway,
-                        initialization?.DeepClone(), frame, input.ExportUnread(), instance);
-                    if (await McpSuccession.TransferAsync(next.Gateway, transfer, DropWorkerAsync)) return;
+                        initialization?.DeepClone(), frame, input.ExportUnread(), instance, binding);
+                    if (await McpSuccession.TransferAsync(next.Gateway, transfer, DropWorkerAsync)) { relinquished = true; return; }
+                    failedGateway = nextGateway;
                     throw new McpProtocolException("transport_update_failed", "The successor did not become ready. This request was not forwarded; inspect transport diagnostics.");
                 }
                 if (id is null) continue;
@@ -94,6 +104,17 @@ public sealed class McpGateway : IAsyncDisposable
                 }
                 await McpFrames.WriteAsync(output, JsonSerializer.Serialize(new { jsonrpc = "2.0", id, result }, McpProcessSelections.Json));
             }
+            catch (SelectionChanged)
+            {
+                var next = ReadSelection();
+                var identity = McpProcessSelections.Identity(next.Gateway);
+                var transfer = new McpTransferState(selectionPath, stateDirectory, identity, initialization?.DeepClone(), null,
+                    input.ExportUnread(), instance, binding);
+                try { if (await McpSuccession.TransferAsync(next.Gateway, transfer, DropWorkerAsync)) { relinquished = true; return; } }
+                catch (Exception error) { Record(error); }
+                failedGateway = identity;
+                Record(new McpProtocolException("transport_update_failed", "Idle successor did not acknowledge readiness; original stream ownership retained."));
+            }
             catch (Exception error)
             {
                 try { await DropWorkerAsync(); }
@@ -109,6 +130,29 @@ public sealed class McpGateway : IAsyncDisposable
                     ? JsonSerializer.Serialize(new { jsonrpc = "2.0", id, result = failure }, McpProcessSelections.Json)
                     : JsonSerializer.Serialize(new { jsonrpc = "2.0", id, error = new { code = -32000, message, data = failure.structuredContent.error } }, McpProcessSelections.Json));
             }
+        }
+    }
+
+    public async Task PollAsync()
+    {
+        try
+        {
+            var selected = ReadSelection();
+            var identity = McpProcessSelections.Identity(selected.Gateway);
+            if (identity != gatewayIdentity && identity != failedGateway && input.CanTransfer) throw new SelectionChanged();
+            if (workerIdentity is not null && workerIdentity != McpProcessSelections.Identity(selected.Worker)) await DropWorkerAsync();
+            if (DateTimeOffset.UtcNow - lastPresence > TimeSpan.FromSeconds(1))
+            {
+                McpTransportPresences.Write(stateDirectory, new(instance, Environment.ProcessId, binding, Version, gatewayIdentity!, workerIdentity,
+                    McpProcessSelections.Identity(selected.Worker), identity == gatewayIdentity ? "current" : "update_failed", DateTimeOffset.UtcNow, input.BufferedBytes, started));
+                lastPresence = DateTimeOffset.UtcNow;
+            }
+            pollError = null;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or McpProtocolException)
+        {
+            var key = error.GetType().Name + error.Message;
+            if (pollError != key) { Record(error); pollError = key; }
         }
     }
 
@@ -134,6 +178,7 @@ public sealed class McpGateway : IAsyncDisposable
         var start = new ProcessStartInfo(image.Executable) { UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };
         foreach (var argument in image.Arguments) start.ArgumentList.Add(argument);
+        if (binding is { } connection) { start.ArgumentList.Add("--connection-id"); start.ArgumentList.Add(connection.ToString("D")); }
         start.Environment["AGENT_RELAY_MCP_INSTANCE"] = instance.ToString("D");
         start.Environment["AGENT_RELAY_MCP_BROKER_VERSION"] = Version;
         worker = Process.Start(start) ?? throw new IOException("Worker could not start.");
@@ -186,5 +231,11 @@ public sealed class McpGateway : IAsyncDisposable
         }
     }
 
-    public async ValueTask DisposeAsync() => await DropWorkerAsync();
+    public async ValueTask DisposeAsync()
+    {
+        await DropWorkerAsync();
+        if (!relinquished && selection is { } selected)
+            McpTransportPresences.Write(stateDirectory, new(instance, Environment.ProcessId, binding, Version, gatewayIdentity!, null,
+                McpProcessSelections.Identity(selected.Worker), "closed", DateTimeOffset.UtcNow, ProcessStartedAt: started));
+    }
 }

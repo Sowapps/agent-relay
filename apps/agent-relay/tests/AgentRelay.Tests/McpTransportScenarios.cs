@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using AgentRelay.Protocol;
@@ -33,6 +34,13 @@ internal static class McpTransportScenarios
 
     public static async Task RunAsync(string data, string gatewaySource)
     {
+        using (var oversized = new MemoryStream(new byte[McpWireLimits.MaximumFrameBytes + 1]))
+        {
+            var frames = new McpFrames(oversized);
+            try { await frames.ReadAsync(); throw new Exception("Oversized EOF accepted"); }
+            catch (McpProtocolException error) when (error.Code == "invalid_request") { }
+            Check(await frames.ReadAsync() is null, "Malformed EOF caused an infinite error loop");
+        }
         Directory.CreateDirectory(data);
         var first = Bundle(gatewaySource, Path.Combine(data, "gateway-a"));
         var second = Bundle(gatewaySource, Path.Combine(data, "gateway-b"));
@@ -85,9 +93,19 @@ internal static class McpTransportScenarios
             Select(first, "recovered");
             await McpFrames.WriteAsync(parent.StandardInput.BaseStream, Json(new { jsonrpc = "2.0", id = 31, method = "ping" }));
             Check((await Read(31))["result"] is not null, "Parent could not resume after refusal");
+            var split = Call(4);
+            var half = split.Length / 2;
+            await parent.StandardInput.BaseStream.WriteAsync(Encoding.UTF8.GetBytes(split[..half]));
+            await parent.StandardInput.BaseStream.FlushAsync();
+            var partialDeadline = DateTimeOffset.UtcNow.AddSeconds(5);
+            while (!McpTransportPresences.Read(state).Any(item => item.BufferedInputBytes > 0) && DateTimeOffset.UtcNow < partialDeadline) await Task.Delay(50);
+            Check(McpTransportPresences.Read(state).Any(item => item.BufferedInputBytes > 0), "Partial input was not retained by the reader");
             Select(second, "three");
-            await McpFrames.WriteAsync(parent.StandardInput.BaseStream, Call(4) + "\n" + Call(5) + "\n" +
-                Json(new { jsonrpc = "2.0", id = 6, method = "tools/list" }));
+            await parent.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            Check(parent.ExitCode == 0, "Idle parent failed to hand over without another client frame");
+            await parent.StandardInput.BaseStream.WriteAsync(Encoding.UTF8.GetBytes(split[half..] + "\n" + Call(5) + "\n" +
+                Json(new { jsonrpc = "2.0", id = 6, method = "tools/list" }) + "\n"));
+            await parent.StandardInput.BaseStream.FlushAsync();
             Check((await Read(4))["result"]?["structuredContent"]?["generation"]?.GetValue<string>() == "three", "Successor did not dispatch pending frame");
             Check((await Read(5))["result"]?["structuredContent"]?["generation"]?.GetValue<string>() == "three", "Queued unread frame lost");
             var tools = (await Read(6))["result"]?["tools"]?.AsArray();

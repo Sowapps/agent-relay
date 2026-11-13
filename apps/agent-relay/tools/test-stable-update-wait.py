@@ -1,12 +1,10 @@
-"""Verify standby timeout/identity without stopping a process or touching the installed stable."""
+"""Verify the receipt entry delegates once without a client-exit timer or stable effects."""
 
 import json
-from pathlib import Path
 from unittest.mock import patch
 import uuid
 
 import stable_update_wait as driver
-from complete_update import UpdateFailure
 from deployment import read, write
 from runtime_layout import app_var, pilotage_stable_root
 
@@ -24,19 +22,14 @@ receipt = stable / 'armed-fixture/result.json'
 receipt.parent.mkdir()
 write(receipt, dict(config=str(config), configSha256=driver.workflow.sha256(config), data=str(data),
                     release=str(root / 'candidate'), version='9.0.0', archiveSha256='fixture'))
-inventory = [dict(ProcessId=123, ExecutablePath=str(broker), CommandLine='"' + str(broker) + '" mcp --data-dir "' + str(data) + '"')]
 with patch.object(driver.workflow, 'ROOT', root), patch.object(driver.workflow, 'verified_inputs', return_value=(root / 'archive.zip', 'fixture')):
-    with patch.object(driver, 'processes', return_value=inventory), patch.object(driver.workflow, 'upgrade') as apply:
-        try:
-            driver.run(receipt, timeout=0)
-        except UpdateFailure as error:
-            assert error.error['diagnosticId'] and 'MCP clients still hold' in error.error['message']
-        else:
-            raise AssertionError('Standby ignored a mapped client')
-        apply.assert_not_called()
+    outcome = dict(state=dict(schema=2, phase='awaiting_work', id='fixture'), receipt='retained C# transaction')
+    with patch.object(driver.workflow, 'upgrade', side_effect=AssertionError('Must use the unified transaction')), \
+            patch.object(driver, 'update', return_value=outcome) as apply:
+        driver.run(receipt, timeout=0)
+        apply.assert_called_once()
 result = read(receipt)
-assert result['stage'] == 'failed' and result['remainingClientProcesses'] == [123]
+assert result['stage'] == 'awaiting_work' and result['applied'] is False
 assert (data / 'mcp-runtime.json').read_text() == '{}'
-assert driver.clients(data.parents[3], data, []) == []
-(root / 'result.json').write_text(json.dumps(dict(passed=True, noProcessesStopped=True, noUpgradeBeforeClientExit=True), indent=2), encoding='utf-8')
+(root / 'result.json').write_text(json.dumps(dict(passed=True, noProcessesStopped=True, noClientExitWait=True, durableWaitingWithoutExpiry=True), indent=2), encoding='utf-8')
 print(json.dumps(dict(passed=True, report=str(root / 'result.json'))))

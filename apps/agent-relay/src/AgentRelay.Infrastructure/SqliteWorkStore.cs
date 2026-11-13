@@ -8,7 +8,13 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
 
     /// <summary>Check durable work without opening a host or recovering pending operations.</summary>
     /// <seealso cref="RecoverAsync"/>
-    public static async Task DemandIdleAsync(string dataDirectory, bool allowUninitialized, CancellationToken token)
+    public static Task DemandIdleAsync(string dataDirectory, bool allowUninitialized, CancellationToken token) =>
+        DemandMaintenanceIdleAsync(dataDirectory, allowUninitialized, false, token);
+
+    internal static Task DemandUpdateIdleAsync(string dataDirectory, CancellationToken token) =>
+        DemandMaintenanceIdleAsync(dataDirectory, false, true, token);
+
+    private static async Task DemandMaintenanceIdleAsync(string dataDirectory, bool allowUninitialized, bool includeUncertain, CancellationToken token)
     {
         var path = RelayDatabase.DatabasePath(dataDirectory);
         RuntimePaths.DemandPrivatePath(path);
@@ -23,9 +29,9 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
             throw new RelayException("storage_unavailable", "The selected relay database path is not a file.", false);
         using var connection = new RelayDatabase(dataDirectory, readOnly: true).Open();
         using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT 1 FROM work WHERE {ActiveState} LIMIT 1";
-        if (await command.ExecuteScalarAsync(token) is not null)
-            throw new RelayException("busy", "Active durable work exists; finish it before maintenance.", false);
+        command.CommandText = $"SELECT id FROM work WHERE ({ActiveState}{(includeUncertain ? " OR json_extract(payload,'$.state')='unknown'" : "")}) LIMIT 1";
+        if (await command.ExecuteScalarAsync(token) is { } id)
+            throw new RelayException("busy", includeUncertain ? "Active or uncertain durable work blocks update: " + id : "Active durable work exists; finish it before maintenance.", false);
     }
 
     public async Task ProgressAsync(Guid id, WorkProgress progress, CancellationToken token)

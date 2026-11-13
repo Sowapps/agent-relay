@@ -75,7 +75,7 @@ public sealed class RelayPipeServer : IDisposable
                     var authenticated = connections is null ? null : await connections.AuthenticateAsync(request.AccessToken, deadline.Token);
                     var passive = request.Operation is "mcp_handshake" or "configuration" or "history" or "read" or "show_window" ||
                         request.Operation == "project" && request.ProjectAction is { } query &&
-                        (query.Name is "configuration" or "describe_endpoints" or "list_sessions" or "list_results" or "list_events" ||
+                        (query.Name is "configuration" or "describe_endpoints" or "get_result" or "list_sessions" or "list_results" or "list_events" ||
                             query.Name.StartsWith("observe_", StringComparison.Ordinal));
                     using var admissionLease = passive || request.Operation == "deployment_quiesce" ? null : promotion?.Enter();
                     if (dataDirectory is not null && File.Exists(Path.Combine(dataDirectory, "maintenance.json")))
@@ -96,7 +96,8 @@ public sealed class RelayPipeServer : IDisposable
                     else if (request.Operation == "mcp_handshake")
                     {
                         if (authenticated is not { Administrator: false }) throw new RelayException("capability_denied", "An MCP connection must retain its explicit participant identity.");
-                        response = new(Mcp: new(McpIdentity.Current, authenticated.ConnectionId, authenticated.Caller.EndpointId, authenticated.Caller.ProjectIds));
+                        response = new(Mcp: new(McpIdentity.Current, authenticated.ConnectionId, authenticated.Caller.EndpointId, authenticated.Caller.ProjectIds,
+                            Environment.ProcessId, AgentRelay.Protocol.McpProcessIdentity.StartedAt));
                     }
                     else if (request.Operation == "show_window")
                     {

@@ -13,19 +13,20 @@ public sealed record InstallationUpdateClient(Guid? BindingId, string Client);
 public sealed record InstallationUpdateState(int Schema, string Id, string CandidateHash, string Installation, string Data, string Version,
     string ContractHash, string Phase, InstallationUpdateFile[] Files, InstallationUpdateClient[] Clients,
     DateTimeOffset StartedAt, DateTimeOffset UpdatedAt, long BytesPrepared, double PreparationSeconds,
-    string? Error = null, double ApplySeconds = 0, double RollbackSeconds = 0);
+    string? Error = null, double ApplySeconds = 0, double RollbackSeconds = 0, InstallationActivation? Activation = null);
 
 /// <summary>Owns the complete installed-file transaction, its durable intent and crash reconciliation.</summary>
 /// <remarks>Host drain/backup and client control are adapters. They cannot infer completion from a runtime swap.</remarks>
 /// <seealso cref="McpInstallation"/>
-public sealed class InstallationUpdate
+public sealed partial class InstallationUpdate
 {
     private readonly string installation;
     private readonly string data;
     private readonly string directory;
     private readonly string journal;
+    private readonly IInstallationRuntime runtime;
 
-    public InstallationUpdate(string installation, string data)
+    public InstallationUpdate(string installation, string data, IInstallationRuntime? runtime = null)
     {
         this.installation = Absolute(installation);
         this.data = Absolute(data);
@@ -33,6 +34,7 @@ public sealed class InstallationUpdate
             throw Failure("update_scope_invalid", "Update the existing portable installation and its retained data scope.");
         directory = Path.Combine(RuntimePaths.ApplicationDirectory(this.installation), "update");
         journal = Path.Combine(directory, "current.json");
+        this.runtime = runtime ?? new InstallationRuntime(this.data);
         RuntimePaths.DemandPrivatePath(journal);
     }
 
@@ -44,6 +46,7 @@ public sealed class InstallationUpdate
         return action switch
         {
             "prepare" => Prepare(candidate ?? throw new ArgumentException("Select an extracted verified candidate.")),
+            "resume" => ResumeSelected(),
             "status" => Read(),
             "apply" => Apply(),
             "activate" => Activate(),
@@ -87,6 +90,7 @@ public sealed class InstallationUpdate
         var contractHash = contract["contractHash"]?.GetValue<string>() ?? throw new JsonException();
         if (contract["version"]?.GetValue<string>() != version || contractHash.Length != 64)
             throw Failure("update_candidate_invalid", "Candidate version and MCP contract disagree.");
+        if (expected.ContainsKey("transport/AgentRelay.Transport.exe")) return PrepareSelected(candidate, manifestPath, version, contractHash, expected);
         expected.Add("release-manifest.json", Hash(manifestPath));
         AddLauncher(expected, candidate, "mcp-launcher", documentation: true);
         if (Directory.Exists(Path.Combine(data, "startup-launcher")))
@@ -114,16 +118,7 @@ public sealed class InstallationUpdate
         if (current["distribution"]?.GetValue<string>() != "portable-win-x64") throw Failure("update_scope_invalid", "Unsupported installed layout.");
         var currentExecutable = current["executable"]?.GetValue<string>() ?? throw new JsonException();
         if (!Within(currentExecutable, installation)) throw Failure("update_scope_invalid", "Selected runtime escaped the installation.");
-        var nativeChanged = declared.Where(item => item.Key.StartsWith("app/wsl/", StringComparison.Ordinal))
-            .Any(item => OptionalHash(Path.Combine(Path.GetDirectoryName(currentExecutable)!, item.Key[4..])) != item.Value);
-        if (nativeChanged)
-        {
-            using var database = new RelayDatabase(data, readOnly: true).Open();
-            using var command = database.CreateCommand();
-            command.CommandText = "SELECT count(*) FROM sessions";
-            if (Convert.ToInt64(command.ExecuteScalar()) != 0)
-                throw Failure("update_adapter_sync_required", "Native session adapters change in this candidate. Qualify their owned-session synchronization before updating; no component was replaced.");
-        }
+        DemandNativeCompatibility(declared, currentExecutable);
         var priorContract = JsonNode.Parse(File.ReadAllText(Path.Combine(Path.GetDirectoryName(currentExecutable)!, "mcp-contract.json")));
         // Legacy installations have no root manifest. Never bless different bytes under their current version.
         if (priorContract?["version"]?.GetValue<string>() == version && !File.Exists(Path.Combine(installation, "release-manifest.json")))
@@ -168,6 +163,7 @@ public sealed class InstallationUpdate
     private InstallationUpdateState Apply()
     {
         var state = Read();
+        if (state.Activation is not null) return ResumeSelected();
         if (state.Phase is "complete" or "awaiting_clients") return Verify();
         if (state.Phase == "files_applied") { DemandStage(state); return state; }
         if (state.Phase is not ("prepared" or "applying")) throw Failure("update_recovery_required", "This update must be rolled back before retrying.");
@@ -205,6 +201,7 @@ public sealed class InstallationUpdate
     private InstallationUpdateState Activate()
     {
         var state = Read();
+        if (state.Activation is not null) return ResumeSelected();
         if (state.Phase != "files_applied") throw Failure("update_activation_required", "Apply all components before activating the runtime.");
         DemandBarrier(state);
         using var host = RelayLocation.OpenHostOwnership(data);
@@ -215,13 +212,10 @@ public sealed class InstallationUpdate
         pointer["mcpExecutable"] = Path.Combine(data, "mcp-launcher", "AgentRelay.Windows.exe");
         var contractPath = Path.Combine(installation, "app", "mcp-contract.json");
         var historyPath = Path.Combine(data, "mcp-contract-history.json");
-        var history = File.Exists(historyPath) ? JsonNode.Parse(File.ReadAllText(historyPath))!.AsObject() : new JsonObject();
-        if (history[state.Version] is { } known && known.GetValue<string>() != state.ContractHash)
-            throw Failure("update_version_conflict", "This version already identifies another MCP contract.");
-        history[state.Version] = state.ContractHash;
+        var history = ContractHistory(File.Exists(historyPath) ? File.ReadAllText(historyPath) : null, state.Version, state.ContractHash);
         AtomicText(pointerPath, pointer.ToJsonString());
         AtomicText(Path.Combine(data, "mcp-contract.json"), File.ReadAllText(contractPath));
-        AtomicText(historyPath, history.ToJsonString());
+        AtomicText(historyPath, history);
         return state;
     }
 
@@ -230,6 +224,7 @@ public sealed class InstallationUpdate
     private InstallationUpdateState Rollback()
     {
         var state = Read();
+        if (state.Activation is not null) return RollbackSelected(state);
         if (state.Phase is "rolled_back" or "files_restored") return state;
         if (state.Phase is "complete" or "awaiting_clients")
             throw Failure("update_recovery_required", "Admission was reopened; do not restore an old snapshot over newer work.");
@@ -314,6 +309,7 @@ public sealed class InstallationUpdate
     private InstallationUpdateState Verify()
     {
         var state = Read();
+        if (state.Activation is not null) return ResumeSelected();
         if (state.Phase is not ("files_applied" or "awaiting_clients" or "complete"))
             throw Failure("update_recovery_required", "Apply the complete candidate before verifying activation.");
         DemandPublished(state);
@@ -378,11 +374,12 @@ public sealed class InstallationUpdate
     private InstallationUpdateState Read()
     {
         var state = RelayJson.Deserialize<InstallationUpdateState>(File.ReadAllText(journal));
-        if (state.Schema != 1 || state.Id.Length != 12 || !state.Id.All(Uri.IsHexDigit) || !Same(state.Installation, installation) || !Same(state.Data, data)
+        if (state.Schema is not (1 or 2) || state.Schema == 1 && state.Activation is not null || state.Id.Length != 12 || !state.Id.All(Uri.IsHexDigit) || !Same(state.Installation, installation) || !Same(state.Data, data)
             || state.Phase is not ("preparing" or "prepared" or "applying" or "files_applied" or "awaiting_clients" or "complete"
-                or "rolling_back" or "files_restored" or "rolled_back" or "recovery_required"))
+                or "rolling_back" or "files_restored" or "rolled_back" or "recovery_required" or "awaiting_work" or "snapshot_ready" or "selecting" or "selected" or "awaiting_transports" or "reopening"))
             throw Failure("update_recovery_required", "Update journal ownership, schema or phase is invalid. No recovery effect was attempted.");
         foreach (var file in state.Files) ValidateManagedName(file.Name);
+        if (state.Schema == 2) ValidateActivation(state);
         return state;
     }
 
@@ -464,7 +461,8 @@ public sealed class InstallationUpdate
         var launcherRoots = new[] { "mcp-launcher", "startup-launcher" }
             .Select(launcher => Path.GetRelativePath(installation, Path.Combine(data, launcher)).Replace('\\', '/') + "/");
         if (name.StartsWith("var/", StringComparison.OrdinalIgnoreCase)
-            && !launcherRoots.Any(root => name.StartsWith(root, StringComparison.OrdinalIgnoreCase)))
+            && !launcherRoots.Any(root => name.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+            && !name.StartsWith(Path.GetRelativePath(installation, Path.Combine(RuntimePaths.ApplicationDirectory(installation), "releases")).Replace('\\', '/') + "/", StringComparison.OrdinalIgnoreCase))
             throw Failure("update_scope_invalid", "Application data is not a distribution-owned update file.");
     }
 

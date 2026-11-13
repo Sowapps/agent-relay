@@ -11,10 +11,11 @@ internal static class Program
             if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Use the qualified Windows transport adapter.");
             var values = new Dictionary<string, string>(StringComparer.Ordinal);
             for (var index = 0; index < arguments.Length; index += 2)
-                if (index + 1 >= arguments.Length || arguments[index] is not ("--selection" or "--state-dir" or "--resume" or "--control-read" or "--control-write") ||
+                if (index + 1 >= arguments.Length || arguments[index] is not ("--selection" or "--state-dir" or "--connection-id" or "--resume" or "--control-read" or "--control-write") ||
                     !values.TryAdd(arguments[index], arguments[index + 1])) throw new ArgumentException("Unknown, duplicate or incomplete transport option.");
             var selection = values["--selection"];
             var state = values["--state-dir"];
+            Guid? binding = values.TryGetValue("--connection-id", out var identity) ? Guid.Parse(identity) : null;
             if (!Path.IsPathFullyQualified(selection) || !Path.IsPathFullyQualified(state)) throw new ArgumentException("Transport paths must be absolute.");
             McpTransferState? transfer = null;
             if (values.TryGetValue("--resume", out var resume)) transfer = await McpSuccession.ResumeAsync(selection, state, resume, values["--control-read"], values["--control-write"]);
@@ -25,9 +26,12 @@ internal static class Program
                 if (!string.Equals(Path.GetFullPath(selected.Gateway.Executable), Environment.ProcessPath, StringComparison.OrdinalIgnoreCase))
                     throw new IOException("This process is not the selected gateway.");
                 // Capture loaded generation before the first blocking input read.
-                transfer = new(selection, state, McpProcessSelections.Identity(selected.Gateway), null, null, [], Guid.NewGuid());
+                transfer = new(selection, state, McpProcessSelections.Identity(selected.Gateway), null, null, [], Guid.NewGuid(), binding);
             }
-            await using var gateway = new McpGateway(selection, state, Console.OpenStandardInput(), Console.OpenStandardOutput(), transfer);
+            if (transfer.BindingId != binding) throw new IOException("Successor binding does not match the transferred identity.");
+            McpGateway? gateway = null;
+            var input = new WindowsPipeInput(Console.OpenStandardInput(), () => gateway!.PollAsync());
+            await using var owned = gateway = new McpGateway(selection, state, input, Console.OpenStandardOutput(), transfer);
             await gateway.RunAsync();
             return 0;
         }

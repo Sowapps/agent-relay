@@ -226,7 +226,7 @@ def _update(data, archive, digest, *, updater=None, verify=None, guard=None, ref
         if (reports / 'current.json').exists():
             existing = invoke(updater, installation, data, 'status')
         barrier = data / 'promotion.lock'
-        if existing and existing['phase'] == 'rolled_back' and action != 'status':
+        if existing and existing.get('schema') != 2 and existing['phase'] == 'rolled_back' and action != 'status':
             prior_receipt = reports / existing['id'] / 'ports.json'
             if barrier.exists() or not prior_receipt.exists() or not read(prior_receipt).get('rollbackVerified'):
                 return finalize_rollback(updater, installation, data, existing, prior_receipt, guard)
@@ -235,6 +235,8 @@ def _update(data, archive, digest, *, updater=None, verify=None, guard=None, ref
             state = existing
         else:
             candidate = candidate or candidate_from_archive(archive, digest)
+            if not (candidate / 'transport/AgentRelay.Transport.exe').is_file():
+                raise ValueError('Forward updates require the stable transport. Legacy transactions retain status/rollback recovery only; client-exit deployment is retired')
             updater = {'executable': str(candidate / 'app' / EXE)}
             context['updater'] = updater
             state = invoke(updater, installation, data, 'prepare', candidate)
@@ -248,6 +250,23 @@ def _update(data, archive, digest, *, updater=None, verify=None, guard=None, ref
             return dict(state=state, receipt=str(receipt))
         if state['phase'] == 'rolled_back' and receipt.exists() and read(receipt).get('rollbackVerified'):
             return dict(state=state, receipt=str(receipt), rolledBack=True, alreadyCurrent=True)
+        if state.get('schema') == 2:
+            # C# owns drain, snapshot, immutable selection, transport readiness and rollback.
+            # Legacy typed-tool probes/reload callbacks cannot validate the fixed generic surface.
+            if guard:
+                guard()
+            before = state['phase']
+            state = invoke(updater, installation, data, 'rollback' if action == 'rollback' else 'resume')
+            ports = dict(startupEnabled=state['activation']['startupEnabled'],
+                         admissionReleased=state['activation']['admissionReleased'],
+                         rollbackVerified=state['phase'] == 'rolled_back',
+                         elapsedSeconds=round(time.monotonic() - started, 3),
+                         transactionOwner='InstallationUpdate', phase=state['phase'])
+            write(receipt, ports)
+            return dict(state=state, receipt=str(receipt), verification=dict(transactionPhase=state['phase']),
+                        alreadyCurrent=before == 'complete', rolledBack=state['phase'] == 'rolled_back')
+        if action != 'rollback' and not recovering and state['phase'] in ('preparing', 'prepared', 'applying', 'files_applied'):
+            raise ValueError('Forward legacy publication is retired. Roll back this retained transaction, then qualify the initial stable-transport migration')
         runtime = {'executable': str(installation / 'app' / EXE)}
         if state['phase'] in ('complete', 'awaiting_clients'):
             if action == 'rollback':

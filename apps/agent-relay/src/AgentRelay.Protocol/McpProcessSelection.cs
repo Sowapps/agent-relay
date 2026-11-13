@@ -1,7 +1,18 @@
 using System.Security.Cryptography;
+using System.Diagnostics;
 using System.Text.Json;
 
 namespace AgentRelay.Protocol;
+
+public static class McpProcessIdentity
+{
+    public static DateTimeOffset StartedAt { get; } = ReadStart();
+    private static DateTimeOffset ReadStart()
+    {
+        using var process = Process.GetCurrentProcess();
+        return new(process.StartTime.ToUniversalTime());
+    }
+}
 
 public sealed record McpProcessImage(string Executable, string[] Arguments, IReadOnlyDictionary<string, string> Files);
 public sealed record McpProcessSelection(int Version, McpTransportRequirement Transport, McpProcessImage Worker, McpProcessImage Gateway);

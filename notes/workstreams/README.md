@@ -5,6 +5,8 @@
 
 ## Records
 
+- [U3 complete-update transaction](2026-11-13-u3-transactional-update.md): immutable selection, durable admission/recovery and the idle-transport prerequisite.
+
 - [U2 minimal transport](2026-11-13-u2-minimal-transport.md): generic worker integration, original-stream ownership, checked process succession and isolated recovery qualification.
 
 - [U1 stable MCP contract](2026-11-13-u1-stable-contract.md): fixed protocol library, operation revisions, compatibility manifests and isolated checks; no stable effects.

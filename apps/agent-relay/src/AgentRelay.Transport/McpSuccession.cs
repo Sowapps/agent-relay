@@ -26,7 +26,8 @@ public static class McpSuccession
         using var fromChild = new AnonymousPipeServerStream(PipeDirection.In);
         using var toChild = new AnonymousPipeServerStream(PipeDirection.Out);
         using var child = WindowsStdioProcess.Start(image.Executable, inherited => image.Arguments.Concat(new[] { "--selection", transfer.Selection,
-            "--state-dir", transfer.StateDirectory, "--resume", path, "--control-read", inherited[1].ToString(), "--control-write", inherited[0].ToString() }),
+            "--state-dir", transfer.StateDirectory, "--resume", path, "--control-read", inherited[1].ToString(), "--control-write", inherited[0].ToString() })
+                .Concat(transfer.BindingId is { } binding ? new[] { "--connection-id", binding.ToString("D") } : []),
             [fromChild.ClientSafePipeHandle.DangerousGetHandle(), toChild.ClientSafePipeHandle.DangerousGetHandle()]);
         fromChild.DisposeLocalCopyOfClientHandle();
         toChild.DisposeLocalCopyOfClientHandle();

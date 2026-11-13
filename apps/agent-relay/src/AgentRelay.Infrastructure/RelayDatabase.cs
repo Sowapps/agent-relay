@@ -43,7 +43,13 @@ public sealed class RelayDatabase
         transaction.Commit();
     }
 
-    internal static string DatabasePath(string dataDirectory) => Path.Combine(dataDirectory, "relay.sqlite");
+    internal static string DatabasePath(string dataDirectory)
+    {
+        var path = Path.GetFullPath(Path.Combine(dataDirectory, "relay.sqlite"));
+        // Native SQLite also opens journal/WAL siblings. Explicit Windows paths avoid MAX_PATH at that boundary.
+        if (!OperatingSystem.IsWindows() || path.StartsWith(@"\\?\", StringComparison.Ordinal)) return path;
+        return path.StartsWith(@"\\", StringComparison.Ordinal) ? @"\\?\UNC\" + path[2..] : @"\\?\" + path;
+    }
 
     public SqliteConnection Open()
     {
