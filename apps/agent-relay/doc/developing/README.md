@@ -5,6 +5,8 @@
 
 ## References
 
+- [Shared stable registration migration](registration-migration.md): exact named identities, paired copied-settings recovery, explicit maintenance selection and live-activation limits.
+
 - [Codex MCP refresh qualification](codex-mcp-refresh.md): tested reconnection/catalog behavior and the owning-client control boundary.
 
 - [Complete portable update](complete-update.md): one installed version, full component activation, idempotence, interruption recovery and rollback.

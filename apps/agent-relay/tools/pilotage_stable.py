@@ -4,7 +4,6 @@ import argparse
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import hashlib
-import importlib.util
 import json
 from pathlib import Path
 import subprocess
@@ -24,27 +23,29 @@ from complete_update import startup as startup_state
 from complete_update import report_error
 from complete_update import update as complete_update
 from client_refresh import CodexControlConnector
+import codex_registration as registration
 
 
 ROOT = Path(__file__).resolve().parents[3]
-SERVER = 'agent_relay_personal_assistant'
 EXE = 'AgentRelay.Windows.exe'
 DOC_URI = 'agent-relay://docs/tools'
 STATE_FILES = ('relay.sqlite', 'relay-projects.json', 'relay-config.json', 'attention-reviews.json')
-REGISTRATION_SPEC = importlib.util.spec_from_file_location('relay_registration', Path(__file__).with_name('register-codex.py'))
-registration = importlib.util.module_from_spec(REGISTRATION_SPEC)
-REGISTRATION_SPEC.loader.exec_module(registration)
+SERVER = registration.SHARED_SERVER
+LEGACY_SERVER = registration.LEGACY_STABLE_SERVER
 
 
 def now():
     return datetime.now(timezone.utc).isoformat()
 
 
-def registration_state(config):
+def registration_state(config, server=SERVER):
     raw = ordinary_file(config).read_bytes()
-    table = tomllib.loads(raw.decode('utf-8-sig')).get('mcp_servers', {}).get(SERVER)
+    servers = tomllib.loads(raw.decode('utf-8-sig')).get('mcp_servers', {})
+    if server == SERVER and LEGACY_SERVER in servers:
+        raise ValueError('Legacy stable alias is present; prepare the shared registration migration or explicitly select --server ' + LEGACY_SERVER + ' for reviewed legacy maintenance')
+    table = servers.get(server)
     if table is None:
-        raise ValueError(f'No named connection {SERVER} in the selected configuration')
+        raise ValueError(f'No named connection {server} in the selected configuration')
     args = table['args']
     if not isinstance(args, list) or 'mcp' not in args or any(
         args.count(flag) != 1 or args.index(flag) == len(args) - 1
@@ -180,9 +181,9 @@ def stage_archive(archive, digest, version, executable):
         extract_archive(package, executable.parent, prefix='app/')
 
 
-def prepare(config, release, version, project, endpoint, thread, stable_root, legacy_scope=None, *, guard_runtime=None):
+def prepare(config, release, version, project, endpoint, thread, stable_root, legacy_scope=None, *, guard_runtime=None, server=SERVER):
     archive, digest = verified_inputs(release, version)
-    _, table, source, binding = registration_state(config)
+    _, table, source, binding = registration_state(config, server)
     if not source.is_relative_to(stable_root) and source != legacy_scope:
         raise ValueError('The named connection points outside the declared Pilotage AP scopes')
     if table.get('enabled', True) is not True:
@@ -194,7 +195,7 @@ def prepare(config, release, version, project, endpoint, thread, stable_root, le
     executable, data = locations(receipt)
     report = {'stage': 'preparing', 'startedUtc': now(), 'version': version, 'archiveSha256': digest,
               'source': str(source), 'config': str(config), 'bindingId': binding, 'projectId': project,
-              'endpointId': endpoint, 'threadId': thread, 'server': SERVER, 'modelCalls': 0,
+              'endpointId': endpoint, 'threadId': thread, 'server': server, 'modelCalls': 0,
               'challenge': uuid.uuid4().hex, 'previousRoute': route(table)}
     started = time.monotonic()
     write(receipt, report)
@@ -249,13 +250,14 @@ def switch(receipt, report, *, guard_runtime=None):
     config = Path(report['config'])
     executable, data = locations(receipt)
     source = Path(report['source'])
-    raw, table, selected, binding = registration_state(config)
+    server = report['server']
+    raw, table, selected, binding = registration_state(config, server)
     if selected != source or binding != report['bindingId'] or route(table) != report['previousRoute']:
         raise ValueError('The named connection changed after preparation')
-    fragment = f'[mcp_servers.{SERVER}]\n' + ''.join(
+    fragment = '[mcp_servers.' + json.dumps(server) + ']\n' + ''.join(
         f'{key} = {registration.toml_value(value)}\n' for key, value in candidate_table(receipt, report).items()
     )
-    desired = registration.update(raw.decode('utf-8-sig'), fragment, SERVER).encode('utf-8')
+    desired = registration.update(raw.decode('utf-8-sig'), fragment, server).encode('utf-8')
     started = time.monotonic()
     guard_runtime = guard_runtime or {'executable': str(executable)}
     with stopped_source(source, guard_runtime):
@@ -276,7 +278,7 @@ def switch(receipt, report, *, guard_runtime=None):
             registration.replace_if_unchanged(config, raw, desired)
         except (Exception, KeyboardInterrupt) as error:
             # A signal may arrive after the atomic replacement. Never stop a possibly selected host.
-            _, current, _, _ = registration_state(config)
+            _, current, _, _ = registration_state(config, server)
             if not matches_target(current, receipt, report):
                 if process is not None:
                     stop_owned(process)
@@ -301,9 +303,9 @@ def startup_transfer_plan(executable, data, previous):
                 previousData=str(previous))
 
 
-def upgrade(config, release, version, project, endpoint, thread, stable_root, *, rehearsal=False, legacy_startup=None):
+def upgrade(config, release, version, project, endpoint, thread, stable_root, *, rehearsal=False, legacy_startup=None, server=SERVER):
     """Run the shared complete update while retaining the reviewed scoped witness."""
-    raw, table, data, binding = registration_state(config)
+    raw, table, data, binding = registration_state(config, server)
     if rehearsal and not stable_root.is_relative_to(ROOT / 'local/apps/agent-relay'):
         raise ValueError('RC rehearsal requires a private developer fixture')
     if (not data.is_relative_to(stable_root) or table.get('enabled', True) is not True
@@ -333,7 +335,7 @@ def upgrade(config, release, version, project, endpoint, thread, stable_root, *,
     report = {'stage': 'preparing-upgrade', 'startedUtc': now(), 'version': version, 'archiveSha256': digest,
               'config': str(config), 'data': str(data), 'runtimeExecutable': str(executable),
               'bindingId': binding, 'projectId': project,
-              'endpointId': endpoint, 'threadId': thread, 'server': SERVER, 'modelCalls': 0,
+              'endpointId': endpoint, 'threadId': thread, 'server': server, 'modelCalls': 0,
               'challenge': uuid.uuid4().hex}
     started = time.monotonic()
     write(receipt, report)
@@ -351,7 +353,7 @@ def upgrade(config, release, version, project, endpoint, thread, stable_root, *,
             expected = dict(version=version, contractHash=candidate_contract['contractHash'],
                             connectionIds=[binding], quickstartHash=quickstart_hash)
             return CodexControlConnector(ROOT, reports, expected=expected,
-                                         diagnostic=lambda error: report_error(data, error)).refresh(SERVER, thread)
+                                         diagnostic=lambda error: report_error(data, error)).refresh(server, thread)
 
         outcome = complete_update(data, archive, digest, guard=guard, verify=lambda: probe(receipt, report), refresh=refresh)
         ports = read_json(Path(outcome['receipt']))
@@ -374,12 +376,14 @@ def chat_check(report):
     return result
 
 
-def status(config, receipt=None, report=None):
-    _, table, data, binding = registration_state(config)
+def status(config, receipt=None, report=None, server=SERVER):
+    if report is not None and report['server'] != server:
+        raise ValueError('The receipt selects another server; explicitly select its recorded --server')
+    _, table, data, binding = registration_state(config, server)
     command = Path(table['command'])
     stable_root = pilotage_stable_root(ROOT)
     location = 'managed-stable' if (data.is_relative_to(stable_root) and command.is_relative_to(stable_root)) else 'outside-managed-stable'
-    result = {'server': SERVER, 'data': str(data), 'bindingId': binding, 'command': str(command), 'location': location,
+    result = {'server': server, 'data': str(data), 'bindingId': binding, 'command': str(command), 'location': location,
               'enabled': table.get('enabled', True), 'chatConfirmed': False}
     if receipt is None or str(config) != report['config'] or data != locations(receipt, report)[1]:
         return dict(result, stage='registration-only')
@@ -402,7 +406,7 @@ def confirm(receipt, report, proof):
     started = time.monotonic()
     if proof != dict(chat_check(report), listProjectsSucceeded=True):
         raise ValueError('Same-chat proof did not match the challenge, server, project or catalog')
-    state = status(Path(report['config']), receipt, report)
+    state = status(Path(report['config']), receipt, report, server=report['server'])
     if state['stage'] not in ('awaiting-chat', 'confirmed'):
         raise ValueError('The named connection is no longer pointing at the prepared stable archive')
     report.update(stage='confirmed', chatProof=proof, updatedUtc=now(),
@@ -431,6 +435,8 @@ def main():
     status_cli = commands.add_parser('status')
     status_cli.add_argument('--config', required=True, type=Path)
     status_cli.add_argument('--receipt', type=Path)
+    for command in (prepare_cli, upgrade_cli, status_cli):
+        command.add_argument('--server', default=SERVER, help='Explicit MCP registration; no automatic legacy fallback')
     switch_cli = commands.add_parser('switch')
     switch_cli.add_argument('--receipt', required=True, type=Path)
     switch_cli.add_argument('--apply', required=True, action='store_true')
@@ -442,11 +448,11 @@ def main():
     try:
         if args.action == 'prepare':
             receipt = prepare(args.config.absolute(), args.release_directory.absolute(), args.version, args.project,
-                              args.endpoint, args.thread, stable_root, pilotage_legacy_scope(ROOT))
+                              args.endpoint, args.thread, stable_root, pilotage_legacy_scope(ROOT), server=args.server)
             result = {'stage': 'prepared', 'receipt': str(receipt)}
         elif args.action == 'upgrade':
             receipt = upgrade(args.config.absolute(), args.release_directory.absolute(), args.version, args.project,
-                              args.endpoint, args.thread, stable_root, legacy_startup=pilotage_legacy_scope(ROOT))
+                              args.endpoint, args.thread, stable_root, legacy_startup=pilotage_legacy_scope(ROOT), server=args.server)
             report = read_json(receipt)
             result = {'stage': report['stage'], 'receipt': str(receipt), 'version': report['version'],
                       'chatCheck': chat_check(report), 'startupEnabled': report['startupEnabled'],
@@ -457,7 +463,7 @@ def main():
                 raise ValueError('Select the result.json of a managed stable installation')
             report = read_json(receipt) if receipt else None
             if args.action == 'status':
-                result = status(args.config.absolute(), receipt, report)
+                result = status(args.config.absolute(), receipt, report, server=args.server)
             elif args.action == 'switch':
                 report = switch(receipt, report)
                 result = {'stage': report['stage'], 'version': report['version'], 'chatCheck': chat_check(report)}

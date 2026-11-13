@@ -92,7 +92,7 @@ For one combined archive and update qualification, use `python -B apps/agent-rel
 
 ## Pilotage AP stable operation
 
-Use `python -B apps/agent-relay/tools/pilotage_stable.py <action>`. The workflow uses the existing `agent_relay_personal_assistant` table as a scoped witness for the shared stable relay. All project connections that already point at that installation follow an in-place update with their own grants. The development MCP stays isolated. A stable rollout requires separate authorization and an idle maintenance window.
+Use `python -B apps/agent-relay/tools/pilotage_stable.py <action>`. The workflow selects shared `agent_relay` by default; `prepare`, `upgrade` and `status` accept an explicit `--server` for reviewed alternative/legacy selection. A still-present legacy stable alias is a refusal, not an automatic fallback. Receipts carry their exact selected name through switch/confirm. Use the [registration migration procedure](registration-migration.md) on copies before changing existing shared/development mappings. All project connections that already point at the selected installation retain their own grants. A stable rollout requires separate authorization and an idle maintenance window; this tool does not make the actual Codex client reloadable.
 
 | Action | Effect |
 | --- | --- |

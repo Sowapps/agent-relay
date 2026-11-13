@@ -1,0 +1,49 @@
+{
+  "lot": "IR-01",
+  "result": "passed_on_copies_only",
+  "syntheticGroups": {
+    "normal_exact_identity_no_dev_option_leak_and_idempotent_rollback": true,
+    "existing_merge_interface_and_sole_removal": true,
+    "real_process_exit_resume_and_paired_rollback": true,
+    "external_edit_preserved_during_resume_and_rollback": true,
+    "tampered_proposal_refused_before_effects": true,
+    "changed_target_selection_refused": true,
+    "ambiguous_alias_and_same_file_refused": true
+  },
+  "focusedSeconds": 0.375,
+  "actualCopiedSettings": {
+    "passed": true,
+    "originalFilesUnchangedAtDelivery": true,
+    "idempotent": true,
+    "rollbackExact": true,
+    "cliActions": [
+      "status",
+      "apply",
+      "resume",
+      "rollback"
+    ]
+  },
+  "portableMaintenanceWitness": {
+    "passed": true,
+    "selectedServer": "shared_fixture",
+    "prepareSeconds": 3.781,
+    "switchSeconds": 1.766,
+    "chatEvidenceSimulated": true
+  },
+  "dependentStandbyCheckPassed": true,
+  "modelCalls": 0,
+  "liveClientReconnected": false,
+  "stableDeployed": false,
+  "u1Ready": false,
+  "remainingBoundaries": [
+    "AR-CLIENT-09",
+    "AR-CFG-10"
+  ],
+  "finalSourceSha256": {
+    "codex_registration.py": "ebf5509ae9507dc96c07f0b3c498ea5ccd87e6c2aeefb3cd012689f87c9becc5",
+    "register-codex.py": "c1215b412c779d64a530252d4b4aedeeb9a3416ced3bf9303935867b8e89f858",
+    "registration_migration.py": "802787f50440d991a346b6ff8bccd462bf9409a57d5c3f6cc09f7566ae1f3498",
+    "pilotage_stable.py": "69423e6e95044158140cdd364ddfdbbe28c01250a53786394aa5835fd444b6bb",
+    "stable_update_wait.py": "7a34786f4c8a423ef614887fd4f1df7c0d345df7470f9a75484efb2596057a4e"
+  }
+}

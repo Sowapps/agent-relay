@@ -5,6 +5,8 @@
 
 ## Working documents
 
+- [Shared stable registration correction](2026-11-13-shared-stable-registration.md): evaluated IR-01 proposal for copied-settings migration, preserved identity and maintenance tooling; live activation remains gated.
+
 - [Complete-update target and challenged plan](2026-11-13-complete-update-target.md): client-independent application updates, full inventory, durable recovery and unresolved transport/migration gate before implementation.
 
 - [Design guide audit and correction plan](2026-11-05-design-guide-audit.md): verified ownership/layering/reference/convention gaps, current strengths and dependency-ordered proposed lots; no source implementation.

@@ -32,9 +32,9 @@ def clients(installation, data, inventory):
     return sorted(selected)
 
 
-def arm(config, release, version, project, endpoint, thread, *, stable_root=None):
+def arm(config, release, version, project, endpoint, thread, *, stable_root=None, server=workflow.SERVER):
     stable_root = stable_root or pilotage_stable_root(workflow.ROOT)
-    raw, table, data, binding = workflow.registration_state(config)
+    raw, table, data, binding = workflow.registration_state(config, server)
     if not data.is_relative_to(stable_root):
         raise ValueError('The named connection is outside the reviewed stable scope')
     workflow.expected_membership(data, project, endpoint)
@@ -47,7 +47,7 @@ def arm(config, release, version, project, endpoint, thread, *, stable_root=None
     receipt = folder / 'result.json'
     write(receipt, dict(stage='armed', config=str(config), configSha256=workflow.sha256(config),
                         release=str(release), version=version, archiveSha256=digest, project=project, endpoint=endpoint,
-                        thread=thread, data=str(data), binding=binding, transaction=prepared['id'], modelCalls=0))
+                        thread=thread, server=server, data=str(data), binding=binding, transaction=prepared['id'], modelCalls=0))
     return receipt
 
 
@@ -61,7 +61,8 @@ def run(receipt, timeout=900):
     started = time.monotonic()
     failure = None
     try:
-        if workflow.sha256(config) != report['configSha256'] or workflow.registration_state(config)[2] != data:
+        server = report.get('server', workflow.SERVER)
+        if workflow.sha256(config) != report['configSha256'] or workflow.registration_state(config, server)[2] != data:
             raise RuntimeError('The named registration changed since arming; no update was started')
         archive, digest = workflow.verified_inputs(Path(report['release']), report['version'])
         if digest != report['archiveSha256']:
@@ -79,7 +80,7 @@ def run(receipt, timeout=900):
                 raise TimeoutError('MCP clients still hold the stable installation. It was not replaced; close/reload the owning client before retrying')
             time.sleep(1)
         result = workflow.upgrade(config, Path(report['release']), report['version'], report['project'],
-                                  report['endpoint'], report['thread'], root)
+                                  report['endpoint'], report['thread'], root, server=server)
         report.update(stage='awaiting_chat', deploymentReceipt=str(result), applied=True)
     except (Exception, KeyboardInterrupt) as error:
         report.update(stage='failed', error=report_error(data, error))
@@ -101,6 +102,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='action', required=True)
     prepare = commands.add_parser('arm')
+    prepare.add_argument('--server', default=workflow.SERVER)
     for name in ('config', 'release-directory'):
         prepare.add_argument('--' + name, required=True, type=Path)
     for name in ('version', 'project', 'endpoint', 'thread'):
@@ -111,9 +113,9 @@ def main():
     data = Path.cwd()
     try:
         if args.action == 'arm':
-            data = workflow.registration_state(args.config.absolute())[2]
+            data = workflow.registration_state(args.config.absolute(), args.server)[2]
             result = dict(receipt=str(arm(args.config.absolute(), args.release_directory.absolute(), args.version,
-                                          args.project, args.endpoint, args.thread)))
+                                          args.project, args.endpoint, args.thread, server=args.server)))
         else:
             data = Path(read(args.receipt)['data'])
             result = run(args.receipt)

@@ -29,6 +29,7 @@ def rejected(action, message):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--release-directory', required=True, type=Path)
+    parser.add_argument('--server', default=workflow.SERVER)
     parser.add_argument('--baseline-directory', type=Path, help='Use an older portable verifier fixture as the source')
     parser.add_argument('--upgrade-release-directory', type=Path, help='Rehearse an in-place candidate update after cutover')
     parser.add_argument('--guard-runtime-pointer', type=Path, help='Prepared current C# runtime for rehearsing an older archive')
@@ -61,7 +62,7 @@ def main():
     config = test / 'config.toml'
     command = str(extracted / 'app' / workflow.EXE)
     arguments = ['mcp', '--data-dir', str(source), '--connection-id', fixture['connectionId']]
-    config.write_text(f'[mcp_servers.{workflow.SERVER}]\ncommand = ' + json.dumps(command)
+    config.write_text('[mcp_servers.' + json.dumps(args.server) + ']\ncommand = ' + json.dumps(command)
                       + '\nargs = ' + json.dumps(arguments) + '\nrequired = true\n'
                       + '[mcp_servers.unrelated]\ncommand = "preserved"\n', encoding='utf-8')
     initial_config = config.read_bytes()
@@ -69,9 +70,9 @@ def main():
     project, endpoint, thread = fixture['projectId'], fixture['mainId'], str(uuid.uuid4())
     version = verification['version']
     upgrade_result = None
-    rejected(lambda: workflow.prepare(config, release, version + '-rc.1', project, endpoint, thread, sandbox),
+    rejected(lambda: workflow.prepare(config, release, version + '-rc.1', project, endpoint, thread, sandbox, server=args.server),
              'stable releases only')
-    receipt = workflow.prepare(config, release, version, project, endpoint, thread, sandbox, guard_runtime=guard)
+    receipt = workflow.prepare(config, release, version, project, endpoint, thread, sandbox, guard_runtime=guard, server=args.server)
     report = read_json(receipt)
     assert report['freshMcp']['projectId'] == project and report['freshMcp']['endpointId'] == endpoint
     assert config.read_bytes() == initial_config
@@ -94,22 +95,22 @@ def main():
         with patch.object(workflow.registration, 'replace_if_unchanged', side_effect=RuntimeError('fixture conflict')):
             rejected(lambda: workflow.switch(receipt, report, guard_runtime=guard), 'fixture conflict')
         assert hosts[-1].poll() is not None and config.read_bytes() == initial_config
-        receipt = workflow.prepare(config, release, version, project, endpoint, thread, sandbox, guard_runtime=guard)
+        receipt = workflow.prepare(config, release, version, project, endpoint, thread, sandbox, guard_runtime=guard, server=args.server)
         try:
             with config.open('a', encoding='utf-8') as stream:
                 stream.write('required = false\n')
             report = workflow.switch(receipt, read_json(receipt), guard_runtime=guard)
-            raw, table, data, binding = workflow.registration_state(config)
+            raw, table, data, binding = workflow.registration_state(config, args.server)
             assert table['required'] is True and binding == fixture['connectionId']
             assert tomllib.loads(raw.decode())['mcp_servers']['unrelated'] == {'command': 'preserved', 'required': False}
             assert (data / 'relay-projects.json').read_bytes() == (source / 'relay-projects.json').read_bytes()
             assert workflow.source_fingerprint(source) == initial_source
-            assert workflow.status(config, receipt, report)['chatConfirmed'] is False
+            assert workflow.status(config, receipt, report, server=args.server)['chatConfirmed'] is False
             proof = dict(workflow.chat_check(report), listProjectsSucceeded=True)
             rejected(lambda: workflow.confirm(receipt, report, dict(proof, toolsDocSha256='old catalog')),
                      'did not match')
             assert workflow.confirm(receipt, report, proof)['stage'] == 'confirmed'
-            assert workflow.status(config, receipt, report)['chatConfirmed'] is True
+            assert workflow.status(config, receipt, report, server=args.server)['chatConfirmed'] is True
             if args.upgrade_release_directory:
                 upgrade_result = rehearse_upgrade(config, args.upgrade_release_directory.resolve(), receipt, report,
                                                   data, project, endpoint, thread, sandbox)
@@ -131,10 +132,10 @@ def rehearse_upgrade(config, release, receipt, report, data, project, endpoint, 
     try:
         # Updating the broker binary is different from swapping only its worker. Do not
         # keep an old mapped executable open and pretend that its bytes were upgraded.
-        updated = workflow.upgrade(config, release, version, project, endpoint, thread, sandbox, rehearsal=True)
+        updated = workflow.upgrade(config, release, version, project, endpoint, thread, sandbox, rehearsal=True, server=report['server'])
         upgraded = read_json(updated)
         assert upgraded['startupEnabled'] is initial_startup
-        assert workflow.registration_state(config)[2] == data and config.read_bytes() == registered
+        assert workflow.registration_state(config, report['server'])[2] == data and config.read_bytes() == registered
         assert workflow.candidate_table(updated, upgraded) == previous
         assert workflow.source_fingerprint(data)['relay-projects.json'] == before['relay-projects.json']
         runtime = {'executable': previous['command'], 'connectionId': report['bindingId']}
@@ -143,12 +144,12 @@ def rehearse_upgrade(config, release, receipt, report, data, project, endpoint, 
                 status = client.tool('get_connection_status')
                 assert status['version'] == status['brokerVersion'] == version and status['clientRefreshRequired'] is False
                 assert client.tool('list_projects')['configuration']['projects'][0]['id'] == project
-                repeated = workflow.upgrade(config, release, version, project, endpoint, thread, sandbox, rehearsal=True)
+                repeated = workflow.upgrade(config, release, version, project, endpoint, thread, sandbox, rehearsal=True, server=report['server'])
                 repeated_report = read_json(repeated)
                 assert repeated_report['hostPid'] == upgraded['hostPid']
                 assert repeated_report['runtimeExecutable'] == upgraded['runtimeExecutable']
                 assert repeated_report['deploymentTransaction'] is None
-        assert workflow.status(config, receipt, report)['stage'] == 'superseded'
+        assert workflow.status(config, receipt, report, server=report['server'])['stage'] == 'superseded'
         return str(updated)
     finally:
         if updated:

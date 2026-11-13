@@ -5,6 +5,8 @@
 
 ## Records
 
+- [IR-01 shared stable registration](2026-11-13-shared-stable-registration.md): implemented paired copied-settings migration, generic maintenance selection, measured checks and remaining live-client/writer gates.
+
 - [Initial MCP reconnection](2026-11-13-initial-mcp-reconnection.md): actual settings capture, shared/dev registration mismatch, protection baseline and recorded operator rules.
 
 - [U0 transport feasibility](2026-11-13-u0-transport-feasibility.md): successful isolated cooperative stdio succession and unresolved initial legacy-client migration.

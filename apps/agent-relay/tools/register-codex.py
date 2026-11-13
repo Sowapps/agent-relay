@@ -1,87 +1,9 @@
-"""Safely maintain only the authorized agent_relay MCP table, preserving all other effective settings."""
-import argparse
-from datetime import datetime, timezone
-import hashlib
-import json
-import os
-from pathlib import Path
-import re
-import tomllib
-import uuid
+"""Compatible registration command; behavior is owned by codex_registration."""
 
-
-def toml_value(value):
-    if isinstance(value, bool):
-        return str(value).lower()
-    if isinstance(value, (str, int, float)):
-        return json.dumps(value, ensure_ascii=False, allow_nan=False)
-    if isinstance(value, list):
-        return '[' + ', '.join(toml_value(item) for item in value) + ']'
-    if isinstance(value, dict):
-        return '{ ' + ', '.join(json.dumps(key) + ' = ' + toml_value(item) for key, item in value.items()) + ' }'
-    raise ValueError('Unsupported existing MCP value; configuration was not changed')
-
-
-def update(original, fragment, server_name='agent_relay'):
-    before = tomllib.loads(original)
-    desired = tomllib.loads(fragment)['mcp_servers'][server_name]
-    existing = before.get('mcp_servers', {}).get(server_name, {})
-    if existing and all(existing.get(key) == value for key, value in desired.items()):
-        return original
-    replacement = dict(existing, **desired)
-    table = '[mcp_servers.' + json.dumps(server_name) + ']\n' + ''.join(key + ' = ' + toml_value(value) + '\n' for key, value in replacement.items())
-    headers = list(re.finditer(r'(?m)^[ \t]*\[(?!\[)[^\r\n]+\][ \t]*(?:#[^\r\n]*)?\r?$', original))
-    spans = []
-    for index, header in enumerate(headers):
-        parsed = tomllib.loads(header.group() + '\n__relay_probe__ = 1\n')
-        if server_name in parsed.get('mcp_servers', {}):
-            spans.append((header.start(), headers[index+1].start() if index+1 < len(headers) else len(original)))
-    result = original
-    if spans:
-        for index in range(len(spans)-1, -1, -1):
-            start, end = spans[index]
-            result = result[:start] + (table + '\n' if index == 0 else '') + result[end:]
-    else:
-        result = original.rstrip() + '\n\n' + table
-    after = tomllib.loads(result)
-    actual = after.get('mcp_servers', {}).pop(server_name)
-    baseline = tomllib.loads(original)
-    baseline.setdefault('mcp_servers', {}).pop(server_name, None)
-    assert after == baseline and actual == replacement, 'Unexpected configuration change; refusing update'
-    return result
-
-
-def replace_if_unchanged(path, expected, desired):
-    """One CAS/atomic-write owner shared by registration, migration and update/rollback."""
-    path = Path(path); temporary = path.with_name('config.agent-relay-' + uuid.uuid4().hex + '.tmp')
-    try:
-        with temporary.open('xb') as stream:
-            stream.write(desired); stream.flush(); os.fsync(stream.fileno())
-        if path.read_bytes() != expected: raise RuntimeError('Configuration changed concurrently; preserve it and re-inspect')
-        os.replace(temporary, path)
-    finally:
-        if temporary.exists(): temporary.unlink()
-
-
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config', type=Path, required=True)
-    parser.add_argument('--fragment', type=Path, required=True)
-    parser.add_argument('--backup-dir', type=Path, required=True)
-    parser.add_argument('--apply', action='store_true')
-    args = parser.parse_args()
-    raw = args.config.read_bytes()
-    new = update(raw.decode('utf-8-sig'), args.fragment.read_text(encoding='utf-8-sig')).encode('utf-8')
-    args.backup_dir.mkdir(parents=True, exist_ok=True)
-    identifier = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ') + '-' + uuid.uuid4().hex[:8]
-    backup = args.backup_dir / (identifier + '.before.toml')
-    backup.write_bytes(raw)
-    proposal = args.backup_dir / (identifier + '.proposed.toml')
-    proposal.write_bytes(new)
-    if args.apply:
-        replace_if_unchanged(args.config, raw, new)
-    print(json.dumps({'applied': args.apply, 'backup': str(backup), 'beforeSha256': hashlib.sha256(raw).hexdigest(),
-                      'afterSha256': hashlib.sha256(new).hexdigest(), 'onlyAgentRelayChanged': True}))
+from codex_registration import (
+    DEVELOPMENT_SERVER, LEGACY_STABLE_SERVER, SHARED_SERVER,
+    main, replace_if_unchanged, replace_servers, toml_value, update,
+)
 
 
 if __name__ == '__main__':
