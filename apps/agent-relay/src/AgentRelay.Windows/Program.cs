@@ -11,7 +11,7 @@ internal static class Program
         try
         {
             var options = LaunchOptions.Parse(arguments);
-            if (options.Mode is "mcp" or "mcp-worker" or "mcp-contract" or "mcp-operations" or "startup-entry" or "maintenance-idle" or "wsl-maintenance" or "installation-update")
+            if (options.Mode is "mcp" or "mcp-worker" or "mcp-stable-worker" or "mcp-contract" or "mcp-operations" or "startup-entry" or "maintenance-idle" or "wsl-maintenance" or "installation-update")
             {
                 Console.InputEncoding = new System.Text.UTF8Encoding(false);
                 Console.OutputEncoding = new System.Text.UTF8Encoding(false);
@@ -93,11 +93,11 @@ internal static class Program
         if (options.Mode == "initialize") { await PortableConfiguration.InitializeAsync(options.DataDirectory, options.ConnectionId); return 0; }
         if (options.Mode == "mcp-contract") { Console.WriteLine(RelayJson.Serialize(McpIdentity.Current)); return 0; }
         if (options.Mode == "mcp-operations") { Console.WriteLine(RelayJson.Serialize(McpToolCatalog.Manifest)); return 0; }
-        if (options.Mode == "mcp-worker")
+        if (options.Mode is "mcp-worker" or "mcp-stable-worker")
         {
             var startup = string.Equals(Path.GetFileName(Environment.ProcessPath), "AgentRelay.Windows.exe", StringComparison.OrdinalIgnoreCase)
                 ? new RelayHostStartup(options.DataDirectory, () => StartupRegistration.ResolveRuntime(options.DataDirectory)) : null;
-            await McpFacade.RunAsync(options.DataDirectory, options.ConnectionId, startup);
+            await McpFacade.RunAsync(options.DataDirectory, options.ConnectionId, startup, options.Mode == "mcp-stable-worker");
             return 0;
         }
         if (options.Mode == "mcp") { await McpBroker.RunAsync(options.DataDirectory, options.ConnectionId); return 0; }

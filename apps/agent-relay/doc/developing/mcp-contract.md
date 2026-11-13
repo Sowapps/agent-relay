@@ -1,7 +1,7 @@
 # Stable MCP contracts
 
 **Utility:** identifies the fixed transport contract and the application's versioned operation registry.  
-**Usage:** consult before changing MCP schemas, adding an operation or comparing package compatibility. Generic facade integration is a separate implementation step; these declarations alone do not change a connected client's tool inventory.
+**Usage:** consult before changing MCP schemas, adding an operation or comparing package compatibility. The stable worker exposes this surface through the [minimal transport](mcp-transport.md); legacy connections retain typed tools until explicitly migrated.
 
 ## Owners and authority
 

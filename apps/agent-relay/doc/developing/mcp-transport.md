@@ -1,0 +1,28 @@
+# MCP transport lifecycle
+
+**Utility:** defines the isolated C# transport's responsibilities, process succession and failure boundary.  
+**Usage:** consult before composing launch metadata or changing worker/transport lifecycle. Installed legacy connections are not retrofitted by these source changes; installation transaction and registration activation are separate gates.
+
+## Composition and ownership
+
+`AgentRelay.Transport` references only `AgentRelay.Protocol`. It neither opens SQLite nor reads participant credentials, routes project operations or starts a model. The selected `AgentRelay.Windows mcp-stable-worker` owns those capabilities through the existing authenticated host/use cases. The legacy `mcp`/`mcp-worker` entry retains its existing typed surface until explicit migration. The [contract owner](mcp-contract.md) supplies the four generic tools; operation/documentation changes do not require a new client tool catalog.
+
+The transport accepts absolute `--selection` and `--state-dir` paths supplied by installation composition. Selection version 1 identifies the wire requirement and worker/gateway images: explicit executable, argument vector and relative-file SHA-256 inventory. File paths cannot escape the selected bundle or traverse reparse points. The updater must provide a complete inventory and immutable bundles; arbitrary MCP input never selects an executable. Hashes detect mixed/changed files, not a malicious same-user installer. Selection is read once per request; unchanged bytes reuse verification, and a new worker start rechecks its image. File hashes cannot make uncooperative in-place mutation of a selected bundle safe.
+
+The transport initializes its selected worker with retained client parameters, verifies the acknowledged wire requirement and correlates every forwarded response. One request is forwarded once. Worker loss after forwarding yields `mcp_transport_lost` with `execution=unconfirmed` and a diagnostic ID. Reading a retained result is a separate request, never automatic replay. An invalid selection or failed successor before forwarding reports `not_started`. Diagnostics contain exception metadata rather than MCP bodies or credentials; persistence failure is explicit. Worker stderr is drained in bounded chunks rather than blindly logged as payload.
+
+## Cooperative succession
+
+`McpGateway` owns the only input reader and output writer. Its bounded byte reader exports all unread bytes, avoiding both per-byte system calls and lost read-ahead. On detecting a different checked gateway image after a complete frame has been read, it retains that undispatched frame, unread bytes, initialization and instance identity. No in-flight forwarded call is transferred.
+
+`McpSuccession.TransferAsync` and `ResumeAsync` are paired operations. A private transfer record is flushed before launch. `WindowsStdioProcess` passes only duplicated standard handles and two control-pipe handles using the Windows handle whitelist. Anonymous control pipes avoid named-endpoint discovery/ACL ambiguity. The successor verifies its selected image/scope and acknowledges its PID/image over those inherited control handles. It does not read/write the client stream until commit. The parent releases its idle proxy worker, records intent and attempts the commit. Before that attempt a failed successor is stopped and the parent can refuse/resume. After the attempt the parent must exit even if acknowledgement/persistence is uncertain; resuming would risk two readers or duplicate work.
+
+Transfer records and sibling status/candidate/active markers live below the explicit state directory's `succession/`; diagnostics below `diagnostics/`. These are internal runtime data, never an implicit developer `local/` path. A pending-frame transfer file may contain the request being handed over: treat it as private retained work, not a public diagnostic/export. Its cleanup belongs to guarded runtime retention. Status files aid reconciliation but are not authority to replay work. Parent `committed` records a sent commit, while the separate active marker identifies the successor; the updater must verify actual readiness before claiming installation completion.
+
+Total loss of every stream owner still closes stdio and needs client cooperation. A cooperative success does not prove recovery from that failure, nor does it migrate an already-loaded legacy broker. An idle gateway checks selection on its next frame, so installation completeness must inspect active transport identities and drive any required maintenance handshake rather than infer activation from a file alone.
+
+## Packaging and checks
+
+Publish Transport independently for win-x64 with its own runtime lock; it must contain no Core, Infrastructure, SQLite or WebView assembly. Self-contained runtime files are required because the transport outlives an application release; copying runtime files is not a second implementation of application policy. Its exact loaded bundle is distinct from the selected worker's release.
+
+Targeted test entry points are `minimal-mcp-transport <fresh-output> <transport-bundle>` and `stable-mcp-facade <fresh-data>`. The former uses real C# gateway/worker fixture processes, checks parent exit, pending/queued frames, precommit refusal/parent recovery and no replay after lost response. The latter uses an authenticated local test host, real policy and retained data, without native agents/models. An IPC sandbox refusal is an environment result; run the isolated host scenario only with the permission needed for its own named pipe, never by changing production pipe security.

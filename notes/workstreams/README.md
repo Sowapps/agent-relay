@@ -5,6 +5,8 @@
 
 ## Records
 
+- [U2 minimal transport](2026-11-13-u2-minimal-transport.md): generic worker integration, original-stream ownership, checked process succession and isolated recovery qualification.
+
 - [U1 stable MCP contract](2026-11-13-u1-stable-contract.md): fixed protocol library, operation revisions, compatibility manifests and isolated checks; no stable effects.
 
 - [Conditional autonomous U1–U5 execution](2026-11-13-autonomous-u1-u5.md): scoped delegation, exact wait deadline, lot recovery and automatic analysis-only TR after U5.

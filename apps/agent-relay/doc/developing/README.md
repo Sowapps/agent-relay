@@ -5,6 +5,8 @@
 
 ## References
 
+- [MCP transport lifecycle](mcp-transport.md): minimal C# dependency boundary, checked selection, exclusive stream succession and recovery limits.
+
 - [Stable MCP contracts](mcp-contract.md): fixed envelopes, versioned operation routing, authority boundaries and separate compatibility identities.
 
 - [Shared stable registration migration](registration-migration.md): exact named identities, paired copied-settings recovery, explicit maintenance selection and live-activation limits.

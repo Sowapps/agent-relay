@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="src/AgentRelay.Protocol/AgentRelay.Protocol.csproj" />
+  <Project Path="src/AgentRelay.Transport/AgentRelay.Transport.csproj" />
   <Project Path="src/AgentRelay.Core/AgentRelay.Core.csproj" />
   <Project Path="src/AgentRelay.Infrastructure/AgentRelay.Infrastructure.csproj" />
   <Project Path="src/AgentRelay.Windows/AgentRelay.Windows.csproj" />

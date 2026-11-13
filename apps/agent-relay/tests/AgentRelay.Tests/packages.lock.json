@@ -51,6 +51,12 @@
       "agentrelay.protocol": {
         "type": "Project"
       },
+      "agentrelay.transport": {
+        "type": "Project",
+        "dependencies": {
+          "AgentRelay.Protocol": "[1.2.0-rc.1, )"
+        }
+      },
       "agentrelay.windows": {
         "type": "Project",
         "dependencies": {

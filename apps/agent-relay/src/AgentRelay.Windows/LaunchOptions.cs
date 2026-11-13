@@ -8,7 +8,7 @@ internal sealed record LaunchOptions(string Mode, string DataDirectory, string? 
     {
         var mode = arguments.Length > 0 && !arguments[0].StartsWith('-') ? arguments[0] : "tray";
         if (mode is "wsl-maintenance" or "installation-update") return Maintenance(arguments);
-        if (mode is not ("tray" or "startup" or "startup-enable" or "startup-disable" or "startup-status" or "startup-transfer" or "startup-entry" or "send" or "read" or "mcp" or "mcp-worker" or "mcp-contract" or "mcp-operations" or "prepare" or "submit" or "result" or "history" or "inbox" or "profiles" or "start-profile" or "admin" or "initialize" or "deployment-quiesce" or "maintenance-idle")) throw new ArgumentException("Unsupported application mode.");
+        if (mode is not ("tray" or "startup" or "startup-enable" or "startup-disable" or "startup-status" or "startup-transfer" or "startup-entry" or "send" or "read" or "mcp" or "mcp-worker" or "mcp-stable-worker" or "mcp-contract" or "mcp-operations" or "prepare" or "submit" or "result" or "history" or "inbox" or "profiles" or "start-profile" or "admin" or "initialize" or "deployment-quiesce" or "maintenance-idle")) throw new ArgumentException("Unsupported application mode.");
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
         bool show = false, onDemand = false, apply = false, allowUninitialized = false;
         for (var index = mode == "tray" && (arguments.Length == 0 || arguments[0].StartsWith('-')) ? 0 : 1; index < arguments.Length; index++)
@@ -27,7 +27,7 @@ internal sealed record LaunchOptions(string Mode, string DataDirectory, string? 
             ? Path.GetDirectoryName(Path.TrimEndingDirectorySeparator(AppContext.BaseDirectory))!
             : AgentRelay.Infrastructure.RuntimePaths.DefaultDataDirectory());
         Guid? id = values.TryGetValue("--id", out var identifier) ? Guid.Parse(identifier) : null;
-        if (mode is not ("mcp" or "mcp-worker" or "mcp-contract" or "mcp-operations")) AgentRelay.Infrastructure.RuntimePaths.DemandActive(data);
+        if (mode is not ("mcp" or "mcp-worker" or "mcp-stable-worker" or "mcp-contract" or "mcp-operations")) AgentRelay.Infrastructure.RuntimePaths.DemandActive(data);
         int? lifetime = values.TryGetValue("--lifetime-ms", out var milliseconds) ? int.Parse(milliseconds) : null;
         if (lifetime is < 500 or > 300_000) throw new ArgumentException("Test lifetime must be 500–300000 milliseconds.");
         if (mode == "send" && !values.ContainsKey("--message")) throw new ArgumentException("Send requires --message.");

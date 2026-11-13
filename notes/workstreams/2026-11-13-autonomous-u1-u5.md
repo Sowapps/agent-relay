@@ -23,4 +23,6 @@ The existing overall rollout goal has remained unfinished/blocked with historica
 
 ## Resume action
 
+U1 completed and integrated/pushed as a3248a8 on 13/11/2026 14:03:24 Europe/Paris (13:03:24 UTC). Contract/legacy checks, locked offline build, manifest agreement, absent data-path metadata export and dependency boundary passed; details in the U1 record. No stable/client effect. Account weekly observation 25% to 26%, shared and not exact task consumption. Start U2 after **14:13:24 Europe/Paris (13:13:24 UTC)** if no new steering; explicit GO may start earlier. The initial U1 timer below is historical, not a second wait. Refine U2 before coding: minimal transport/worker ownership, generic facade, same-stdio cooperative succession and failure/recovery on copies.
+
 If the timer has not elapsed, continue bounded waiting and incorporate any user steering. If elapsed without steering, create the dedicated U1 branch, record its detailed local point plan and proceed under this conditional authorization. Do not ask again for the already-delegated U1–U5 GO. Following each lot, persist a new result/deadline here before waiting or moving on.

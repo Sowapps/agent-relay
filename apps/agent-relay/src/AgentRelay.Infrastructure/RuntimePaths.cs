@@ -46,9 +46,7 @@ public static class RuntimePaths
     public static string TransferPartial(string data, Guid request) => Path.Combine(Path.GetFullPath(data), "staging", "transfers", request.ToString("D") + ".part");
     public static void DemandPrivatePath(string path)
     {
-        for (var current = new DirectoryInfo(Path.GetDirectoryName(Path.GetFullPath(path))!); current is not null; current = current.Parent)
-            if (current.Exists && (current.Attributes & FileAttributes.ReparsePoint) != 0) throw new IOException("Private relay storage cannot traverse a reparse point.");
-        if (File.Exists(path) && (File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0) throw new IOException("Private relay files cannot be reparse points.");
+        AgentRelay.Protocol.McpPrivateFiles.Demand(path);
     }
     public static void DemandActive(string data)
     {

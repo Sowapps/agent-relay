@@ -2,6 +2,10 @@ using AgentRelay.Core;
 using AgentRelay.Infrastructure;
 using System.IO.Pipes;
 
+if (args.Length == 4 && args[0] == "transport-fixture") { await McpTransportScenarios.FixtureAsync(args[1], args[2], args[3]); return; }
+if (args.Length == 3 && args[0] == "minimal-mcp-transport") { await McpTransportScenarios.RunAsync(Path.GetFullPath(args[1]), Path.GetFullPath(args[2])); return; }
+if (args.Length == 2 && args[0] == "stable-mcp-facade") { await McpStableFacadeScenarios.RunAsync(Path.GetFullPath(args[1])); return; }
+
 if (args.Length == 2 && args[0] == "stable-mcp-contract") { await McpContractScenarios.RunAsync(Path.GetFullPath(args[1])); return; }
 
 if (args.Length == 2 && args[0] == "process-fixture") { await ProcessScenarios.FixtureAsync(args[1]); return; }
