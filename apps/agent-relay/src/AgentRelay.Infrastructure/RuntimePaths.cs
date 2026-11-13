@@ -29,6 +29,15 @@ public static class RuntimePaths
     public static string ReleaseDirectory(string installation, string candidateHash) => Path.Combine(ApplicationDirectory(installation), "releases", candidateHash);
     public static string TransportSelection(string data) => Path.Combine(Path.GetFullPath(data), "transport-selection.json");
     public static string TransportStateDirectory(string data) => Path.Combine(Path.GetFullPath(data), "transport");
+    public static string TransportBootstrapDirectory(string data) => Path.Combine(Path.GetFullPath(data), "transport-bootstrap");
+    public static string TransportBootstrapExecutable(string data) => Path.Combine(TransportBootstrapDirectory(data), "AgentRelay.Transport.exe");
+    public static string TransportEntryScript(string data) => Path.Combine(Path.GetFullPath(data), "launch.ps1");
+    public static string TransportBundleDirectory(string data) => Path.Combine(TransportStateDirectory(data), "bundles");
+    public static string UpdateDirectory(string installation) => Path.Combine(ApplicationDirectory(installation), "update");
+    public static string UpdateJournal(string data) => Path.Combine(UpdateDirectory(PortableInstallationForData(data)), "current.json");
+    public static string RuntimePointer(string data) => Path.Combine(Path.GetFullPath(data), "mcp-runtime.json");
+    public static string InstallationDescriptor(string installation, string binaryDirectory) => RelayJson.Serialize(new
+    { version = 1, root = Path.GetRelativePath(Path.GetFullPath(binaryDirectory), Path.GetFullPath(installation)) });
     public static string PortableInstallationForData(string data)
     {
         var path = Path.TrimEndingDirectorySeparator(Path.GetFullPath(data));

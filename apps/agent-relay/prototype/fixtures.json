@@ -492,7 +492,7 @@
   ],
   "schemaVersion": 1,
   "sessionNameMaximumLength": 120,
-  "relayVersion": "1.1.0-rc.1",
+  "relayVersion": "1.2.0-rc.1",
   "relay": "ready",
   "startup": {
     "enabled": false
@@ -532,30 +532,33 @@
       "location": "/srv/api-catalogue"
     }
   ],
-  "mcpConnections": [
-    {
-      "instanceId": "mock-1",
-      "bindingId": "mock-binding",
-      "client": "Client de pilotage",
-      "version": "1.1.0-rc.1",
-      "brokerVersion": "1.1.0-rc.1",
-      "contractHash": "fixture-current",
-      "catalogContract": "fixture-current",
-      "generation": "simulation",
-      "state": "current",
-      "lastSeen": "2026-11-02T14:40:00+01:00"
+  "mcpConnections": [],
+  "mcpTransports": {
+    "connections": [
+      {
+        "instanceId": "10000000-0000-0000-0000-000000000001",
+        "client": "Client de démonstration",
+        "gatewayIdentity": "fictive-gateway",
+        "version": "1.2.0-rc.1",
+        "activeWorkerIdentity": "fictive-worker",
+        "state": "current"
+      }
+    ]
+  },
+  "installationUpdate": {
+    "lastCommand": {
+      "modelCalls": 0,
+      "durationMilliseconds": 87
     },
-    {
-      "instanceId": "mock-2",
-      "bindingId": "mock-secondary",
-      "client": "Client de relecture",
-      "version": "1.1.0-rc.1",
-      "brokerVersion": "1.1.0-rc.1",
-      "contractHash": "fixture-current",
-      "catalogContract": "fixture-old",
-      "generation": "simulation",
-      "state": "client_reload_required",
-      "lastSeen": "2026-11-02T14:40:00+01:00"
-    }
-  ]
+    "message": "Une connexion attend la relève de son transport. Le travail engagé est conservé.",
+    "id": "fictional-update",
+    "code": "update_transport_pending",
+    "admissionSuspended": true,
+    "pending": true,
+    "continuation": {
+      "state": "running"
+    },
+    "phase": "awaiting_transports",
+    "version": "1.2.0-rc.1"
+  }
 }

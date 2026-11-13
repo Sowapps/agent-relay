@@ -11,7 +11,7 @@ internal static class Program
         try
         {
             var options = LaunchOptions.Parse(arguments);
-            if (options.Mode is "mcp" or "mcp-worker" or "mcp-stable-worker" or "mcp-contract" or "mcp-operations" or "startup-entry" or "maintenance-idle" or "wsl-maintenance" or "installation-update")
+            if (options.Mode is "mcp" or "mcp-worker" or "mcp-stable-worker" or "mcp-contract" or "mcp-operations" or "portable-layout" or "startup-entry" or "maintenance-idle" or "wsl-maintenance" or "installation-update")
             {
                 Console.InputEncoding = new System.Text.UTF8Encoding(false);
                 Console.OutputEncoding = new System.Text.UTF8Encoding(false);
@@ -20,6 +20,12 @@ internal static class Program
         }
         catch (Exception error)
         {
+            if (arguments.FirstOrDefault() == "installation-resume")
+            {
+                var index = Array.IndexOf(arguments, "--data-dir");
+                _ = InstallationUpdateDiagnostics.Capture(index >= 0 && index + 1 < arguments.Length ? arguments[index + 1] : null, error);
+                return 1; // Detached continuation never writes into an inherited MCP stream.
+            }
             if (arguments.FirstOrDefault() == "installation-update")
             {
                 var index = Array.IndexOf(arguments, "--data-dir");
@@ -35,6 +41,7 @@ internal static class Program
 
     private static async Task<int> RunClientAsync(LaunchOptions options)
     {
+        if (options.Mode == "installation-resume") return await InstallationUpdateRecovery.ContinueAsync(options.DataDirectory, CancellationToken.None);
         if (options.Mode == "installation-update")
         {
             var request = RelayJson.Deserialize<InstallationUpdateRequest>(await Console.In.ReadToEndAsync());
@@ -52,7 +59,8 @@ internal static class Program
                     request.Candidate ?? throw new ArgumentException("Missing diagnostic identifier."))));
                 return 0;
             }
-            Console.WriteLine(RelayJson.Serialize(new InstallationUpdate(request.Installation, request.Data).Run(request.Action, request.Candidate)));
+            var update = new InstallationUpdate(request.Installation, request.Data);
+            Console.WriteLine(RelayJson.Serialize(request.Action == "start-resume" ? InstallationUpdateRecovery.Start(request.Data) ?? update.Run("status") : update.Run(request.Action, request.Candidate)));
             return 0;
         }
         if (options.Mode == "wsl-maintenance")
@@ -93,6 +101,7 @@ internal static class Program
         if (options.Mode == "initialize") { await PortableConfiguration.InitializeAsync(options.DataDirectory, options.ConnectionId); return 0; }
         if (options.Mode == "mcp-contract") { Console.WriteLine(RelayJson.Serialize(McpIdentity.Current)); return 0; }
         if (options.Mode == "mcp-operations") { Console.WriteLine(RelayJson.Serialize(McpToolCatalog.Manifest)); return 0; }
+        if (options.Mode == "portable-layout") { Console.WriteLine(RelayJson.Serialize(McpTransportInstallation.PortableLayout(RuntimePaths.InstallationRoot() ?? throw new IOException("Installation ownership missing.")))); return 0; }
         if (options.Mode is "mcp-worker" or "mcp-stable-worker")
         {
             var startup = string.Equals(Path.GetFileName(Environment.ProcessPath), "AgentRelay.Windows.exe", StringComparison.OrdinalIgnoreCase)

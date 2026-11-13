@@ -256,7 +256,7 @@ def _update(data, archive, digest, *, updater=None, verify=None, guard=None, ref
             if guard:
                 guard()
             before = state['phase']
-            state = invoke(updater, installation, data, 'rollback' if action == 'rollback' else 'resume')
+            state = invoke(updater, installation, data, 'rollback' if action == 'rollback' else 'start-resume')
             ports = dict(startupEnabled=state['activation']['startupEnabled'],
                          admissionReleased=state['activation']['admissionReleased'],
                          rollbackVerified=state['phase'] == 'rolled_back',

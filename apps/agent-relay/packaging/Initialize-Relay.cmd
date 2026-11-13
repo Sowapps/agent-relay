@@ -1,2 +1,2 @@
 @echo off
-"%~dp0app\AgentRelay.Windows.exe" initialize --data-dir "%~dp0var\apps\agent-relay\default" %*
+pwsh -NoProfile -NonInteractive -File "%~dp0tools\launch.ps1" -Root "%~dp0." -Mode Initialize %*

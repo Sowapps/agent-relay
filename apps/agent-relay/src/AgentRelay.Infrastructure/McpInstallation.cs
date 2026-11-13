@@ -26,7 +26,7 @@ public static class McpInstallation
                 if (!CreateHardLink(target, file, IntPtr.Zero)) File.Copy(file, target);
             }
             var root = RuntimePaths.InstallationRoot() ?? throw new IOException("Installation ownership is missing.");
-            File.WriteAllText(Path.Combine(stage, "installation.json"), JsonSerializer.Serialize(new { version = 1, root = Path.GetRelativePath(destination, root) }));
+            File.WriteAllText(Path.Combine(stage, "installation.json"), RuntimePaths.InstallationDescriptor(root, destination));
             File.WriteAllText(Path.Combine(stage, "mcp-launcher.ready"), "Retained native MCP broker protocol1. Keep while client registrations refer to it.\n");
             DemandOwned(data, stage); DemandOwned(data, destination);
             // Windows can briefly lock newly linked runtime files (scanner/indexer). Retry only

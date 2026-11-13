@@ -18,8 +18,16 @@ if($Action -in @('Lock','Package')){
     Import-Module (Join-Path $PSScriptRoot 'AppCommands.psm1') -Force
     $context=New-AppCommandContext $root (Join-Path $app 'app.psd1')
     $releaseProperties=@('-p:NuGetLockFilePath=packages.win-x64.lock.json','-p:RuntimeFrameworkVersion=10.0.14','-p:TargetLatestRuntimePatch=false')
+    $offlineArguments=@()
+    if($Offline){
+        $configuration=Join-Path $context.CacheRoot 'offline.NuGet.Config'
+        '<configuration><packageSources><clear /></packageSources></configuration>' | Set-Content -LiteralPath $configuration -Encoding utf8
+        $offlineArguments=@('--configfile',$configuration,'-p:NuGetAudit=false')
+    }
     if($Action -eq 'Lock'){
-        Invoke-AppDotnet $context (@('restore','src/AgentRelay.Windows/AgentRelay.Windows.csproj','-r','win-x64','-p:SelfContained=true','--force-evaluate','-p:RestoreLockedMode=false')+$releaseProperties)
+        foreach($project in @('src/AgentRelay.Windows/AgentRelay.Windows.csproj','src/AgentRelay.Transport/AgentRelay.Transport.csproj')){
+            Invoke-AppDotnet $context (@('restore',$project,'-r','win-x64','-p:SelfContained=true','--force-evaluate','-p:RestoreLockedMode=false','-m:1')+$releaseProperties+$offlineArguments)
+        }
         Write-Output 'Review and commit packages.win-x64.lock.json for every project before Package.'
         return
     }
@@ -27,12 +35,9 @@ if($Action -in @('Lock','Package')){
     $payload=Join-Path $Directory 'payload';$binary=Join-Path $payload 'app'
     New-Item -ItemType Directory -Path $binary -Force | Out-Null
     $publish=@('publish','src/AgentRelay.Windows/AgentRelay.Windows.csproj','-c','Release','-r','win-x64','--self-contained','true','--disable-build-servers','-p:RestoreLockedMode=true','-p:UseSharedCompilation=false','-p:DebugType=None','-p:DebugSymbols=false','-o',$binary)+$releaseProperties
-    if($Offline){
-        $configuration=Join-Path $Directory 'offline.NuGet.Config'
-        '<configuration><packageSources><clear /></packageSources></configuration>' | Set-Content -LiteralPath $configuration -Encoding utf8
-        $publish+=@('--configfile',$configuration,'-p:NuGetAudit=false')
-    }
-    Invoke-AppDotnet $context $publish
+    Invoke-AppDotnet $context ($publish+$offlineArguments)
+    $transport=Join-Path $payload 'transport'
+    Invoke-AppDotnet $context (@('publish','src/AgentRelay.Transport/AgentRelay.Transport.csproj','-c','Release','-r','win-x64','--self-contained','true','--disable-build-servers','-p:RestoreLockedMode=true','-p:UseSharedCompilation=false','-p:DebugType=None','-p:DebugSymbols=false','-p:PublishSingleFile=true','-p:IncludeNativeLibrariesForSelfExtract=true','-p:EnableSingleFileAnalyzer=false','-m:1','-o',$transport)+$releaseProperties+$offlineArguments)
     Copy-Item -Path (Join-Path $app 'packaging/*') -Destination $payload -Recurse
     New-Item -ItemType Directory -Path (Join-Path $payload 'tools') -Force | Out-Null
     Copy-Item -LiteralPath (Join-Path $app 'doc/using/examples/new-project-request.ps1') -Destination (Join-Path $payload 'tools/new-project-request.ps1')

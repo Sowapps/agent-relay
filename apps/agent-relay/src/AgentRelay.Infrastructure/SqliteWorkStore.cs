@@ -29,9 +29,11 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
             throw new RelayException("storage_unavailable", "The selected relay database path is not a file.", false);
         using var connection = new RelayDatabase(dataDirectory, readOnly: true).Open();
         using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT id FROM work WHERE ({ActiveState}{(includeUncertain ? " OR json_extract(payload,'$.state')='unknown'" : "")}) LIMIT 1";
-        if (await command.ExecuteScalarAsync(token) is { } id)
-            throw new RelayException("busy", includeUncertain ? "Active or uncertain durable work blocks update: " + id : "Active durable work exists; finish it before maintenance.", false);
+        command.CommandText = $"SELECT id,json_extract(payload,'$.state') FROM work WHERE ({ActiveState}{(includeUncertain ? " OR json_extract(payload,'$.state')='unknown'" : "")}) LIMIT 1";
+        using var reader = await command.ExecuteReaderAsync(token);
+        if (await reader.ReadAsync(token))
+            throw new RelayException(includeUncertain && reader.GetString(1) == "unknown" ? "update_uncertain_work" : "busy",
+                includeUncertain ? "Active or uncertain durable work blocks update: " + reader.GetString(0) : "Active durable work exists; finish it before maintenance.", false);
     }
 
     public async Task ProgressAsync(Guid id, WorkProgress progress, CancellationToken token)

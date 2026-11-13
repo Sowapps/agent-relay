@@ -17,6 +17,8 @@ internal static class SelectedUpdateScenarios
         var update = new InstallationUpdate(nominal.Installation, nominal.Data, runtime);
         var prepared = update.Run("prepare", nominal.Candidate);
         Check(prepared.Schema == 2 && update.Run("prepare", nominal.Candidate).Id == prepared.Id, "Idempotent selected preparation");
+        Check(InstallationUpdateRecovery.Start(nominal.Data, authorize: false) is null && !File.Exists(Path.Combine(nominal.Data, "promotion.lock")),
+            "A prepared artifact silently authorized deployment through recovery");
         var store = new SqliteWorkStore(new RelayDatabase(nominal.Data));
         var work = new WorkRecord(new(Guid.NewGuid(), "fixture", "command", ""), "pending", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         store.SaveAsync(work, CancellationToken.None).GetAwaiter().GetResult();
@@ -60,6 +62,17 @@ internal static class SelectedUpdateScenarios
 
         var recovery = Seed(Path.Combine(root, "rollback"));
         var broken = new Runtime(recovery.Root) { FailCandidate = true };
+        var retired = Seed(Path.Combine(root, "retired-transport"));
+        var retiredOld = McpProcessSelections.Read(RuntimePaths.TransportSelection(retired.Data));
+        var retiredId = Guid.NewGuid();
+        var retiredPresence = new McpTransportPresence(retiredId, Environment.ProcessId, null, "fixture", McpProcessSelections.Identity(retiredOld.Gateway), null,
+            McpProcessSelections.Identity(retiredOld.Worker), "current", DateTimeOffset.UtcNow);
+        McpTransportPresences.Write(RuntimePaths.TransportStateDirectory(retired.Data), retiredPresence);
+        var retireUpdate = new InstallationUpdate(retired.Installation, retired.Data, new Runtime(retired.Root));
+        retireUpdate.Run("prepare", retired.Candidate);
+        Check(retireUpdate.Run("resume").Phase == "awaiting_transports", "Live old transport bypassed acknowledgement");
+        McpTransportPresences.Write(RuntimePaths.TransportStateDirectory(retired.Data), retiredPresence with { State = "closed" });
+        Check(retireUpdate.Run("resume").Phase == "complete", "A safely closed transport blocked completion forever");
         var rollback = new InstallationUpdate(recovery.Installation, recovery.Data, broken);
         var pointerBefore = File.ReadAllText(Path.Combine(recovery.Data, "mcp-runtime.json"));
         rollback.Run("prepare", recovery.Candidate);
@@ -191,5 +204,7 @@ internal static class SelectedUpdateScenarios
             if (FailCandidate && version == "0.0.2-rc.1") throw new IOException("candidate readiness fixture");
         }
         public bool StartupEnabled(string executable) => true;
+        public InstallationStartupSnapshot CaptureStartup(string executable) => new(true, "{}");
+        public void ReconcileStartup(string executable, InstallationStartupSnapshot before, bool restore) { }
     }
 }

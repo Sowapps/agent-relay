@@ -1,2 +1,2 @@
 @echo off
-"%~dp0app\AgentRelay.Windows.exe" tray --data-dir "%~dp0var\apps\agent-relay\default" --show
+pwsh -NoProfile -NonInteractive -File "%~dp0tools\launch.ps1" -Root "%~dp0." -Show

@@ -6,6 +6,7 @@ using AgentRelay.Core;
 namespace AgentRelay.Infrastructure;
 
 public sealed record InstallationHost(int ProcessId, DateTimeOffset StartedAt, string Executable);
+public sealed record InstallationStartupSnapshot(bool Enabled, string Capture);
 
 /// <summary>OS/host adapter for the existing transaction. Decisions and durable phases remain in InstallationUpdate.</summary>
 public interface IInstallationRuntime
@@ -16,6 +17,8 @@ public interface IInstallationRuntime
     void Start(string executable);
     void DemandReady(string executable, string version, string contractHash);
     bool StartupEnabled(string executable);
+    InstallationStartupSnapshot CaptureStartup(string executable);
+    void ReconcileStartup(string executable, InstallationStartupSnapshot before, bool restore);
 }
 
 internal sealed class InstallationRuntime(string data) : IInstallationRuntime
@@ -94,17 +97,38 @@ internal sealed class InstallationRuntime(string data) : IInstallationRuntime
 
     public bool StartupEnabled(string executable)
     {
-        var start = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardOutput = true, RedirectStandardError = true };
-        foreach (var argument in new[] { "startup-status", "--data-dir", data }) start.ArgumentList.Add(argument);
-        using var process = Process.Start(start) ?? throw new IOException("Startup status command could not start.");
-        var output = process.StandardOutput.ReadToEndAsync();
-        var errors = process.StandardError.ReadToEndAsync();
-        process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
-        if (process.ExitCode != 0) throw new IOException("Startup preference could not be inspected: " + errors.GetAwaiter().GetResult());
-        using var document = JsonDocument.Parse(output.GetAwaiter().GetResult());
-        if (document.RootElement.TryGetProperty("error", out var error) && error.ValueKind != JsonValueKind.Null)
+        var value = Command(executable, "startup-status");
+        if (value.TryGetProperty("error", out var error) && error.ValueKind != JsonValueKind.Null)
             throw new IOException("Startup preference inspection reported an error.");
-        return document.RootElement.GetProperty("enabled").GetBoolean();
+        return value.GetProperty("enabled").GetBoolean();
+    }
+
+    public InstallationStartupSnapshot CaptureStartup(string executable)
+    {
+        var capture = Command(executable, "startup-entry");
+        return new(capture.GetProperty("entry").ValueKind != JsonValueKind.Null, capture.GetRawText());
+    }
+
+    public void ReconcileStartup(string executable, InstallationStartupSnapshot before, bool restore)
+    {
+        var current = Command(executable, "startup-entry");
+        using var document = JsonDocument.Parse(before.Capture);
+        var entry = current.GetProperty("entry");
+        var desired = restore ? document.RootElement.GetProperty("entry") : before.Enabled ? current.GetProperty("enabledEntry") : JsonSerializer.SerializeToElement<object?>(null);
+        if (JsonElement.DeepEquals(entry, desired)) return;
+        var previous = document.RootElement.GetProperty("entry");
+        if (!JsonElement.DeepEquals(entry, previous) && !(restore && JsonElement.DeepEquals(entry, current.GetProperty("enabledEntry"))))
+            throw new IOException("The startup entry changed outside this transaction; no registry value was overwritten.");
+        var action = desired.ValueKind == JsonValueKind.Null ? "disable" : restore ? "restore" : "enable";
+        Command(executable, "startup-entry", RelayJson.Serialize(new { expected = entry, action, entry = action == "restore" ? desired : JsonSerializer.SerializeToElement<object?>(null) }));
+    }
+
+    private JsonElement Command(string executable, string mode, string? input = null)
+    {
+        var arguments = new List<string> { mode, "--data-dir", data };
+        if (input is not null) arguments.Add("--apply");
+        var result = LocalProcess.RunAsync(executable, arguments, input, TimeSpan.FromSeconds(12), CancellationToken.None).GetAwaiter().GetResult();
+        if (result.ExitCode != 0) throw new IOException("Owned startup command failed: " + result.Error);
+        return JsonSerializer.Deserialize<JsonElement>(result.Output);
     }
 }
