@@ -5,6 +5,8 @@
 
 ## Records
 
+- [Owning-client refresh continuation](2026-11-13-owning-client-refresh.md): actual stdio boundary and retained update-adapter failure diagnostics.
+
 - [Codex refresh qualification](2026-11-12-codex-refresh-qualification.md): recovered proofs, repeated installed-client isolation test and actual desktop capability boundary.
 
 - [Stable 1.1.2 preparation and complete rollout](2026-11-12-stable-1.1.2.md): exact archive qualification, in-place managed-component update and actual client readiness.

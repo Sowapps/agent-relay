@@ -21,6 +21,7 @@ from release_artifact import (
 )
 from runtime_layout import app_var, pilotage_legacy_scope, pilotage_stable_root
 from complete_update import startup as startup_state
+from complete_update import report_error
 from complete_update import update as complete_update
 from client_refresh import CodexControlConnector
 
@@ -349,7 +350,8 @@ def upgrade(config, release, version, project, endpoint, thread, stable_root, *,
         def refresh(reports):
             expected = dict(version=version, contractHash=candidate_contract['contractHash'],
                             connectionIds=[binding], quickstartHash=quickstart_hash)
-            return CodexControlConnector(ROOT, reports, expected=expected).refresh(SERVER, thread)
+            return CodexControlConnector(ROOT, reports, expected=expected,
+                                         diagnostic=lambda error: report_error(data, error)).refresh(SERVER, thread)
 
         outcome = complete_update(data, archive, digest, guard=guard, verify=lambda: probe(receipt, report), refresh=refresh)
         ports = read_json(Path(outcome['receipt']))
