@@ -27,10 +27,7 @@ internal static class Program
             {
                 if (values.ContainsKey("--resume") || binding is not null) throw new ArgumentException("Host launch cannot carry an MCP binding or transfer state.");
                 var host = McpProcessSelections.Read(selection).Host ?? throw new IOException("Selected installation has no declared host launch.");
-                var start = new System.Diagnostics.ProcessStartInfo(host.Executable) { UseShellExecute = false, CreateNoWindow = true, WindowStyle = System.Diagnostics.ProcessWindowStyle.Hidden };
-                foreach (var argument in host.Arguments) start.ArgumentList.Add(argument);
-                if (show) start.ArgumentList.Add("--show");
-                using var process = System.Diagnostics.Process.Start(start) ?? throw new IOException("Selected host could not start.");
+                using var process = WindowsStdioProcess.StartDetached(host.Executable, show ? host.Arguments.Concat(["--show"]) : host.Arguments);
                 return 0;
             }
             McpTransferState? transfer = null;

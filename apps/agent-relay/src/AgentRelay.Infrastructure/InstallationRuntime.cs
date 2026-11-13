@@ -56,6 +56,18 @@ internal sealed class InstallationRuntime(string data) : IInstallationRuntime
         using var process = DemandProcess(host);
         process.Kill();
         process.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(10)).GetAwaiter().GetResult();
+        // Process exit acknowledgement is not the storage-ownership readiness contract.
+        var release = Stopwatch.StartNew();
+        while (true)
+        {
+            try { using var ownership = RelayLocation.OpenHostOwnership(data); return; }
+            catch (IOException error) when (RelayLocation.IsSharingConflict(error))
+            {
+                if (release.Elapsed >= TimeSpan.FromSeconds(5))
+                    throw new RelayException("update_host_ownership_pending", "The stopped host has not released data ownership. No snapshot or publication was attempted; inspect the retained transaction.", false);
+                Thread.Sleep(25);
+            }
+        }
     }
 
     private static Process DemandProcess(InstallationHost host)
@@ -72,9 +84,7 @@ internal sealed class InstallationRuntime(string data) : IInstallationRuntime
 
     public void Start(string executable)
     {
-        var start = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden };
-        foreach (var argument in new[] { "tray", "--data-dir", data }) start.ArgumentList.Add(argument);
-        using var process = Process.Start(start) ?? throw new IOException("Selected host could not start.");
+        using var process = AgentRelay.Protocol.WindowsStdioProcess.StartDetached(executable, ["tray", "--data-dir", data]);
     }
 
     public void DemandReady(string executable, string version, string contractHash)
