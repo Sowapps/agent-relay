@@ -34,7 +34,7 @@ if($Action -in @('Lock','Package')){
     $Directory=Join-Path $root ('local/apps/agent-relay/releases/'+$tag+'/'+[guid]::NewGuid().ToString('N'))
     $payload=Join-Path $Directory 'payload';$binary=Join-Path $payload 'app'
     New-Item -ItemType Directory -Path $binary -Force | Out-Null
-    $publish=@('publish','src/AgentRelay.Windows/AgentRelay.Windows.csproj','-c','Release','-r','win-x64','--self-contained','true','--disable-build-servers','-p:RestoreLockedMode=true','-p:UseSharedCompilation=false','-p:DebugType=None','-p:DebugSymbols=false','-o',$binary)+$releaseProperties
+    $publish=@('publish','src/AgentRelay.Windows/AgentRelay.Windows.csproj','-c','Release','-r','win-x64','--self-contained','true','--disable-build-servers','-p:RestoreLockedMode=true','-p:UseSharedCompilation=false','-p:DebugType=None','-p:DebugSymbols=false','-m:1','-o',$binary)+$releaseProperties
     Invoke-AppDotnet $context ($publish+$offlineArguments)
     $transport=Join-Path $payload 'transport'
     Invoke-AppDotnet $context (@('publish','src/AgentRelay.Transport/AgentRelay.Transport.csproj','-c','Release','-r','win-x64','--self-contained','true','--disable-build-servers','-p:RestoreLockedMode=true','-p:UseSharedCompilation=false','-p:DebugType=None','-p:DebugSymbols=false','-p:PublishSingleFile=true','-p:IncludeNativeLibrariesForSelfExtract=true','-p:EnableSingleFileAnalyzer=false','-m:1','-o',$transport)+$releaseProperties+$offlineArguments)

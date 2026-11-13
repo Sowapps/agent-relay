@@ -32,6 +32,8 @@ public static class McpTransportInstallation
             if (Path.IsPathFullyQualified(configured) && File.Exists(configured) && Path.GetFileName(configured).Equals("pwsh.exe", StringComparison.OrdinalIgnoreCase)) return configured;
             throw new IOException("AGENT_RELAY_PWSH must name the installed PowerShell 7 executable.");
         }
+        var installed = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles), "PowerShell", "7", "pwsh.exe");
+        if (File.Exists(installed)) return installed;
         foreach (var folder in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(Path.PathSeparator))
             if (Path.IsPathFullyQualified(folder) && File.Exists(Path.Combine(folder, "pwsh.exe"))) return Path.GetFullPath(Path.Combine(folder, "pwsh.exe"));
         throw new RelayException("launch_prerequisite_missing", "PowerShell 7 must be available on PATH for this installation's launch entry.", false);

@@ -137,15 +137,17 @@ def verify_mcp(extracted, command, project_ids, version, environment, errors):
 
 
 def wait_for_host(host, executable, data, invoke):
+    last_error = None
     for _ in range(30):
         if host.poll() is not None:
             raise RuntimeError('Extracted host exited early')
         try:
             json.loads(invoke(executable, 'profiles', '--data-dir', data))
             return
-        except RuntimeError:
+        except RuntimeError as error:
+            last_error = error
             time.sleep(.2)
-    raise RuntimeError('Extracted host unavailable')
+    raise RuntimeError('Extracted host unavailable; last diagnostic: ' + str(last_error)) from last_error
 
 
 def verify_runtime(directory, extracted, version):

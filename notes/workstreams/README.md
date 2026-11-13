@@ -155,3 +155,5 @@
 - [MCP connection refresh audit](2026-11-01-mcp-refresh-audit.md)
 
 - [Live MCP correction](2026-11-02-mcp-live-update.md)
+
+- [U5 package qualification](2026-11-13-u5-package-qualification.md).

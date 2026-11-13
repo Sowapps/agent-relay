@@ -40,6 +40,8 @@ public sealed partial class InstallationUpdate
 
     public InstallationUpdateState Run(string action, string? candidate = null)
     {
+        // Publication is atomic; passive status must remain readable while the writer holds its lock.
+        if (action == "status") return Read();
         Directory.CreateDirectory(directory);
         using var ownership = new FileStream(Path.Combine(directory, "update.lock"), FileMode.OpenOrCreate,
             FileAccess.ReadWrite, FileShare.None);

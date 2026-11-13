@@ -3,10 +3,10 @@ using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Text;
 
-namespace AgentRelay.Transport;
+namespace AgentRelay.Protocol;
 
 /// <summary>Pass only duplicated standard handles; the successor must await the succession commit.</summary>
-internal static class WindowsStdioProcess
+public static class WindowsStdioProcess
 {
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
     private struct StartupInfo
@@ -33,7 +33,17 @@ internal static class WindowsStdioProcess
     private static extern bool CreateProcessW(string application, StringBuilder command, IntPtr processAttributes, IntPtr threadAttributes,
         bool inherit, uint flags, IntPtr environment, string directory, ref StartupInfoEx startup, out ProcessInfo process);
 
-    public static Process Start(string executable, Func<IReadOnlyList<IntPtr>, IEnumerable<string>> arguments, IReadOnlyList<IntPtr> controlHandles)
+    /// <summary>Launch independently of the caller's redirected MCP/CLI channels.</summary>
+    /// <seealso cref="Start"/>
+    public static Process StartDetached(string executable, IEnumerable<string> arguments)
+    {
+        using var sink = File.OpenHandle(@"\\.\NUL", FileMode.Open, FileAccess.ReadWrite, FileShare.ReadWrite);
+        var handle = sink.DangerousGetHandle();
+        return Start(executable, _ => arguments, [], [handle, handle, handle]);
+    }
+
+    public static Process Start(string executable, Func<IReadOnlyList<IntPtr>, IEnumerable<string>> arguments,
+        IReadOnlyList<IntPtr> controlHandles, IReadOnlyList<IntPtr>? standardHandles = null)
     {
         if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException("Windows stdio succession requires its Windows adapter.");
         var handles = new IntPtr[3 + controlHandles.Count];
@@ -42,7 +52,7 @@ internal static class WindowsStdioProcess
         try
         {
             for (var index = 0; index < handles.Length; index++)
-                if (!DuplicateHandle(GetCurrentProcess(), index < 3 ? GetStdHandle(-10 - index) : controlHandles[index - 3], GetCurrentProcess(), out handles[index], 0, true, 2))
+                if (!DuplicateHandle(GetCurrentProcess(), index < 3 ? standardHandles?[index] ?? GetStdHandle(-10 - index) : controlHandles[index - 3], GetCurrentProcess(), out handles[index], 0, true, 2))
                     throw new Win32Exception(Marshal.GetLastWin32Error());
             var size = IntPtr.Zero;
             InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref size);

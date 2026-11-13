@@ -34,14 +34,12 @@ public static class InstallationUpdateRecovery
         if (state.Schema != 2) throw new RelayException("update_legacy_recovery_required", "The retained legacy transaction needs the relay maintainer's explicit recovery. No project work was admitted.", false);
         if (state.Phase == "preparing") throw new RelayException("update_candidate_incomplete", "The retained candidate stage is incomplete. Ask the relay maintainer to resume preparation from its reviewed artifact.", false);
         var runner = Runner(data, state.Id);
-        if (authorize) state = update.Run("authorize");
+        if (authorize && state.Activation?.ResumeAuthorized != true) state = update.Run("authorize");
         var directory = RuntimePaths.UpdateDirectory(root);
         using var ownership = new FileStream(Path.Combine(directory, "resume-launch.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
         var presence = Presence(data);
         if (presence is not null && presence.TransactionId == state.Id && Alive(presence, runner.Executable)) return state;
-        var start = new ProcessStartInfo(runner.Executable) { UseShellExecute = false, CreateNoWindow = true, WindowStyle = ProcessWindowStyle.Hidden };
-        start.ArgumentList.Add("installation-resume"); start.ArgumentList.Add("--data-dir"); start.ArgumentList.Add(data);
-        using var process = Process.Start(start) ?? throw new IOException("The retained recovery process could not start.");
+        using var process = AgentRelay.Protocol.WindowsStdioProcess.StartDetached(runner.Executable, ["installation-resume", "--data-dir", data]);
         WritePresence(data, new(state.Id, process.Id, new(process.StartTime.ToUniversalTime()), "starting", DateTimeOffset.UtcNow));
         return state;
     }
