@@ -5,6 +5,8 @@
 
 ## Records
 
+- [Target-first point planning](2026-11-13-target-first-point-planning.md): challenged target before migration lots, refined sequential point plans and proportionate proof.
+
 - [Procedure improvement loop](2026-11-09-procedure-improvement-loop.md): reuse operating procedures, track recurrences and improve the process.
 - [Single knowledge owner](2026-11-05-single-knowledge-owner.md): shared rules have one authority across all levels.
 - [Responsibility layering](2026-11-05-responsibility-layering.md): coherent services and precise strategies without service proliferation.

@@ -21,6 +21,12 @@ The handoff checkpoint contains authorization/limits, objective, branch and last
 Before coding, identify the nominal scenario, important failure, ownership boundaries and structural prerequisites.
 Compare meaningful alternatives, make routine technical choices and record their reasons. Ask the operator about product choices or authorization, not unfamiliar technical details.
 
+For a significant workstream, define the target first: required behavior, responsibility boundaries, contracts, invariants, failure/recovery guarantees and explicit limitations. Do not constrain it to preserving a flawed existing decomposition. Compare meaningful alternatives and challenge the target against requirements, existing rules, security, compatibility, concurrency, interruption, deployment and maintenance. Revise until another focused review finds no new concrete contradiction; record review passes and unresolved items rather than claiming exhaustive certainty. Only then derive the gap map and intermediate lots (evidence `2026-11-13-target-first-point-planning`).
+
+Immediately before each point, refine its local execution plan using the actual checkpoint: owning code and complementary operations, exact changes and exclusions, prerequisites, effects, error/recovery path, useful verification, completion criterion and next point. Treat points sequentially. A discovery that invalidates the target returns to design; do not accumulate ad hoc bypasses. Preserve the updated plan and result before advancing. This supplements the existing authorization, branch, tracking and delivery processes; it does not create a separate competing workflow.
+
+Use analysis to choose the necessary proofs. Reuse retained valid results, and rerun a test only when changed code, environment, a failure or an unresolved hypothesis justifies it. Prefer one decisive qualification of a structural uncertainty to repeated broad regression runs. A test cannot compensate for a contradictory target or silently authorize a product compromise.
+
 For a significant design choice, use a dated application notes/decisions record: context, status, decision, alternatives, consequences, current owner and supersession. Reference operator evidence instead of copying it. Keep proposals separate from accepted decisions and link current docs to the owner only where useful.
 
 Qualify unfamiliar infrastructure with an isolated example in persistent local storage. A build cannot prove interactive debugging or an external integration.

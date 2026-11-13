@@ -5,6 +5,8 @@
 
 ## Understand before dividing
 
+For a significant change, establish the target before deriving intermediate migration steps. Use the [workflow's target and point-planning method](workflow.md#authorization-and-design) to challenge it and refine each point immediately before execution. Existing decomposition is evidence to inspect, not a constraint requiring preservation when it prevents the intended behavior.
+
 Start with the user capability, its inputs, effects, failures and authority. Identify the rules that must remain true, their existing owners and the consumers affected by a change. Select a design because it solves those needs, not because a pattern or framework is available. Record significant alternatives and consequences before implementation. A small reversible change needs proportionately little design.
 
 Services own coherent capabilities at their level of abstraction. A session service may create, inspect, reopen and close sessions; single responsibility does not mean one method or primitive operation. A strategy owns a precise variation, such as one publication algorithm. A class should have a coherent reason to change, rather than an arbitrary size limit (evidence `2026-11-05-responsibility-layering`).
