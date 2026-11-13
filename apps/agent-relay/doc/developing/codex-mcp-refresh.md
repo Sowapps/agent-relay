@@ -13,6 +13,7 @@
 | Cooperative process succession with inherited stdio | Original fixture exited; its successor answered on the same loaded isolated Codex thread without reload and with unchanged tool schema. | Synthetic Windows/Python fixture only; does not prove C# release handover, arbitrary crash recovery or migration of the existing non-cooperative broker. |
 | Agent Relay close action | Closes the admitted connection safely; does not itself request a Codex catalog reload. | Broker lifecycle qualification is distinct from client integration. |
 | Owning desktop control adapter | Reports `unsupported` when its supported control socket is absent. | An isolated backend accepting reload does not make the existing desktop backend reachable. |
+| MCP settings toggle followed by the appeared Restart action | Operator-observed Codex error/restarting loop; recovery required a full client exit/relaunch. | Failed no-client-restart qualification. Do not recommend repeating this action as a safe server-only reconnect; the local backend's identity-not-ready failure is retained in the incident record. |
 
 These are measured outcomes, not a generic statement that refresh is “not guaranteed”. Both the original and repeat qualification, exact client versions, outputs and limitations are retained in the dated qualification record. Changes to the Codex version or control interface require a scoped requalification.
 

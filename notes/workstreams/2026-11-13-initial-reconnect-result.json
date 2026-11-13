@@ -1,0 +1,19 @@
+{
+  "outcome": "failed_no_client_restart_qualification",
+  "operatorRecovery": "full Codex exit and relaunch",
+  "observedBackendFailure": "Hosted AppServerManager identity is not ready",
+  "underlyingRootCauseEstablished": false,
+  "u1Ready": false,
+  "relayVersionAfterManualRestart": "1.1.1",
+  "scopedProjectReadAfterManualRestart": true,
+  "sameBinding": true,
+  "sameDataScope": true,
+  "logicalTablesUnchanged": true,
+  "logicalTableCount": 9,
+  "changedProtectedFileCount": 0,
+  "protectedFileCount": 9,
+  "codexConfigurationBytesUnchanged": false,
+  "unrelatedConfigurationEqualityEstablished": false,
+  "agentModifiedStableDataOrGrants": false,
+  "furtherLiveRetryPerformed": false
+}

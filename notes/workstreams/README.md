@@ -5,6 +5,8 @@
 
 ## Records
 
+- [Initial MCP reconnection](2026-11-13-initial-mcp-reconnection.md): actual settings capture, shared/dev registration mismatch, protection baseline and recorded operator rules.
+
 - [U0 transport feasibility](2026-11-13-u0-transport-feasibility.md): successful isolated cooperative stdio succession and unresolved initial legacy-client migration.
 
 - [Complete-update target design](2026-11-13-update-target-design.md): target-first architecture, challenge passes, dependency-ordered lots and first-point preparation; no implementation.

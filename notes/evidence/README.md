@@ -5,6 +5,8 @@
 
 ## Records
 
+- [TR analysis-only shortcut](2026-11-13-tr-review-shortcut.md): scope discovery, evaluated lots, separate implementation approval and durable follow-through.
+
 - [Target-first point planning](2026-11-13-target-first-point-planning.md): challenged target before migration lots, refined sequential point plans and proportionate proof.
 
 - [Procedure improvement loop](2026-11-09-procedure-improvement-loop.md): reuse operating procedures, track recurrences and improve the process.

@@ -5,6 +5,8 @@
 
 ## References
 
+- [On-demand technical review (TR)](technical-review.md): bounded discovery, evaluated lots, analysis-only authority and follow-through.
+
 - [Design guide](design-guide.md): responsibility levels, knowledge ownership, dependencies and maintainable evolution.
 
 - [Workspace layout](workspace-layout.md): multi-application ownership.
