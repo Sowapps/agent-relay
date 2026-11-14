@@ -44,3 +44,7 @@ On contention, return a clear in-progress/conflict outcome and retain the origin
 Pause/save uses Point de reprise: État / Sauvegarde / Reprise. Dated records own checkpoints; current guides own procedures. Actual stable activation, code implementation of this TR, publication and messaging to AP remain gated by their respective permissions. This report and its index/checkpoint are local only, not committed or pushed.
 
 TR completed 13/11/2026 after U5 integration. No application change/test/model/WSL/reload/registry/deployment performed during TR. Review used retained proof and targeted source inspection; source state remains cbd0b21. Next action is operator selection/GO for named full lots, not autonomous work past U5.
+
+## 14/11/2026 disposition
+
+Operator explicitly approved TR-U-01–TR-U-04 for local implementation/testing/source delivery, excluding stable. All four are completed and qualified as bounded in [the implementation record](2026-11-14-tr-u01-u04.md). The actual-client activation lot TR-U-05 remains proposed, not authorized. The narrowly requested goal-tool discipline was corrected and a matching objective restored; TR-U-06's remaining measurement/tooling proposals are not silently included.
