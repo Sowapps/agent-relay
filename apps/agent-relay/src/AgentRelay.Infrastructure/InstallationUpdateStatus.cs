@@ -24,8 +24,10 @@ public static class InstallationUpdateStatus
             var last = Path.Combine(RuntimePaths.UpdateDirectory(state.Installation), "last-command.json");
             JsonElement? command = File.Exists(last) ? JsonSerializer.Deserialize<JsonElement>(McpPrivateFiles.ReadText(last, 16384)) : null;
             var pending = state.Phase is not ("complete" or "rolled_back") && (state.Activation?.ResumeAuthorized == true || File.Exists(Path.Combine(data, "promotion.lock")));
+            var continuation = InstallationUpdateRecovery.Presence(data);
+            if (continuation?.TransactionId != state.Id) continuation = null;
             return new(state.Id, state.Version, state.Phase, pending, state.ErrorCode, state.Error, state.StartedAt, state.UpdatedAt,
-                (DateTimeOffset.UtcNow - state.StartedAt).TotalSeconds, InstallationUpdateRecovery.Presence(data), command,
+                (DateTimeOffset.UtcNow - state.StartedAt).TotalSeconds, continuation, command,
                 AdmissionSuspended: File.Exists(Path.Combine(data, "promotion.lock")));
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or JsonException or ArgumentException or AgentRelay.Core.RelayException)

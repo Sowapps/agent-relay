@@ -180,6 +180,20 @@ def rehearse_candidate(report, folder, baseline_directory, legacy_baseline=False
     baseline = candidate_evidence(baseline_directory, baseline_version)
     if baseline['sha256'] == candidate['sha256']:
         raise ValueError('Select a different verified baseline archive')
+    generic = read_json(extracted / 'app/mcp-contract.json').get('compatibility', {}).get('transport')
+    if generic and not legacy_baseline:
+        if not read_json(baseline_directory / EXTRACTED_DIRECTORY / 'app/mcp-contract.json').get('compatibility', {}).get('transport'):
+            raise ValueError('Initial legacy migration is separate; explicitly select the legacy refusal/recovery rehearsal')
+        proof = ROOT / 'local/apps/agent-relay/qualification' / ('selected-' + uuid.uuid4().hex[:12])
+        output = phase(report, folder, 'selected-update-and-interrupted-recovery',
+                       python_script('qualification/selected-package.py', '--base', baseline_directory,
+                                     '--candidate', archive.parent, '--output', proof, '--interrupt-runner'))
+        lines = [json.loads(line) for line in output.splitlines() if line.startswith('{')]
+        if not lines or lines[-1].get('passed') is not True:
+            raise ValueError('Selected-package qualification did not pass')
+        report['baseline'] = baseline
+        report['rehearsalReceipt'] = lines[-1]['report']
+        return
     baseline_runtime = stage_runtime(baseline)
     report['baseline'] = baseline
     previous = folder / 'previous'

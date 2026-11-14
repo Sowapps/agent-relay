@@ -10,7 +10,7 @@ p.add_argument('--version',required=True);a=p.parse_args()
 payload=a.payload.resolve();notices=payload/'third-party';notices.mkdir()
 app=Path(__file__).resolve().parents[1]
 root=app.parents[1]
-update_tools = ['complete_update.py', 'deployment.py', 'host_identity.py', 'release_artifact.py',
+update_tools = ['complete_update.py', 'deployment.py', 'host_identity.py', 'release_artifact.py', 'portable_fixture.py',
                 'runtime_layout.py', 'relay_mcp.py', 'stdio_rpc.py', 'verify-release.py']
 updater = payload / 'tools/updater'
 updater.mkdir(parents=True)

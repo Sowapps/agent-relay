@@ -57,9 +57,11 @@ internal static class StartupRegistration
     internal static string Command(string data)
     {
         if (!UsesTransport(data)) return LegacyCommand(data);
-        var launch = AgentRelay.Infrastructure.McpTransportInstallation.HostLaunch(data);
-        return Quote(launch.Command) + " " + string.Join(" ", launch.Args.Select(Quote));
+        return LaunchCommand(AgentRelay.Infrastructure.McpTransportInstallation.HostLaunch(data));
     }
+    private static string LaunchCommand(AgentRelay.Infrastructure.McpLaunch launch, bool quoteAll = false) =>
+        Quote(launch.Command) + " " + string.Join(" ", launch.Args.Select(value =>
+            quoteAll || value.Any(char.IsWhiteSpace) || value.Contains('"') ? Quote(value) : value));
     private static StartupEntry EnabledEntry(string data) => new(Command(data), RegistryValueKind.String);
     public static bool Enabled(string data)
     { using var key = Registry.CurrentUser.OpenSubKey(RegistryPath); return ReadValue(key, Name(data)) is string; }
@@ -82,7 +84,6 @@ internal static class StartupRegistration
 
     internal static StartupEntrySnapshot Capture(string data)
     {
-        var enabled = EnabledEntry(data);
         using var key = Registry.CurrentUser.OpenSubKey(RegistryPath);
         var name = Name(data);
         var value = ReadValue(key, name);
@@ -92,7 +93,36 @@ internal static class StartupRegistration
             string text when key is not null => new StartupEntry(text, key.GetValueKind(name)),
             _ => throw new IOException("The startup entry is not a Windows launch command. Review it before migrating.")
         };
-        var accepted = new[] { enabled, new StartupEntry(LegacyCommand(data), RegistryValueKind.String) }.Distinct().ToArray();
+        return Capture(data, entry);
+    }
+
+    // Pure ownership projection is shared with copied-entry qualification; registry I/O stays above.
+    internal static StartupEntrySnapshot Capture(string data, StartupEntry? entry)
+    {
+        var enabled = EnabledEntry(data);
+        var known = new List<StartupEntry> { enabled, new(LegacyCommand(data), RegistryValueKind.String) };
+        var pointer = AgentRelay.Infrastructure.RuntimePaths.RuntimePointer(data);
+        if (UsesTransport(data) && File.Exists(pointer))
+        {
+            var currentHost = AgentRelay.Infrastructure.McpTransportInstallation.HostLaunch(data);
+            known.Add(new(LaunchCommand(currentHost, quoteAll: true), RegistryValueKind.String));
+            using var document = JsonDocument.Parse(AgentRelay.Protocol.McpPrivateFiles.ReadText(pointer));
+            if (document.RootElement.TryGetProperty("mcpLaunch", out var value))
+            {
+                var prior = value.Deserialize<AgentRelay.Infrastructure.McpLaunch>(AgentRelay.Infrastructure.RelayJson.Options)
+                    ?? throw new IOException("The retained launch identity is empty.");
+                var binding = document.RootElement.GetProperty("connectionId").GetGuid();
+                var expected = AgentRelay.Infrastructure.McpTransportInstallation.Launch(data, binding);
+                if (!Path.IsPathFullyQualified(prior.Command) || !Path.GetFileName(prior.Command).Equals("pwsh.exe", StringComparison.OrdinalIgnoreCase)
+                    || prior.Args is null || !prior.Args.SequenceEqual(expected.Args, StringComparer.OrdinalIgnoreCase))
+                    throw new IOException("The retained launch does not identify this scope's common entry.");
+                // Recognize the reviewed prior executable, but only with our owned host arguments/script.
+                var host = AgentRelay.Infrastructure.McpTransportInstallation.HostLaunch(data) with { Command = prior.Command };
+                known.Add(new(LaunchCommand(host), RegistryValueKind.String));
+                known.Add(new(LaunchCommand(host, quoteAll: true), RegistryValueKind.String));
+            }
+        }
+        var accepted = known.Distinct().ToArray();
         DemandOwnedEntry(enabled, entry, accepted);
         return new(entry, enabled, accepted);
     }

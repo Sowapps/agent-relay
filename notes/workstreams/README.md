@@ -157,3 +157,7 @@
 - [Live MCP correction](2026-11-02-mcp-live-update.md)
 
 - [U5 package qualification](2026-11-13-u5-package-qualification.md).
+
+- [Post-U5 technical review](2026-11-13-post-u5-technical-review.md): analysis-only prioritized remaining activation, recovery, tooling and measurement lots.
+
+- [TR-U-01–TR-U-04 implementation checkpoint](2026-11-14-tr-u01-u04.md): authorized local corrections; tracked-objective gate and precise next steps.

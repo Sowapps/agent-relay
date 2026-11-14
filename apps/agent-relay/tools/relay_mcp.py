@@ -38,6 +38,10 @@ class McpRpc(StdioRpc):
 
     def operation(self, name, arguments=None, *, revision=None, timeout=190):
         """Discover an explicit operation revision, then invoke once; never replay a failed invocation."""
+        if not any(item['name'] == 'invoke_operation' for item in self.inventory):
+            if revision is not None:
+                raise ValueError('Legacy typed surface cannot select an operation revision')
+            return self.tool(name, arguments, timeout)
         operations = []
         query = {'limit': 100}
         while True:

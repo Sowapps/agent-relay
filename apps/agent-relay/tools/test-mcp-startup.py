@@ -12,18 +12,24 @@ import subprocess
 import threading
 import time
 import uuid
+from functools import partial
 
 from deployment import PromotionFreeze, exclusive, snapshot, write
 from host_identity import identity, resolve_host
 from pilotage_stable import EXE, ROOT, STATE_FILES, startup_state
-from relay_mcp import RelayMcp
+from relay_mcp import RelayMcp, McpRemoteError
+from portable_fixture import extract_verified, prepare_fixture, run
 from release_artifact import EXTRACTED_DIRECTORY, VERIFICATION_FILE, read_json
 from runtime_layout import app_var
 
 
 def assert_refused(client, code):
-    result = client.call('tools/call', {'name': 'list_projects', 'arguments': {}}, timeout=22)
-    assert result['isError'], result
+    try:
+        client.operation('list_projects', timeout=22)
+    except McpRemoteError as error:
+        result = error.result
+    else:
+        raise AssertionError('Expected scoped startup refusal: ' + code)
     failure = result['structuredContent']['error']
     assert failure['code'] == code and failure['execution'] == 'not_started', failure
     return failure
@@ -37,19 +43,28 @@ def main():
     if not release.is_relative_to(ROOT / 'local/apps/agent-relay/releases'):
         raise ValueError('Select a private verified archive')
     verification = read_json(release / VERIFICATION_FILE)
-    extracted = release / EXTRACTED_DIRECTORY
-    assert Path(verification['extracted']) == extracted and verification['passed'] is True
-    fixture = read_json(extracted / 'requests-0/example-context.json')
-    assert fixture['localOnly'] is True
-    executable = extracted / 'app' / EXE
     started = time.monotonic()
-    data = app_var(extracted) / ('wake-' + uuid.uuid4().hex[:8])
-    snapshot(app_var(extracted) / 'default', data, files=STATE_FILES)
-    subprocess.run([str(executable), 'initialize', '--data-dir', str(data), '--connection-id', fixture['connectionId']],
-                   capture_output=True, check=True, timeout=35, creationflags=subprocess.CREATE_NO_WINDOW)
+    reference = release / EXTRACTED_DIRECTORY
+    generic = read_json(reference / 'app/mcp-contract.json').get('compatibility', {}).get('transport')
+    if generic:
+        extracted = ROOT / 'local/apps/agent-relay/qualification' / ('cold-' + uuid.uuid4().hex[:12])
+        extract_verified(release, extracted)
+        executable = extracted / 'app' / EXE
+        data = extracted / read_json(extracted / 'portable-layout.json')['data']
+        prepare_fixture(extracted, executable, data, partial(run, cwd=extracted, environment=dict(os.environ)))
+        fixture = read_json(extracted / 'requests-0/example-context.json')
+    else:
+        # Retain the already-qualified typed baseline's separate copied-scope probe.
+        extracted = reference
+        fixture = read_json(extracted / 'requests-0/example-context.json')
+        executable = extracted / 'app' / EXE
+        data = app_var(extracted) / ('wake-' + uuid.uuid4().hex[:8])
+        snapshot(app_var(extracted) / 'default', data, files=STATE_FILES)
+        subprocess.run([str(executable), 'initialize', '--data-dir', str(data), '--connection-id', fixture['connectionId']],
+                       capture_output=True, check=True, timeout=35, creationflags=subprocess.CREATE_NO_WINDOW)
     pointer = read_json(data / 'mcp-runtime.json')
     host_runtime = {'executable': str(executable)}
-    client_runtime = {'executable': pointer['mcpExecutable'], 'connectionId': fixture['connectionId']}
+    client_runtime = pointer if generic else {'executable': pointer['mcpExecutable'], 'connectionId': fixture['connectionId']}
     assert startup_state(executable, data) is False
 
     def host():
@@ -84,7 +99,7 @@ def main():
             def call_together():
                 with RelayMcp(client_runtime, data, ROOT, errors) as client:
                     gate.wait(timeout=10)
-                    projects = client.tool('list_projects', timeout=20)['configuration']['projects']
+                    projects = client.operation('list_projects', timeout=20)['configuration']['projects']
                     assert [project['id'] for project in projects] == [fixture['projectId']]
                     status = client.tool('get_connection_status', timeout=12)
                     assert status['version'] == verification['version'] and status['clientRefreshRequired'] is False

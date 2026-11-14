@@ -292,13 +292,12 @@ public sealed partial class InstallationUpdate
         {
             if (!EquivalentJson(File.ReadAllText(RuntimePaths.TransportSelection(data)), previousTransport)) throw Failure("update_recovery_required", "Previous transport selection has not been restored.");
             var selected = McpProcessSelections.Parse(previousTransport);
-            var leases = McpTransportPresences.Read(RuntimePaths.TransportStateDirectory(data));
-            if (activation.TransportInstances.Any(id => !leases.Any(item => item.InstanceId == id && item.State == "current" && item.GatewayIdentity == McpProcessSelections.Identity(selected.Gateway))))
-                return Save(state with { Error = "Previous transport identities are still returning; admission remains suspended." });
+            if (!TransportsReady(selected, activation.TransportInstances))
+                return SaveIfChanged(state with { ErrorCode = "update_rollback_transport_pending", Error = "Previous transport identities are still returning; admission remains suspended." });
         }
         if (runtime.StartupEnabled(priorExecutable) != activation.StartupEnabled) throw Failure("update_startup_changed", "Restored startup preference differs.");
         if (activation.Startup is { } startupBefore) runtime.ReconcileStartup(priorExecutable, startupBefore, restore: true);
-        state = Save(state with { Phase = "rolled_back" });
+        state = Save(state with { Phase = "rolled_back", ErrorCode = null });
         ReleaseSelectedBarrier(state);
         return state;
     }
@@ -327,14 +326,18 @@ public sealed partial class InstallationUpdate
         Error = "Required live transport identities have not acknowledged this selection. Admission remains suspended; resume without a client restart or expiry." });
 
     private bool TransportsReady(InstallationUpdateState state)
+        => TransportsReady(ComposeSelection(state, false), state.Activation!.TransportInstances);
+
+    /// <summary>Same readiness invariant for publication and rollback; only the selected target differs.</summary>
+    /// <seealso cref="CompleteSelectedRollback"/>
+    private bool TransportsReady(McpProcessSelection selected, IReadOnlyList<Guid> required)
     {
-        var selected = ComposeSelection(state, false);
         var leases = McpTransportPresences.Read(RuntimePaths.TransportStateDirectory(data));
         var gateway = McpProcessSelections.Identity(selected.Gateway); var worker = McpProcessSelections.Identity(selected.Worker);
         bool Current(McpTransportPresence item) => item.State == "current" && item.GatewayIdentity == gateway && item.SelectedWorkerIdentity == worker &&
             (item.ActiveWorkerIdentity is null || item.ActiveWorkerIdentity == item.SelectedWorkerIdentity);
         // A confirmed closed/dead process no longer owns client stdio; stale-but-live is never retired.
-        return state.Activation!.TransportInstances.All(id => leases.Any(item => item.InstanceId == id && (Current(item) || item.State is "offline" or "closed"))) &&
+        return required.All(id => leases.Any(item => item.InstanceId == id && (Current(item) || item.State is "offline" or "closed"))) &&
             !leases.Any(item => item.State is not ("offline" or "closed") && !Current(item));
     }
 

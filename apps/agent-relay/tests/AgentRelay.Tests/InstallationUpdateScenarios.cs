@@ -55,7 +55,10 @@ internal static class InstallationUpdateScenarios
         Check(!File.Exists(Path.Combine(installation, "README.md")) && File.ReadAllText(Path.Combine(data, "untouched.txt")) == "user-data", "rollback deletes only newly managed files and preserves data");
         Check(update.Run("rollback").Phase == "rolled_back", "repeat rollback is a no-op");
         using (new FileStream(Path.Combine(installation, "var", "apps", "agent-relay", "update", "update.lock"), FileMode.Open, FileAccess.ReadWrite, FileShare.None))
-            Refuses<IOException>(() => update.Run("status"));
+        {
+            Check(update.Run("status").Id == prepared.Id, "Passive legacy status remains available during writer ownership");
+            Refuses("update_in_progress", () => update.Run("verify"));
+        }
         File.WriteAllText(Path.Combine(candidate, "README.md"), "tampered");
         Refuses("update_candidate_invalid", () => update.Prepare(candidate));
         var reported = InstallationUpdateDiagnostics.Capture(data, new RelayException("update_conflict", "fixture conflict", false));

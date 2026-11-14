@@ -72,7 +72,7 @@ def verify_binding(case, data, binding, root):
     pointer = deployment.read(data / 'mcp-runtime.json')
     with (case / 'mcp.stderr.log').open('a', encoding='utf-8') as errors:
         with RelayMcp(dict(pointer, connectionId=binding['connectionId']), data, root, errors) as client:
-            projects = client.tool('list_projects')['configuration']['projects']
+            projects = client.operation('list_projects')['configuration']['projects']
             require([project['id'] for project in projects] == [binding['projectId']],
                     'Fresh MCP connection did not retain the expected project scope')
 
