@@ -17,6 +17,20 @@ internal static class SelectedUpdateScenarios
         var update = new InstallationUpdate(nominal.Installation, nominal.Data, runtime);
         var prepared = update.Run("prepare", nominal.Candidate);
         Check(prepared.Schema == 2 && update.Run("prepare", nominal.Candidate).Id == prepared.Id, "Idempotent selected preparation");
+        using (InstallationUpdate.AcquireOwnership(Path.Combine(RuntimePaths.UpdateDirectory(nominal.Installation), "update.lock")))
+        {
+            Check(update.Run("status").Id == prepared.Id, "Passive status conflicted with an active writer");
+            Refuses("update_in_progress", () => update.Run("authorize"));
+        }
+        var presencePath = Path.Combine(RuntimePaths.UpdateDirectory(nominal.Installation), "continuation.json");
+        File.WriteAllText(presencePath, RelayJson.Serialize(new InstallationRecoveryPresence(prepared.Id, int.MaxValue,
+            DateTimeOffset.UnixEpoch, "running", DateTimeOffset.UtcNow)));
+        var retainedPresence = File.ReadAllText(presencePath);
+        Check(InstallationUpdateRecovery.Presence(nominal.Data) is { State: "interrupted", Code: "update_resume_interrupted" }
+            && File.ReadAllText(presencePath) == retainedPresence, "Dead recovery still appeared running or passive projection wrote state");
+        File.WriteAllText(presencePath, RelayJson.Serialize(new InstallationRecoveryPresence(prepared.Id, Environment.ProcessId,
+            DateTimeOffset.UnixEpoch, "starting", DateTimeOffset.UtcNow)));
+        Check(InstallationUpdateRecovery.Presence(nominal.Data)?.State == "interrupted", "Reused PID was trusted as the original recovery");
         Check(InstallationUpdateRecovery.Start(nominal.Data, authorize: false) is null && !File.Exists(Path.Combine(nominal.Data, "promotion.lock")),
             "A prepared artifact silently authorized deployment through recovery");
         var store = new SqliteWorkStore(new RelayDatabase(nominal.Data));
@@ -81,6 +95,29 @@ internal static class SelectedUpdateScenarios
         Check(rollback.Run("status").Phase == "rolled_back" && File.ReadAllText(Path.Combine(recovery.Installation, "README.md")) == "old docs", "Rollback did not restore root docs");
         Check(File.ReadAllText(Path.Combine(recovery.Data, "mcp-runtime.json")) == pointerBefore && !File.Exists(Path.Combine(recovery.Data, "promotion.lock")), "Rollback did not restore coherent selection/admission");
         Check(rollback.Run("rollback").Phase == "rolled_back", "Rollback repetition failed");
+
+        var held = Seed(Path.Combine(root, "rollback-transport"));
+        var heldOld = McpProcessSelections.Read(RuntimePaths.TransportSelection(held.Data));
+        var heldId = Guid.NewGuid();
+        var heldDirectory = RuntimePaths.TransportStateDirectory(held.Data);
+        McpTransportPresence Lease(McpProcessSelection target) => new(heldId, Environment.ProcessId, null, "fixture",
+            McpProcessSelections.Identity(target.Gateway), null, McpProcessSelections.Identity(target.Worker), "current", DateTimeOffset.UtcNow);
+        McpTransportPresences.Write(heldDirectory, Lease(heldOld));
+        var heldUpdate = new InstallationUpdate(held.Installation, held.Data, new Runtime(held.Root));
+        heldUpdate.Run("prepare", held.Candidate);
+        Check(heldUpdate.Run("resume").Phase == "awaiting_transports", "Transport rollback fixture did not wait");
+        McpTransportPresences.Write(heldDirectory, Lease(McpProcessSelections.Read(RuntimePaths.TransportSelection(held.Data))));
+        Check(heldUpdate.Run("rollback").ErrorCode == "update_rollback_transport_pending", "Wrong rollback gateway was accepted");
+        McpTransportPresences.Write(heldDirectory, Lease(heldOld) with { ActiveWorkerIdentity = "wrong-worker" });
+        Check(heldUpdate.Run("rollback").Phase == "files_restored", "Wrong active rollback worker was accepted");
+        McpTransportPresences.Write(heldDirectory, Lease(heldOld) with { SeenAt = DateTimeOffset.UtcNow.AddMinutes(-1) });
+        Check(heldUpdate.Run("rollback").Phase == "files_restored", "Live stale rollback process was retired");
+        File.Delete(Path.Combine(McpTransportPresences.DirectoryFor(heldDirectory), heldId.ToString("N") + ".json"));
+        Check(heldUpdate.Run("rollback").Phase == "files_restored", "Missing required rollback identity was ignored");
+        McpTransportPresences.Write(heldDirectory, Lease(heldOld) with { State = "closed" });
+        var retiredRollback = heldUpdate.Run("rollback");
+        Check(retiredRollback.Phase == "rolled_back" && retiredRollback.ErrorCode is null && !File.Exists(Path.Combine(held.Data, "promotion.lock")),
+            "Safely closed rollback client did not release admission");
 
         var cancel = Seed(Path.Combine(root, "cancel"));
         var cancelPort = new Runtime(cancel.Root);

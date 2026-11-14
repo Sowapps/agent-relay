@@ -5,6 +5,14 @@ internal static class MonitorScenarios
 {
     public static void Run()
     {
+        var continuation = new InstallationRecoveryPresence("0123456789ab", 123, DateTimeOffset.UnixEpoch, "running", DateTimeOffset.UtcNow);
+        var updating = new InstallationUpdateView("0123456789ab", "0.0.1-rc.1", "awaiting_transports", true, null, null,
+            DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, 1, continuation);
+        var revision = AgentRelay.Windows.Presentation.PresentationSnapshot.UpdateRevision(updating);
+        if (revision != AgentRelay.Windows.Presentation.PresentationSnapshot.UpdateRevision(updating with { Continuation = continuation with { SeenAt = DateTimeOffset.UtcNow.AddSeconds(5) } }))
+            throw new Exception("Recovery heartbeat caused unnecessary native view publication.");
+        if (revision == AgentRelay.Windows.Presentation.PresentationSnapshot.UpdateRevision(updating with { Continuation = continuation with { State = "interrupted", Code = "update_resume_interrupted" } }))
+            throw new Exception("Recovery interruption did not invalidate native presentation.");
         var project = Guid.NewGuid(); var other = Guid.NewGuid(); var owner = Guid.NewGuid(); var endpoint = Guid.NewGuid(); var task = Guid.NewGuid(); var session = Guid.NewGuid(); var now = DateTimeOffset.UtcNow;
         var first = new WorkRecord(new(Guid.NewGuid(), "arbitrary", "message", "A", SessionId: session, Scope: new(project, owner, endpoint), TaskId: task), "completed", now, now);
         var second = first with { Request = first.Request with { Id = Guid.NewGuid(), Text = "B" }, State = "awaiting_approval" };

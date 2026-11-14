@@ -33,7 +33,7 @@ def same_absolute_path(actual, expected):
             and os.path.normcase(os.path.normpath(actual)) == os.path.normcase(os.path.normpath(expected)))
 
 
-def matches(process, runtime, data):
+def matches(process, runtime, data, mode='tray'):
     expected = runtime_command(runtime)
     if not same_absolute_path(process.get('ExecutablePath'), expected[0]):
         return False
@@ -44,7 +44,7 @@ def matches(process, runtime, data):
     if len(parts) <= len(expected) or any(not same_absolute_path(actual, wanted) for actual, wanted in zip(parts, expected)):
         return False
     tail = parts[len(expected):]
-    if tail[0] != 'tray' or tail.count('--data-dir') != 1:
+    if tail[0] != mode or tail.count('--data-dir') != 1:
         return False
     index = tail.index('--data-dir')
     return index + 1 < len(tail) and same_absolute_path(tail[index + 1], data)

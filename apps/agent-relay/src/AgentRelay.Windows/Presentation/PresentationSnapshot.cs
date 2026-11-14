@@ -17,6 +17,17 @@ internal static class PresentationSnapshot
     private static string Initial(string name) => string.Concat(name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(part => part[..1])).ToUpperInvariant();
     private static readonly string[] Colors = ["blue", "purple", "green"];
 
+    // Publish lifecycle changes, but not heartbeat-only churn that disturbs native user context.
+    internal static string UpdateRevision(InstallationUpdateView? update) => RelayJson.Serialize(update is null ? null : new
+    {
+        update.Id, update.Phase, update.Pending, update.Code, update.Message, update.UpdatedAt, update.DiagnosticId,
+        Continuation = update.Continuation is not { } continuation ? null : new
+        {
+            continuation.TransactionId, continuation.ProcessId, continuation.ProcessStartedAt,
+            continuation.State, continuation.Code, continuation.DiagnosticId
+        }
+    });
+
     public static JsonElement Build(ProjectConfiguration configuration, IReadOnlyList<EndpointDescriptor> descriptions,
         IReadOnlyList<ProjectObservation> observations, bool online, string? error, DateTimeOffset observedAt, bool startupEnabled = false, AttentionReviews? reviews = null, IReadOnlyDictionary<Guid, ProjectObservation>? threads = null, StartupPreferenceState? startup = null, IReadOnlyList<McpConnectionLease>? mcpConnections = null, IReadOnlyDictionary<Guid,IReadOnlyList<KeyValuePair<string,string>>>? environmentFacts = null, McpTransportView? mcpTransports = null, InstallationUpdateView? installationUpdate = null)
     {

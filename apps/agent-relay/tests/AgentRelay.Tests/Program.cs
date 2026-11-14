@@ -40,11 +40,11 @@ if (args.Length == 3 && args[0] == "monitor-render") { await UiRenderScenarios.R
 if (args.Length == 4 && args[0] == "monitor-conformance") { await UiRenderScenarios.Conformance(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), Path.GetFullPath(args[3])); Console.WriteLine("NATIVE_CONFORMANCE=PASS"); return; }
 if (args.Length == 3 && args[0] == "monitor-review") { await UiRenderScenarios.Review(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); Console.WriteLine("NATIVE_REVIEW=PASS"); return; }
 if (args.Length == 3 && args[0] == "monitor-usability") { await UiRenderScenarios.Usability(Path.GetFullPath(args[1]),Path.GetFullPath(args[2])); Console.WriteLine("NATIVE_USABILITY=PASS"); return; }
-if (args.Length == 1 && args[0] == "startup-contracts") { StartupTransferScenarios.Run(); return; }
+if (args.Length == 2 && args[0] == "startup-contracts") { StartupTransferScenarios.Run(Path.GetFullPath(args[1])); return; }
 var data = Path.GetFullPath(args.Single());
 DateDisplayScenarios.Run();
 await ProcessScenarios.RunAsync();
-StartupTransferScenarios.Run();
+StartupTransferScenarios.Run(Path.Combine(data, "startup"));
 StorageScenarios.Run(Path.Combine(data, "storage"));
 InstallationUpdateScenarios.Run(Path.Combine(data, "installation-update"));
 await RawPipeScenarios.Run(data+"-raw-pipe");

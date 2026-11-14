@@ -43,8 +43,7 @@ public sealed partial class InstallationUpdate
         // Publication is atomic; passive status must remain readable while the writer holds its lock.
         if (action == "status") return Read();
         Directory.CreateDirectory(directory);
-        using var ownership = new FileStream(Path.Combine(directory, "update.lock"), FileMode.OpenOrCreate,
-            FileAccess.ReadWrite, FileShare.None);
+        using var ownership = AcquireOwnership(Path.Combine(directory, "update.lock"));
         var watch = Stopwatch.StartNew();
         var at = DateTimeOffset.UtcNow;
         var before = File.Exists(journal) ? File.ReadAllText(journal) : null;
@@ -91,6 +90,16 @@ public sealed partial class InstallationUpdate
                     throw;
                 }
             }
+        }
+    }
+
+    internal static FileStream AcquireOwnership(string path)
+    {
+        RuntimePaths.DemandPrivatePath(path);
+        try { return new(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+        catch (IOException error) when (RelayLocation.IsSharingConflict(error))
+        {
+            throw Failure("update_in_progress", "Another update command owns this step. Read status and let it finish; no competing change was started.");
         }
     }
 
@@ -316,7 +325,7 @@ public sealed partial class InstallationUpdate
     /// <summary>Persist an independently runnable, verified recovery tool before publishing intent.</summary>
     private void CacheRecoveryRunner(InstallationUpdateState state, string candidate, Dictionary<string, string> declared)
     {
-        var runner = Path.Combine(directory, state.Id, "runner");
+        var runner = RuntimePaths.UpdateRunnerDirectory(installation, state.Id);
         Directory.CreateDirectory(runner);
         var hashes = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var source in Directory.EnumerateFiles(Path.Combine(candidate, "app"), "*", SearchOption.AllDirectories))

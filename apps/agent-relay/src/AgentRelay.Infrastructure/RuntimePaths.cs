@@ -34,6 +34,7 @@ public static class RuntimePaths
     public static string TransportEntryScript(string data) => Path.Combine(Path.GetFullPath(data), "launch.ps1");
     public static string TransportBundleDirectory(string data) => Path.Combine(TransportStateDirectory(data), "bundles");
     public static string UpdateDirectory(string installation) => Path.Combine(ApplicationDirectory(installation), "update");
+    public static string UpdateRunnerDirectory(string installation, string transaction) => Path.Combine(UpdateDirectory(installation), transaction, "runner");
     public static string UpdateJournal(string data) => Path.Combine(UpdateDirectory(PortableInstallationForData(data)), "current.json");
     public static string RuntimePointer(string data) => Path.Combine(Path.GetFullPath(data), "mcp-runtime.json");
     public static string InstallationDescriptor(string installation, string binaryDirectory) => RelayJson.Serialize(new

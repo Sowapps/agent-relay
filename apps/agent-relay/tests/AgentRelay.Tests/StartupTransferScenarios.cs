@@ -3,7 +3,7 @@ using AgentRelay.Windows;
 
 internal static class StartupTransferScenarios
 {
-    public static void Run()
+    public static void Run(string root)
     {
         var events = new List<string>();
         var source = new Preference("source", true, events);
@@ -35,10 +35,10 @@ internal static class StartupTransferScenarios
                 events.SequenceEqual(new[] { "target:True", "source:False", "target:False" }), "rollback preserves legacy preference");
         }
         Console.WriteLine("STARTUP_PREFERENCE_TRANSFER=PASS");
-        MigrationEntries();
+        MigrationEntries(root);
     }
 
-    private static void MigrationEntries()
+    private static void MigrationEntries(string root)
     {
         var legacy = new StartupEntry(StartupRegistration.Command(@"C:\fixture\legacy"), RegistryValueKind.String);
         var current = new StartupEntry(StartupRegistration.Command(@"C:\fixture\current"), RegistryValueKind.String);
@@ -73,6 +73,34 @@ internal static class StartupTransferScenarios
         Refuses(() => Apply(new(legacy, "restore", new("unknown", RegistryValueKind.String))));
         Check(selected == legacy, "unrelated entry is never restored");
         Console.WriteLine("STARTUP_MIGRATION_ENTRIES=PASS");
+        CommonEntryIdentity(root);
+    }
+
+    private static void CommonEntryIdentity(string root)
+    {
+        var data = Path.Combine(root, "startup-copy-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(data);
+        File.WriteAllText(AgentRelay.Infrastructure.RuntimePaths.TransportSelection(data), "{}");
+        var binding = Guid.NewGuid();
+        var oldShell = @"C:\previous PowerShell\pwsh.exe";
+        var launch = AgentRelay.Infrastructure.McpTransportInstallation.Launch(data, binding) with { Command = oldShell };
+        var pointer = AgentRelay.Infrastructure.RuntimePaths.RuntimePointer(data);
+        File.WriteAllText(pointer, AgentRelay.Infrastructure.RelayJson.Serialize(new { connectionId = binding, mcpLaunch = launch }));
+        var template = AgentRelay.Infrastructure.McpTransportInstallation.HostLaunch(data);
+        string Quote(string value) => '"' + value + '"';
+        var previous = new StartupEntry(Quote(oldShell) + " " + string.Join(" ", template.Args.Select(Quote)), RegistryValueKind.ExpandString);
+        StartupEntry? selected = previous;
+        StartupEntrySnapshot Capture() => StartupRegistration.Capture(data, selected);
+        StartupRegistration.Change(new(previous, "enable"), Capture, value => selected = value, () => { });
+        Check(selected == Capture().EnabledEntry, "prior common-entry shell migrates to current command");
+        StartupRegistration.Change(new(selected, "restore", previous), Capture, value => selected = value, () => { });
+        Check(selected == previous, "common-entry rollback restores exact value and kind");
+        Refuses(() => StartupRegistration.Capture(data, previous with { Value = previous.Value + " -Show" }));
+        Refuses(() => StartupRegistration.Capture(data, previous with { Value = previous.Value.Replace("launch.ps1", "foreign.ps1") }));
+        Check(StartupRegistration.Capture(data, null).Entry is null, "disabled preference remains absent");
+        File.WriteAllText(pointer, AgentRelay.Infrastructure.RelayJson.Serialize(new { connectionId = binding, mcpLaunch = launch with { Args = ["-File", @"C:\foreign.ps1"] } }));
+        Refuses(() => StartupRegistration.Capture(data, previous));
+        Console.WriteLine("STARTUP_COMMON_ENTRY_IDENTITY=PASS (copied metadata and fake entry writes only)");
     }
 
     private static void Refuses(Action action)

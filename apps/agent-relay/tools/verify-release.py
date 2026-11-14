@@ -14,6 +14,7 @@ import subprocess
 import time
 
 from relay_mcp import McpRpc
+from portable_fixture import require, run, prepare_fixture
 from release_artifact import (
     EXTRACTED_DIRECTORY, MANIFEST_FILE, VERIFICATION_FILE, archive_path, declared_checksum,
     extract_archive, read_json, sha256, verified_archive,
@@ -22,11 +23,6 @@ from release_artifact import (
 
 EXPECTED_TOOLS = 4
 EXPECTED_RESOURCES = 5
-
-
-def require(condition, message):
-    if not condition:
-        raise ValueError(message)
 
 
 def extract_package(directory, version):
@@ -62,50 +58,6 @@ def verify_documentation(extracted):
                     f'Broken distribution link: {guide.name}: {target}')
             links += 1
     return links
-
-
-def run(*command, cwd, environment):
-    result = subprocess.run(command, cwd=cwd, env=environment, capture_output=True, text=True,
-                            encoding='utf-8', errors='replace', timeout=45, creationflags=subprocess.CREATE_NO_WINDOW)
-    if result.returncode:
-        raise RuntimeError(f'{command[0]}: {result.stderr}{result.stdout}')
-    return result.stdout
-
-
-def prepare_fixture(extracted, executable, data, invoke):
-    main_workspace = extracted / 'workspaces/main'
-    peer_workspace = extracted / 'workspaces/peer'
-    main_workspace.mkdir(parents=True)
-    peer_workspace.mkdir(parents=True)
-    powershell = shutil.which('pwsh.exe')
-    require(powershell is not None, 'PowerShell 7 is required to generate the portable verification fixture')
-    invoke(executable, 'initialize')
-    pointer = data / 'mcp-runtime.json'
-    require(pointer.is_file() and not (extracted / 'local').exists(), 'Default storage escaped installation var')
-    contexts = []
-    for index in range(2):
-        request = extracted / f'requests-{index}'
-        invoke(powershell, '-NoProfile', '-File', extracted / 'tools/new-project-request.ps1',
-               '-DataDirectory', data, '-Name', f'Archive project {index}', '-MainWorkspace', main_workspace,
-               '-PeerWorkspace', peer_workspace, '-OutputDirectory', request, '-LocalOnly')
-        invoke(executable, 'admin', '--data-dir', data, '--input', request / 'configure-project.request.json')
-        contexts.append(read_json(request / 'example-context.json'))
-        if index == 0:
-            invoke(executable, 'admin', '--data-dir', data, '--input', request / 'connection.request.json')
-    require(len(read_json(data / 'relay-projects.json')['projects']) == 2, 'Fixture did not retain both projects')
-    invoke(executable, 'initialize', '--data-dir', data, '--connection-id', contexts[0]['connectionId'])
-    pointer_before = pointer.read_bytes()
-    for forbidden in ('11111111-1111-4111-8111-111111111111', '28c10e25-b802-42da-92f5-98723e6b54ae'):
-        try:
-            invoke(executable, 'initialize', '--data-dir', data, '--connection-id', forbidden)
-        except RuntimeError:
-            require(pointer.read_bytes() == pointer_before, 'A refused connection changed the exported binding')
-        else:
-            raise ValueError('Missing or administrator connection was exportable')
-    fragment = read_json(data / 'mcp.windows.json')['mcpServers']['agent_relay']
-    require(Path(fragment['command']).name.lower() == 'pwsh.exe'
-            and str(extracted / read_json(extracted / 'portable-layout.json')['entryScript']) in fragment['args'], 'Portable fragment did not select its fixed common entry')
-    return [fragment['command'], *fragment['args']], [item['projectId'] for item in contexts]
 
 
 def verify_mcp(extracted, command, project_ids, version, environment, errors):

@@ -4,8 +4,8 @@ Only protocol/process orchestration lives here. InstallationUpdate owns policy a
 No model turn, client reload, actual client setting or stable installation is used.
 """
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from functools import partial
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -18,30 +18,19 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from codex_rpc import CodexRpc
-from complete_update import invoke, recovery_updater
-from host_identity import resolve_host, identity
-from release_artifact import archive_path, declared_checksum, extract_archive, verified_archive
-
-
-def load_verifier():
-    path = Path(__file__).resolve().parents[1] / 'verify-release.py'
-    spec = importlib.util.spec_from_file_location('archive_verifier', path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+from complete_update import invoke, recovery_updater, UpdateFailure
+from host_identity import resolve_host, identity, processes, matches
+from deployment import exclusive
+import portable_fixture as fixtures
 
 
 def read(path):
     return json.loads(path.read_text(encoding='utf-8-sig'))
 
 
-def extract(directory, destination):
-    version = read(directory / 'payload/release-manifest.json')['version']
-    archive = archive_path(directory, version)
-    digest = declared_checksum(archive)
-    with verified_archive(archive, digest) as source:
-        extract_archive(source, destination)
-    return version, digest
+def owned_runner(runtime, data, pid):
+    return [item for item in processes(runtime) if item['ProcessId'] == pid
+            and matches(item, runtime, data, mode='installation-resume')]
 
 
 def main():
@@ -49,6 +38,7 @@ def main():
     parser.add_argument('--base', required=True, type=Path)
     parser.add_argument('--candidate', required=True, type=Path)
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--interrupt-runner', action='store_true')
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[4]
     output = args.output.resolve()
@@ -58,15 +48,15 @@ def main():
     installed, candidate = output / 'installation', output / 'candidate'
     result = dict(modelTurns=0, reloadCalls=0, actualSettingsChanged=False, stableChanged=False)
     started = time.monotonic()
+    retained = None
     data = installed / 'var/apps/agent-relay/default'
     try:
-        result['baseVersion'], result['baseSha256'] = extract(args.base, installed)
-        result['candidateVersion'], result['candidateSha256'] = extract(args.candidate, candidate)
-        verifier = load_verifier()
+        result['baseVersion'], result['baseSha256'] = fixtures.extract_verified(args.base, installed)
+        result['candidateVersion'], result['candidateSha256'] = fixtures.extract_verified(args.candidate, candidate)
         environment = dict(os.environ)
-        run = partial(verifier.run, cwd=installed, environment=environment)
+        run = partial(fixtures.run, cwd=installed, environment=environment)
         executable = installed / 'app/AgentRelay.Windows.exe'
-        command, projects = verifier.prepare_fixture(installed, executable, data, run)
+        command, projects = fixtures.prepare_fixture(installed, executable, data, run)
         binding = read(data / 'mcp-runtime.json')['connectionId']
         run(shutil.which('pwsh.exe'), '-NoProfile', '-File', installed / 'tools/launch.ps1',
             '-Root', installed, '-Mode', 'Initialize', '--connection-id', binding)
@@ -115,6 +105,13 @@ def main():
                 protected = {str(path.relative_to(data)): path.read_bytes() for path in [data / 'relay-projects.json',
                              *list((data / 'connections').rglob('*'))] if path.is_file()}
                 updater = dict(executable=str(candidate / 'app/AgentRelay.Windows.exe'))
+                blocker_id = uuid.uuid4()
+                blocker_path = data / 'transport/instances' / (blocker_id.hex + '.json')
+                blocker = dict(instanceId=str(blocker_id), processId=os.getpid(), version='fictional-held-client',
+                               gatewayIdentity=leases['gatewayIdentity'], selectedWorkerIdentity=leases['selectedWorkerIdentity'],
+                               activeWorkerIdentity=None, state='unresponsive', seenAt='2000-01-01T00:00:00Z')
+                if args.interrupt_runner:
+                    blocker_path.write_text(json.dumps(blocker), encoding='utf-8')
                 prepared = invoke(updater, installed, data, 'prepare', candidate)
                 if prepared['phase'] != 'prepared' or prepared['activation']['resumeAuthorized']:
                     raise RuntimeError('Preparation unexpectedly authorized execution')
@@ -131,6 +128,42 @@ def main():
                         phases.append(state['phase'])
                     if state['phase'] == 'complete':
                         break
+                    if args.interrupt_runner and state['phase'] == 'awaiting_transports' and not result.get('runnerInterrupted'):
+                        continuation = read(data.parent / 'update/continuation.json')
+                        def same_start():
+                            try:
+                                invoke(retained, installed, data, 'start-resume')
+                                return 'existing_owner'
+                            except UpdateFailure as error:
+                                if error.error['code'] != 'update_in_progress':
+                                    raise
+                                return 'in_progress'
+                        with ThreadPoolExecutor(max_workers=2) as pool:
+                            result['concurrentStarts'] = list(pool.map(lambda _: same_start(), range(2)))
+                        if read(data.parent / 'update/continuation.json')['processId'] != continuation['processId']:
+                            raise RuntimeError('Concurrent start replaced the active recovery owner')
+                        active = owned_runner(retained, data, continuation['processId'])
+                        if len(active) != 1:
+                            raise RuntimeError('Refusing to stop an unverified qualification runner')
+                        os.kill(continuation['processId'], signal.SIGTERM)
+                        # Wait on the observable projection, not a fixed assumption about process exit.
+                        interrupted_deadline = time.monotonic() + 10
+                        while True:
+                            observed = tool('get_connection_status')
+                            recovery = observed.get('update', {}).get('continuation', {})
+                            if recovery.get('state') == 'interrupted':
+                                break
+                            if time.monotonic() > interrupted_deadline:
+                                raise RuntimeError('Killed recovery still appeared active: ' + json.dumps(recovery))
+                            time.sleep(.1)
+                        retained_state = invoke(retained, installed, data, 'status')
+                        if retained_state['id'] != prepared['id'] or not (data / 'promotion.lock').exists():
+                            raise RuntimeError('Interruption lost the transaction or released admission')
+                        blocker['state'] = 'closed'
+                        blocker_path.write_text(json.dumps(blocker), encoding='utf-8')
+                        result['runnerInterrupted'] = True
+                        result['interruptedDiagnosticCode'] = recovery.get('code')
+                        invoke(retained, installed, data, 'start-resume')
                     if state['phase'] in ('rolled_back', 'recovery_required'):
                         raise RuntimeError('Update stopped: ' + str((state['phase'], state.get('errorCode'), state.get('error'))))
                     if time.monotonic() >= deadline:
@@ -163,6 +196,17 @@ def main():
         raise
     finally:
         try:
+            presence = data.parent / 'update/continuation.json'
+            if retained and presence.exists():
+                recovery = read(presence)
+                if owned_runner(retained, data, recovery['processId']):
+                    os.kill(recovery['processId'], signal.SIGTERM)
+                    deadline = time.monotonic() + 10
+                    while owned_runner(retained, data, recovery['processId']):
+                        if time.monotonic() >= deadline:
+                            raise RuntimeError('Owned recovery did not stop during cleanup')
+                        time.sleep(.1)
+                result['ownedRecoveryCleanup'] = True
             if (data / 'mcp-runtime.json').exists():
                 runtime = read(data / 'mcp-runtime.json')
                 host = resolve_host(runtime, data)
@@ -174,6 +218,8 @@ def main():
         result.pop('protocol', None)
         result['seconds'] = round(time.monotonic() - started, 3)
         (output / 'result.json').write_text(json.dumps(result, indent=2), encoding='utf-8')
+    if result.get('cleanupError'):
+        raise RuntimeError('Qualification cleanup failed: ' + result['cleanupError'])
     print(json.dumps(dict(passed=result.get('passed'), seconds=result['seconds'], report=str(output / 'result.json'))))
 
 
