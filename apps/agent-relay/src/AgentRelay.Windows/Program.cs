@@ -11,7 +11,7 @@ internal static class Program
         try
         {
             var options = LaunchOptions.Parse(arguments);
-            if (options.Mode is "mcp" or "mcp-worker" or "mcp-stable-worker" or "mcp-contract" or "mcp-operations" or "portable-layout" or "startup-entry" or "maintenance-idle" or "wsl-maintenance" or "installation-update")
+            if (options.Mode is "mcp" or "mcp-worker" or "mcp-stable-worker" or "mcp-contract" or "mcp-operations" or "portable-layout" or "startup-entry" or "maintenance-idle" or "wsl-maintenance" or "installation-update" or "mcp-connections")
             {
                 Console.InputEncoding = new System.Text.UTF8Encoding(false);
                 Console.OutputEncoding = new System.Text.UTF8Encoding(false);
@@ -41,6 +41,14 @@ internal static class Program
 
     private static async Task<int> RunClientAsync(LaunchOptions options)
     {
+        if (options.Mode == "mcp-connections")
+        {
+            var query = options.InputFile is null ? new McpConnectionQuery()
+                : RelayJson.Deserialize<McpConnectionQuery>(AgentRelay.Protocol.McpPrivateFiles.ReadText(options.InputFile, 16384));
+            if (query is null) throw new ArgumentException("Connection query cannot be null.");
+            Console.WriteLine(RelayJson.Serialize(McpConnectionInspection.Capture(options.DataDirectory, query)));
+            return 0;
+        }
         if (options.Mode == "installation-resume") return await InstallationUpdateRecovery.ContinueAsync(options.DataDirectory, CancellationToken.None);
         if (options.Mode == "installation-update")
         {
