@@ -60,6 +60,8 @@ When tool behavior is uncertain, read its current schema and test the supported 
 
 ## Implementation and verification
 
+For every operational action, locate and use its single documented procedure and existing command before acting. Its owning script must orchestrate the complete operation with explicit inputs, useful defaults, diagnostics, idempotence and supported recovery; concise documentation must identify that entry point and its options. Reuse retained qualification for unchanged inputs. Do not reconstruct the operation from remembered commands, create a parallel script, or announce a missing capability without checking its owner and retained results. If the entry point is incomplete, record the exact observed gap outside Git and fix that owner within the authorized scope; do not bypass its gates manually. At handoff, retain the selected command, inputs, result and next recovery action outside Git so another agent resumes the same procedure.
+
 Define and apply the process and conventions with proportionate checks (evidence `2026-10-28-design-and-proportionate-checks-precede-development`).
 
 Implement one small vertical scenario. Run its nominal path and failures that could lose data, violate directionality or hide unsuccessful actions.

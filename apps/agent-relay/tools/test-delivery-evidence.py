@@ -7,10 +7,26 @@ import unittest
 import zipfile
 
 from delivery_reports import REPORT_FILE, latest_reports
-from release_artifact import archive_path, extract_archive, sha256, verified_archive, validate_version
+from release_artifact import archive_path, extract_archive, sha256, verified_archive, validate_version, verification_directory, EXTRACTED_DIRECTORY, VERIFICATION_FILE
 
 
 class DeliveryEvidenceTests(unittest.TestCase):
+    def test_interrupted_verification_preserves_failed_output_and_retries(self):
+        extracted = self.root / EXTRACTED_DIRECTORY
+        extracted.mkdir()
+        (extracted / 'failure.txt').write_text('retained failure', encoding='utf-8')
+        selected = verification_directory(self.root)
+        self.assertEqual(selected, extracted)
+        self.assertFalse(selected.exists())
+        retained = list(self.root.glob(EXTRACTED_DIRECTORY + '.failed-*'))
+        self.assertEqual(len(retained), 1)
+        self.assertEqual((retained[0] / 'failure.txt').read_text(encoding='utf-8'), 'retained failure')
+        selected.mkdir()
+        (self.root / VERIFICATION_FILE).write_text('{}', encoding='utf-8')
+        with self.assertRaises(ValueError):
+            verification_directory(self.root)
+        self.assertTrue(selected.exists())
+
     def test_packaging_and_deployment_share_stable_rc_grammar(self):
         for version in ['1.0.0', '1.2.3-rc.1']:
             self.assertEqual(validate_version(version), version)

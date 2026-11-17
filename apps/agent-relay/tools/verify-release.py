@@ -17,8 +17,9 @@ from relay_mcp import McpRpc
 from portable_fixture import require, run, prepare_fixture
 from release_artifact import (
     EXTRACTED_DIRECTORY, MANIFEST_FILE, VERIFICATION_FILE, archive_path, declared_checksum,
-    extract_archive, read_json, sha256, verified_archive,
+    extract_archive, read_json, sha256, verified_archive, qualified_archive, verification_directory,
 )
+from deployment import exclusive
 
 
 EXPECTED_TOOLS = 4
@@ -28,7 +29,7 @@ EXPECTED_RESOURCES = 5
 def extract_package(directory, version):
     archive = archive_path(directory, version)
     digest = declared_checksum(archive)
-    extracted = directory / EXTRACTED_DIRECTORY
+    extracted = verification_directory(directory)
     with verified_archive(archive, digest) as source:
         extract_archive(source, extracted)
     manifest = read_json(extracted / MANIFEST_FILE)
@@ -138,10 +139,21 @@ def main():
     parser.add_argument('--version', required=True)
     args = parser.parse_args()
     directory = args.directory.absolute()
-    extracted, digest = extract_package(directory, args.version)
+    with exclusive(directory, 'verify.lock'):
+        if (directory / VERIFICATION_FILE).exists():
+            archive, digest = qualified_archive(directory, args.version, allow_rc=True)
+            with verified_archive(archive, digest):
+                pass
+            print(json.dumps(dict(read_json(directory / VERIFICATION_FILE), reused=True)))
+            return
+        verify_package(directory, args.version)
+
+
+def verify_package(directory, version):
+    extracted, digest = extract_package(directory, version)
     documentation_links = verify_documentation(extracted)
-    resources = verify_runtime(directory, extracted, args.version)
-    result = {'passed': True, 'archiveSha256': digest, 'version': args.version, 'extracted': str(extracted),
+    resources = verify_runtime(directory, extracted, version)
+    result = {'passed': True, 'archiveSha256': digest, 'version': version, 'extracted': str(extracted),
               'resources': resources, 'tools': EXPECTED_TOOLS, 'selfContained': True, 'frenchReadme': True,
               'documentationLinks': documentation_links,
               'runtimeIsolation': 'No dotnet/NuGet variables, nonexistent DOTNET_ROOT, PATH restricted to Windows System32',

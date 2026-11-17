@@ -12,12 +12,25 @@ from pathlib import Path, PureWindowsPath
 import shutil
 import stat
 import zipfile
+import uuid
 
 
 VERIFICATION_FILE = 'verification.json'
 EXTRACTED_DIRECTORY = 'extracted verification'
 WINDOWS_REPARSE_POINT = getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0x400)
 MANIFEST_FILE = 'release-manifest.json'
+
+
+def verification_directory(directory):
+    """Preserve an interrupted extraction before retrying under the verifier's exclusive lock."""
+    directory = ordinary_directory(directory)
+    extracted = directory / EXTRACTED_DIRECTORY
+    if extracted.exists():
+        ordinary_directory(extracted)
+        if (directory / VERIFICATION_FILE).exists():
+            raise ValueError('Existing verification must be validated before extracting again')
+        extracted.rename(directory / (EXTRACTED_DIRECTORY + '.failed-' + uuid.uuid4().hex))
+    return extracted
 
 
 def ordinary_directory(path):
