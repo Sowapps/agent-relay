@@ -143,6 +143,25 @@ def main():
     shared.write_text(owner.replace_servers(shared.read_text(), {workflow.LEGACY_SERVER: parsed}), encoding='utf-8')
     rejected(lambda: migration.prepare(shared, workspace, root / 'same-identity-refused', stable_source=workflow.LEGACY_SERVER), 'distinct')
     results['missing_scope_and_option_disguised_same_identity_refused'] = True
+    shared, workspace, _, binding = fixture(root / 'initial-fixed-entry')
+    stable_data = shared.parent / 'stable-data'
+    request = migration.initial_request(stable_data, shared, workspace, workflow.LEGACY_SERVER)
+    launch = {'command': 'pwsh.exe', 'args': ['-NoProfile', '-NonInteractive', '-File', str(stable_data / 'launch.ps1'), '-ConnectionId', binding]}
+    (stable_data / 'mcp-runtime.json').write_text(json.dumps({'connectionId': binding, 'mcpLaunch': launch}), encoding='utf-8')
+    transaction = shared.parent / 'transaction'
+    migration.finish_initial(stable_data, transaction, request)
+    after = [shared.read_bytes(), workspace.read_bytes()]
+    selected = tomllib.loads(after[0].decode())['mcp_servers']
+    assert workflow.LEGACY_SERVER not in selected
+    assert owner.connection_identity(selected['agent_relay']) == (stable_data, binding)
+    assert owner.DEVELOPMENT_SERVER in tomllib.loads(after[1].decode())['mcp_servers']
+    migration.finish_initial(stable_data, transaction, request)
+    assert after == [shared.read_bytes(), workspace.read_bytes()]
+    assert migration.initial_request(stable_data, shared, workspace, workflow.LEGACY_SERVER) == request
+    changed = dict(selected['agent_relay'], args=launch['args'][:-1] + [str(uuid.uuid4())])
+    rejected(lambda: owner.connection_identity(changed), 'retained scope')
+    results['initial_fixed_entry_preserves_scope_and_resumes_idempotently'] = True
+
     report = {'passed': True, 'cases': results, 'seconds': round(time.monotonic() - started, 3),
               'modelCalls': 0, 'liveConfigurationsWritten': False, 'stableTouched': False,
               'sourceHashes': {name: hashlib.sha256((Path(__file__).parent / name).read_bytes()).hexdigest()

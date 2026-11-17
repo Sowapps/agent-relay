@@ -54,6 +54,7 @@ public sealed partial class InstallationUpdate
             result = action switch
             {
                 "prepare" => PrepareCurrent(candidate ?? throw new ArgumentException("Select an extracted verified candidate.")),
+                "prepare-initial" => PrepareCurrent(candidate ?? throw new ArgumentException("Select an extracted verified candidate."), initial: true),
                 "resume" => ResumeSelected(),
                 "authorize" => AuthorizeSelected(),
                 "status" => Read(),
@@ -103,19 +104,19 @@ public sealed partial class InstallationUpdate
         }
     }
 
-    private InstallationUpdateState PrepareCurrent(string candidate)
+    private InstallationUpdateState PrepareCurrent(string candidate, bool initial = false)
     {
         if (!File.Exists(Path.Combine(candidate, "transport", "AgentRelay.Transport.exe")))
         {
             var prior = File.Exists(journal) ? Read() : null;
-            if (prior is not { Schema: 1, Phase: not "rolled_back" } || prior.CandidateHash != Hash(Path.Combine(candidate, "release-manifest.json")))
+            if (initial || prior is not { Schema: 1, Phase: not "rolled_back" } || prior.CandidateHash != Hash(Path.Combine(candidate, "release-manifest.json")))
                 throw Failure("update_initial_migration_required", "New updates require a stable-transport candidate. Legacy journals retain explicit recovery; no new legacy transaction was created.");
         }
-        return Prepare(candidate);
+        return Prepare(candidate, initial);
     }
 
     // Legacy preparation remains internal for retained-schema qualification; callers use the guarded Run entry.
-    internal InstallationUpdateState Prepare(string candidate)
+    internal InstallationUpdateState Prepare(string candidate, bool initial = false)
     {
         var watch = Stopwatch.StartNew();
         candidate = Absolute(candidate);
@@ -147,7 +148,7 @@ public sealed partial class InstallationUpdate
         var contractHash = contract["contractHash"]?.GetValue<string>() ?? throw new JsonException();
         if (contract["version"]?.GetValue<string>() != version || contractHash.Length != 64)
             throw Failure("update_candidate_invalid", "Candidate version and MCP contract disagree.");
-        if (expected.ContainsKey("transport/AgentRelay.Transport.exe")) return PrepareSelected(candidate, manifestPath, version, contractHash, expected);
+        if (expected.ContainsKey("transport/AgentRelay.Transport.exe")) return PrepareSelected(candidate, manifestPath, version, contractHash, expected, initial);
         expected.Add("release-manifest.json", Hash(manifestPath));
         AddLauncher(expected, candidate, "mcp-launcher", documentation: true);
         if (Directory.Exists(Path.Combine(data, "startup-launcher")))

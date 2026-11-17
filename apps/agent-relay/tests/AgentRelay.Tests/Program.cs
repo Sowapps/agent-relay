@@ -3,6 +3,7 @@ using AgentRelay.Infrastructure;
 using System.IO.Pipes;
 
 if (args.Length == 2 && args[0] == "mcp-connection-inspection") { McpConnectionInspectionScenarios.Run(Path.GetFullPath(args[1])); return; }
+if (args.Length == 2 && args[0] == "initial-stable-activation") { SelectedUpdateScenarios.Initial(Path.GetFullPath(args[1])); return; }
 
 if (args.Length == 4 && args[0] == "transport-fixture") { await McpTransportScenarios.FixtureAsync(args[1], args[2], args[3]); return; }
 if (args.Length == 3 && args[0] == "minimal-mcp-transport") { await McpTransportScenarios.RunAsync(Path.GetFullPath(args[1]), Path.GetFullPath(args[2])); return; }

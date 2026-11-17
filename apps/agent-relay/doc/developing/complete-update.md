@@ -1,7 +1,7 @@
 # Complete portable update
 
 **Utility:** defines the single update transaction, readiness and recovery boundaries.  
-**Usage:** use for an existing portable installation with a qualified stable-transport connection. First installation, initial legacy-client migration and changing data scope are separate gates; development qualification never authorizes a stable deployment.
+**Usage:** use for an existing portable installation. Explicit initial activation is handled by this same command; a new installation or changing data scope remains separate. Development qualification never authorizes a stable deployment.
 
 ## Owners and input
 
@@ -17,11 +17,23 @@ RuntimePaths owns the immutable release slot below the installation's var/apps/a
 
 The candidate must contain the independent self-contained transport, current MCP identity and operation revision manifest. Every source file/hash is checked, same-version different bytes are refused, reused operation revisions cannot change schemas, and incompatible wire requirements refuse before cutover. Changed native helpers with retained sessions require the existing owned-session synchronization qualification. No remote inspection is needed when helpers are unchanged.
 
-A schema-2 update requires an existing qualified transport selection. Active legacy broker connections or an unqualified initial connection return update_initial_migration_required before publication. Do not relabel the old monolithic broker as a minimal transport or repeat an unsafe client restart to bypass that gate. The initial migration/client coordination procedure remains separately required.
+A normal schema-2 update requires an existing qualified transport selection. For the first activation, explicitly select `--initial` and coordinate a safe maintenance point with consuming agents. The same C# transaction stages the candidate and retains that intent, suspends new admission, waits for active and uncertain work, and only then requests graceful closure of legacy connections. It waits for closure before stopping the host or publishing anything. It does not relabel the old broker as a new transport. Rollback restores the original pointer and absence of a transport selection through the same snapshot owner.
 
 ## Command and phases
 
 After the exact archive is verified, use the existing complete_update.py entry with --data, --release-directory and --version. Its --action status, resume, rollback and diagnostic actions need no original archive after verified staging. Packaged launchers call that same adapter. Common registration/startup/UI integration and final archive qualification must be complete before deployment; source fixtures alone are not installed readiness.
+
+From a clean checkout with its stable version committed, one command prepares and deploys the source through existing owners:
+
+```powershell
+python -B apps/agent-relay/tools/complete_update.py --source --data <existing-stable-data>
+```
+
+The first activation uses that same command with `--initial --codex-config <shared-settings> --workspace-config <development-settings>` and, if needed, `--stable-server <existing-stable-name>`. The explicit settings paths and stable binding are retained before execution. `--source` reuses a matching exact-source qualification receipt; otherwise it invokes the existing isolated `qualify` command, rather than implementing another packager or verifier. It creates no tag or remote release. An explicit verified archive remains supported through `--release-directory` and `--version`.
+
+The CLI follows the retained runner until completion or an explicit attention error. On first activation it then invokes the existing paired registration adapter: the shared `agent_relay` uses the C#-generated fixed launch entry, the development connection remains workspace-local, and the stable data and binding must match. Resume uses the retained inputs and paired plan, including after interruption between the application and settings steps; an external settings change refuses with retained diagnostics. A configuration failure is not reported as full success. Neither the adapter nor the updater restarts Codex. Verify the consuming chat's actual catalogue and scoped access before telling it to resume work.
+
+Default command output contains bounded state and receipt references; `--details` explicitly requests the full retained transaction. Full diagnostics and generated reports remain outside Git.
 
 1. Prepare a checked private candidate and independent recovery runner under the existing update directory. The same candidate resumes the same transaction; a conflicting candidate refuses. Completed before-images are never replaced.
 2. Persist the owned admission barrier and awaiting_work state. Drain admitted requests and block on pending, running or unknown durable work. Waiting survives interruption with no expiry and never stops/replays that work. Repeated resume checks the same state.

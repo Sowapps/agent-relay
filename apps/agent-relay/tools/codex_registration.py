@@ -7,6 +7,7 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
+import json
 import os
 from pathlib import Path
 import re
@@ -24,6 +25,18 @@ def connection_identity(table):
     if not isinstance(table, dict) or not isinstance(table.get('command'), str) or not table['command']:
         raise ValueError('The named connection needs an explicit executable')
     args = table.get('args')
+    if isinstance(args, list) and all(isinstance(value, str) for value in args) and '-File' in args:
+        if any(args.count(flag) != 1 or args.index(flag) == len(args) - 1 for flag in ('-File', '-ConnectionId')):
+            raise ValueError('The fixed launch entry needs one explicit script and scoped connection')
+        script = Path(args[args.index('-File') + 1])
+        if not script.is_absolute() or '..' in script.parts:
+            raise ValueError('The fixed launch entry needs an absolute path')
+        data = script.parent
+        pointer = json.loads((data / 'mcp-runtime.json').read_text(encoding='utf-8-sig'))
+        binding = str(uuid.UUID(args[args.index('-ConnectionId') + 1]))
+        if pointer.get('mcpLaunch') != {'command': table['command'], 'args': args} or str(uuid.UUID(pointer['connectionId'])) != binding:
+            raise ValueError('The fixed launch entry does not match its retained scope')
+        return data, binding
     if not isinstance(args, list) or not all(isinstance(value, str) for value in args) or 'mcp' not in args or any(
             args.count(flag) != 1 or args.index(flag) == len(args) - 1
             for flag in ('--data-dir', '--connection-id')):

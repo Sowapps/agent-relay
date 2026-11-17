@@ -16,6 +16,40 @@ import tomllib
 
 from deployment import exclusive
 import codex_registration as registration
+
+
+def selected_stable_table(tables, source):
+    if source not in tables and source == registration.LEGACY_STABLE_SERVER:
+        source = registration.SHARED_SERVER
+    return source, tables.get(source)
+
+
+def initial_request(data, shared, workspace, stable_source):
+    shared, workspace = ordinary_file(shared).resolve(), ordinary_file(workspace).resolve()
+    _, table = selected_stable_table(tomllib.loads(shared.read_text(encoding='utf-8-sig')).get('mcp_servers', {}), stable_source)
+    selected, binding = registration.connection_identity(table)
+    if selected.resolve() != Path(data).resolve():
+        raise ValueError('The selected stable registration belongs to different data')
+    return dict(shared=str(shared), workspace=str(workspace), stableSource=stable_source, binding=binding)
+
+
+def finish_initial(data, transaction, request):
+    """Resume the existing paired settings transaction using the C#-generated fixed entry."""
+    folder = Path(transaction) / 'client-registration'
+    plan = folder / 'plan.json'
+    if not plan.exists():
+        pointer = json.loads((Path(data) / 'mcp-runtime.json').read_text(encoding='utf-8-sig'))
+        tables = tomllib.loads(Path(request['shared']).read_text(encoding='utf-8-sig')).get('mcp_servers', {})
+        source, original = selected_stable_table(tables, request['stableSource'])
+        if registration.connection_identity(original) != (Path(data), request['binding']):
+            raise ValueError('Stable registration changed after initial activation was selected')
+        replacement = dict(original, **pointer['mcpLaunch'])
+        plan = prepare(Path(request['shared']), Path(request['workspace']), folder,
+                       stable_source=source, stable_replacement=replacement)
+    result = reconcile(plan)
+    if result['phase'] != 'complete':
+        raise RuntimeError('Initial client registration is not complete; resume its retained plan')
+    return result
 from release_artifact import ordinary_file
 
 
@@ -43,7 +77,7 @@ def encoded_edit(raw, changes):
 
 
 def prepare(shared, workspace, folder, *, stable_source,
-            shared_name=registration.SHARED_SERVER, dev_name=registration.DEVELOPMENT_SERVER):
+            shared_name=registration.SHARED_SERVER, dev_name=registration.DEVELOPMENT_SERVER, stable_replacement=None):
     """Retain reviewed before/after intent. @see reconcile for publication/rollback."""
     shared, workspace = ordinary_file(shared).resolve(), ordinary_file(workspace).resolve()
     if shared == workspace or shared_name == dev_name or stable_source == dev_name:
@@ -60,6 +94,10 @@ def prepare(shared, workspace, folder, *, stable_source,
         raise ValueError('The shared destination differs from both reviewed registrations')
     if tables[1].get(dev_name) not in (None, dev) or tables[0].get(dev_name) not in (None, dev):
         raise ValueError('The development alias selects an unrelated registration')
+    if stable_replacement is not None:
+        if registration.connection_identity(stable_replacement) != registration.connection_identity(stable):
+            raise ValueError('The replacement launch must retain the exact stable data and binding')
+        stable = stable_replacement
     proposed = [encoded_edit(raw[0], {stable_source: None, dev_name: None, shared_name: stable}),
                 encoded_edit(raw[1], {shared_name: None, dev_name: dev})]
     folder = Path(folder).resolve()
