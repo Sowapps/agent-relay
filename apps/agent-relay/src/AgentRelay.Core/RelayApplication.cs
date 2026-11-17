@@ -1,9 +1,13 @@
 namespace AgentRelay.Core;
 
+public sealed record RuntimeStamp(string Generation, DateTimeOffset StartedAt);
+public sealed record SessionRuntimeObservation(RuntimeStamp Host, RuntimeStamp? Distribution, RuntimeStamp? Native,
+    DateTimeOffset ObservedAt, string Cause);
+
 public sealed record SessionDefinition(Guid Id, string Name, OperationScope Scope, RelayEndpoint Endpoint,
     RelayWorkspace Workspace, bool AllowLocalWork);
 public sealed record SessionSnapshot(Guid Id, string Name, OperationScope Scope, string State, string? NativeConversationId = null,
-    string? Diagnostic = null, bool WorkActive = false);
+    string? Diagnostic = null, bool WorkActive = false, SessionRuntimeObservation? Runtime = null);
 public sealed record ReadQuery(Guid ProjectId, Guid? EndpointId = null, Guid? SessionId = null, Guid? TaskId = null,
     string? Kind = null, string? State = null, string? Search = null, DateTimeOffset? Since = null, DateTimeOffset? Until = null,
     long? Cursor = null, int Limit = 50);
@@ -37,10 +41,11 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
 {
     public ProjectAdmission Admission { get; } = new();
     private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, SemaphoreSlim> sessionGates = new();
-    private async Task<IDisposable> Gate(Guid id, CancellationToken token)
+    private async Task<IDisposable> Gate(Guid id, CancellationToken token, bool wait = false)
     {
         var gate = sessionGates.GetOrAdd(id, _ => new(1, 1));
-        if (!await gate.WaitAsync(0, token)) throw new RelayException("busy", "This session has a lifecycle/submission change in progress.");
+        if (wait) await gate.WaitAsync(token);
+        else if (!await gate.WaitAsync(0, token)) throw new RelayException("busy", "This session has a lifecycle/submission change in progress.", false);
         return new SessionLease(gate);
     }
     private sealed class SessionLease(SemaphoreSlim gate) : IDisposable { public void Dispose() => gate.Release(); }
@@ -130,9 +135,9 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
 
     public async Task<WorkRecord> MessageAsync(CallerIdentity caller, Guid sessionId, Guid requestId, string text, Guid? taskId, CancellationToken token)
     {
-        using var projectLease = Admission.Enter((await sessions.GetAsync(sessionId, token)).Scope.ProjectId);
+        using var projectLease = Admission.EnterWork((await sessions.GetAsync(sessionId, token)).Scope.ProjectId);
         using var policySnapshot = policy.Pin();
-        using var lease = await Gate(sessionId, token);
+        using var lease = await Gate(sessionId, token, wait: true);
         var session = await OwnedAsync(caller, sessionId, RelayCapabilities.SendMessage, token);
         var scope = policy.Message(caller, session.Scope.ProjectId, session.Scope.RecipientId, session.Scope.WorkspaceId);
         return await work.SubmitAsync(new(requestId, scope.RecipientId.ToString("D"), "message", text, SessionId: sessionId,
@@ -142,7 +147,7 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
     public async Task<WorkRecord> CommandAsync(CallerIdentity caller, Guid projectId, Guid endpointId, Guid workspaceId,
         string commandId, Guid requestId, CancellationToken token)
     {
-        using var projectLease = Admission.Enter(projectId);
+        using var projectLease = Admission.EnterWork(projectId);
         using var policySnapshot = policy.Pin();
         var member = policy.Demand(caller, projectId, RelayCapabilities.RunCommand);
         if (!(member.CommandIds ?? []).Contains(commandId, StringComparer.Ordinal)) throw new RelayException("command_denied", "The project does not authorize this command identifier.");
@@ -154,9 +159,9 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
 
     public async Task<WorkRecord> TransferAsync(CallerIdentity caller, Guid sessionId, ArtifactTransfer transfer, Guid requestId, CancellationToken token)
     {
-        using var projectLease = Admission.Enter((await sessions.GetAsync(sessionId, token)).Scope.ProjectId);
+        using var projectLease = Admission.EnterWork((await sessions.GetAsync(sessionId, token)).Scope.ProjectId);
         using var policySnapshot = policy.Pin();
-        using var lease = await Gate(sessionId, token);
+        using var lease = await Gate(sessionId, token, wait: true);
         var session = await OwnedAsync(caller, sessionId, RelayCapabilities.ReadHistory, token);
         policy.Transfer(caller, session.Scope.ProjectId, transfer);
         if (transfer.Source.EndpointId != session.Scope.RecipientId && transfer.Destination.EndpointId != session.Scope.RecipientId)
@@ -169,7 +174,7 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
     public async Task<WorkRecord> ResultAsync(CallerIdentity caller, Guid requestId, CancellationToken token)
     {
         var retained = await work.ReadAsync(requestId, token);
-        using var projectLease = Admission.Enter(retained.Request.Scope?.ProjectId ?? Guid.Empty);
+        using var projectLease = Admission.EnterWork(retained.Request.Scope?.ProjectId ?? Guid.Empty);
         return await ResultCore(caller, requestId, token);
     }
 

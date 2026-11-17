@@ -5,9 +5,11 @@ import json
 from itertools import takewhile
 from pathlib import Path
 import re
+import subprocess
 import sys
 import uuid
-from relay_mcp import RelayMcp
+from relay_mcp import McpRpc
+from runtime_layout import runtime_command
 
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--dotnet',type=Path)
@@ -19,7 +21,11 @@ root=Path(__file__).resolve().parents[3]
 output=args.output.resolve();output.mkdir(parents=True,exist_ok=True)
 with (output/'facade.stderr.log').open('w',encoding='utf-8') as errors:
     runtime={'executable':str(args.executable.resolve())} if args.executable else {'dotnet':str(args.dotnet.resolve()),'assembly':str(args.assembly.resolve())}
-    client=RelayMcp(runtime,output/'facade-data',root,errors)
+    command = runtime_command(runtime)
+    scope = ['--data-dir', str(output / 'facade-data')]
+    manifest = json.loads(subprocess.check_output([*command, 'mcp-operations', *scope], encoding='utf-8', timeout=15))
+    operations = {item['id']: item['inputSchema'] for item in manifest['operations']}
+    client=McpRpc([*command, 'mcp-stable-worker', *scope], root, errors)
     try:
         resources=client.call('resources/list')['resources']
         guides={resource['uri']:client.call('resources/read',{'uri':resource['uri']})['contents'][0]['text'] for resource in resources}
@@ -29,13 +35,17 @@ with (output/'facade.stderr.log').open('w',encoding='utf-8') as errors:
         assert next(resource for resource in resources if resource['uri']=='agent-relay://docs/new-project-request')['mimeType']=='text/plain'
         assert 'agent-relay://docs/quickstart' in client.initialization['instructions']
         tools={tool['name']:tool['inputSchema'] for tool in client.call('tools/list')['tools']}
+        assert set(tools) == {'get_connection_status', 'discover_operations', 'invoke_operation', 'get_result'}
         table=guides['agent-relay://docs/tools']
-        inventory=table.split('| Tool | Required arguments | Optional arguments / effect |', 1)[1].strip().splitlines()
+        inventory=table.split('| Operation | Required arguments | Optional arguments / effect |', 1)[1].strip().splitlines()
         rows=[line.split('|')[1:4] for line in takewhile(lambda line: line.startswith('|'), inventory[1:])]
-        assert sorted(cells[0].strip() for cells in rows)==sorted(tools),'Guide tool inventory differs from live schema'
+        documented = {cells[0].strip() for cells in rows}
+        assert documented == set(operations), (
+            f'Guide operation inventory differs: missing={sorted(set(operations) - documented)}, '
+            f'extra={sorted(documented - set(operations))}')
         for name,required,_ in rows:
             required=required.strip()
-            assert ([] if required=='none' else [x.strip() for x in required.split(',')])==tools[name.strip()]['required'],name
+            assert sorted([] if required=='none' else [x.strip() for x in required.split(',')]) == sorted(operations[name.strip()].get('required', [])), name
         examples=re.findall(r'```json\s*(.*?)```',guides['agent-relay://docs/quickstart'],re.S)
         def check(value,schema):
             kind=schema['type'];assert isinstance(value,{'object':dict,'string':str,'integer':int,'boolean':bool}[kind])
@@ -49,7 +59,9 @@ with (output/'facade.stderr.log').open('w',encoding='utf-8') as errors:
             if kind=='integer':assert schema.get('minimum',value)<=value<=schema.get('maximum',value)
         for example in examples:
             prepared=re.sub(r'<[^>]+>',lambda _:str(uuid.uuid4()),example)
-            call=json.loads(prepared);check(call['arguments'],tools[call['tool']])
+            call=json.loads(prepared)
+            schema = tools[call['tool']] if 'tool' in call else operations[call['operation_id']]
+            check(call['arguments'], schema)
         try:client.call('resources/read',{'uri':'agent-relay://docs/../../connections'})
         except RuntimeError:pass
         else:raise AssertionError('Unknown resource path accepted')
@@ -60,6 +72,6 @@ constants={node.targets[0].id:ast.literal_eval(node.value) for node in module.bo
 assert constants['guide_uri']=='agent-relay://docs/native-messages'
 assert 'independent' in constants['native_guide'] and 'send_message' in constants['native_guide']
 assert constants['tool']['name']=='send_message' and constants['tool']['inputSchema']['required']==['text']
-result={'passed':True,'tools':len(tools),'examples':len(examples),'resources':list(guides),'nativeMessageGuide':'Static AST/schema validation; Linux runtime not invoked','modelCalls':0,'agentSessionCalls':0,'scope':'Fresh documentation-only clients; example arguments validated against live schemas, not executed'}
+result={'passed':True,'tools':len(tools),'operations':len(operations),'examples':len(examples),'resources':list(guides),'nativeMessageGuide':'Static AST/schema validation; Linux runtime not invoked','modelCalls':0,'agentSessionCalls':0,'scope':'Fresh documentation-only clients; example arguments validated against live schemas, not executed'}
 (output/'result.json').write_text(json.dumps(result,indent=2),encoding='utf-8')
 print(json.dumps(result))

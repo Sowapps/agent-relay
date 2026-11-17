@@ -29,6 +29,9 @@ public sealed class RelayDatabase
             CREATE TABLE IF NOT EXISTS work(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS inbox(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS session_runtime(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS workspace_reservations(resource TEXT PRIMARY KEY,request_id TEXT NOT NULL,project_id TEXT NOT NULL,sender_id TEXT NOT NULL,session_id TEXT);
+            CREATE TABLE IF NOT EXISTS workspace_identities(workspace_id TEXT PRIMARY KEY,resource TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS transfers(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS connections(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS cursors(id TEXT PRIMARY KEY,payload TEXT NOT NULL);

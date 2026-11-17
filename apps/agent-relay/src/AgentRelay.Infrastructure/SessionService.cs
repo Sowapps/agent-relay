@@ -11,15 +11,19 @@ public sealed class SessionService
 {
     private readonly string dataDirectory;
     private readonly SettingsStore settings;
-    private readonly AgentControl agents;
+    private readonly ISessionRuntime agents;
     private readonly WslBridge bridge;
     private readonly SqliteDocuments<RelaySession> store;
+    private readonly SqliteDocuments<SessionRuntimeObservation> observations;
+    private readonly SemaphoreSlim observationGate = new(1, 1);
+    private static readonly RuntimeStamp Host = new(Guid.NewGuid().ToString("N"), AgentRelay.Protocol.McpProcessIdentity.StartedAt);
     private readonly SemaphoreSlim creation = new(1, 1);
 
-    public SessionService(string dataDirectory, SettingsStore settings, AgentControl agents, WslBridge bridge)
+    public SessionService(string dataDirectory, SettingsStore settings, ISessionRuntime agents, WslBridge bridge)
     {
         this.dataDirectory = dataDirectory; this.settings = settings; this.agents = agents; this.bridge = bridge;
         store = new(new RelayDatabase(dataDirectory), "sessions");
+        observations = new(new RelayDatabase(dataDirectory), "session_runtime");
     }
 
     public Task<IReadOnlyList<RelaySession>> ListAsync(CancellationToken token) => store.ListAsync(token);
@@ -82,11 +86,60 @@ public sealed class SessionService
         return new(session, await agents.StatusAsync(await ResolveAsync(id, session.ProfileId, token), token), active);
     }
 
+    public async Task<SessionRuntimeObservation> ObserveAsync(Guid id, AgentStatus status, CancellationToken token)
+    {
+        await observationGate.WaitAsync(token);
+        try
+        {
+            var previous = await observations.FindAsync(id, token);
+            var observed = new SessionRuntimeObservation(Host, status.DistributionRuntime, status.NativeRuntime, DateTimeOffset.UtcNow, "unknown");
+            // Unavailable telemetry must not erase the last confirmed identities used to classify a later observation.
+            if (status.NativePresent is null || status.DistributionRuntime is null || status.NativePresent == true && status.NativeRuntime is null)
+                return observed;
+            var cause = previous switch
+            {
+                null => "initial_observation",
+                _ when previous.Distribution?.Generation != status.DistributionRuntime.Generation => "wsl_restart",
+                _ when previous.Native is not null && status.NativePresent == false => "native_exit",
+                _ when previous.Native?.Generation != observed.Native?.Generation => "native_started_or_replaced",
+                _ when previous.Host.Generation != observed.Host.Generation => "host_restart",
+                _ => previous.Cause
+            };
+            var result = observed with { Cause = cause };
+            if (previous is null || previous.Host != result.Host || previous.Distribution != result.Distribution || previous.Native != result.Native)
+                await observations.SaveAsync(id, result, token);
+            return result;
+        }
+        finally { observationGate.Release(); }
+    }
+
     public async Task<SessionDetail> StartAsync(Guid id, CancellationToken token)
     {
         var session = await FindAsync(id, token);
         var agent = await agents.StartAsync(await ResolveAsync(id, session.ProfileId, token), token, resume: true);
         return new(session, agent);
+    }
+
+    /// <summary>Observe readiness and restore a verified existing conversation, without issuing work.</summary>
+    /// <seealso cref="StartAsync"/>
+    internal async Task<AgentStatus> EnsureReadyAsync(RelaySession session, WslProfile profile, bool mayRestore, CancellationToken token)
+    {
+        var status = await agents.StatusAsync(profile, token);
+        if (status.State == "not_started" && mayRestore && status.NativeConversationId is not null && status.DistributionRuntime is not null)
+        {
+            status = await agents.StartAsync(profile, token, resume: true, requirePinnedConversation: true);
+            var readinessDeadline = System.Diagnostics.Stopwatch.StartNew();
+            while (status.State == "starting" && readinessDeadline.Elapsed < TimeSpan.FromSeconds(5))
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(500), token);
+                status = await agents.StatusAsync(profile, token);
+            }
+        }
+        await ObserveAsync(session.Id, status, token);
+        if (status.State != "ready")
+            throw new RelayException(status.State == "awaiting_approval" ? "session_awaiting_approval" : "session_not_ready",
+                $"Native session is {status.State}. {status.Message} No work was dispatched.", false);
+        return status;
     }
 
     public async Task<SessionDetail> ReopenAsync(Guid id, CancellationToken token)

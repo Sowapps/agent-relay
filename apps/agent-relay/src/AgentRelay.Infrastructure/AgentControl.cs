@@ -5,11 +5,18 @@ using AgentRelay.Core;
 namespace AgentRelay.Infrastructure;
 
 public sealed record AgentStatus(string ProfileId, string Client, string State, string Message, string Distribution,
-    string User, string Workspace, bool ModelPromptSent = false, string? Details = null, string? NativeConversationId = null);
+    string User, string Workspace, bool ModelPromptSent = false, string? Details = null, string? NativeConversationId = null,
+    RuntimeStamp? DistributionRuntime = null, RuntimeStamp? NativeRuntime = null, bool? NativePresent = null);
 public sealed record ProfileContext(string Id, string Name, string Client, string Distribution, string User,
     string Workspace, bool AllowLocalWork, IReadOnlyList<CommandRule> Commands);
 
-public sealed class AgentControl(SettingsStore settings, WslBridge bridge)
+public interface ISessionRuntime
+{
+    Task<AgentStatus> StatusAsync(WslProfile profile, CancellationToken token);
+    Task<AgentStatus> StartAsync(WslProfile profile, CancellationToken token, bool resume = false, bool requirePinnedConversation = false);
+}
+
+public sealed class AgentControl(SettingsStore settings, WslBridge bridge) : ISessionRuntime
 {
     private readonly ConcurrentDictionary<string, SemaphoreSlim> startup = new();
 
@@ -43,13 +50,13 @@ public sealed class AgentControl(SettingsStore settings, WslBridge bridge)
         return await StartAsync(profile, token);
     }
 
-    public async Task<AgentStatus> StartAsync(WslProfile profile, CancellationToken token, bool resume = false)
+    public async Task<AgentStatus> StartAsync(WslProfile profile, CancellationToken token, bool resume = false, bool requirePinnedConversation = false)
     {
-        var gate = startup.GetOrAdd(profile.Root + "/" + profile.Client, _ => new(1, 1));
+        var gate = startup.GetOrAdd(profile.Distribution + "/" + profile.User + ":" + profile.Root + "/" + profile.Client, _ => new(1, 1));
         if (!await gate.WaitAsync(0, token)) return Result(profile, "starting", "This agent already has a startup request in progress.");
         try
         {
-            try { await bridge.CallAsync(profile, "start", new { profile.AllowLocalWork, Resume = resume }, token); }
+            try { await bridge.CallAsync(profile, "start", new { profile.AllowLocalWork, Resume = resume, RequirePinnedConversation = requirePinnedConversation }, token); }
             catch (TimeoutException)
             {
                 var observed = await StatusAsync(profile, token);
@@ -76,8 +83,14 @@ public sealed class AgentControl(SettingsStore settings, WslBridge bridge)
             attention ? Result(profile, "attention_required", "The native agent requires attention in its dedicated terminal.", pane) :
             !initialized ? Result(profile, "starting", "The agent session is running; its relay MCP is still initializing.") :
             Result(profile, "ready", "The native session and relay MCP are ready.");
-        return result with { NativeConversationId = native.TryGetProperty("nativeConversationId", out var conversation) && conversation.ValueKind == JsonValueKind.String ? conversation.GetString() : null };
+        return result with {
+            NativeConversationId = native.TryGetProperty("nativeConversationId", out var conversation) && conversation.ValueKind == JsonValueKind.String ? conversation.GetString() : null,
+            DistributionRuntime = ReadStamp(native, "distributionRuntime"), NativeRuntime = ReadStamp(native, "nativeRuntime"), NativePresent = available
+        };
     }
+
+    private static RuntimeStamp? ReadStamp(JsonElement native, string name) =>
+        native.TryGetProperty(name, out var stamp) && stamp.ValueKind == JsonValueKind.Object ? RelayJson.Deserialize<RuntimeStamp>(stamp.GetRawText()) : null;
 
     private static AgentStatus Result(WslProfile profile, string state, string message, string? details = null) =>
         new(profile.Id, profile.Client, state, message, profile.Distribution, profile.User, Context(profile).Workspace, Details: details);

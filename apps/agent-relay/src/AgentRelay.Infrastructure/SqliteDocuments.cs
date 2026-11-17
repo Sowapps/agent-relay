@@ -6,7 +6,7 @@ public sealed class SqliteDocuments<T>
     private readonly string table;
     public SqliteDocuments(RelayDatabase database, string table)
     {
-        if (table is not ("sessions" or "transfers" or "connections" or "cursors" or "dispatches")) throw new ArgumentException("Unsupported document collection.");
+        if (table is not ("sessions" or "session_runtime" or "transfers" or "connections" or "cursors" or "dispatches")) throw new ArgumentException("Unsupported document collection.");
         this.database = database; this.table = table;
     }
 

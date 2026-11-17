@@ -5,6 +5,7 @@ import json
 import sys
 import uuid
 from relay_files import commit, root_path, context, store_message
+from native_clients import ancestor_generations
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--root', required=True)
@@ -29,7 +30,8 @@ for line in sys.stdin:
             continue
         method = request.get('method')
         if method == 'initialize':
-            commit(data / 'mcp-initialized.json', {'profile': args.profile, 'initialized': True})
+            commit(data / 'mcp-initialized.json', {'profile': args.profile, 'initialized': True,
+                                                  'nativeAncestors': ancestor_generations()})
             result = {'protocolVersion': request['params']['protocolVersion'], 'capabilities': {'tools': {}, 'resources': {}},
                       'serverInfo': {'name': 'agent-relay-messages', 'version': '1.0'}, 'instructions': 'Read resource agent-relay://docs/native-messages. Use send_message with text; omit in_reply_to for independent reports, use the exact received request UUID for final replies. No commands or expanded permissions.'}
         elif method == 'tools/list':

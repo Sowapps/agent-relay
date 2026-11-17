@@ -8,7 +8,7 @@ public sealed record WorkResult(string Origin, string Output, string ErrorOutput
     IReadOnlyDictionary<string, string>? Details = null);
 public sealed record WorkRecord(WorkRequest Request, string State, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,
     WorkResult? Result = null, string? Error = null, string? ErrorCode = null, WorkMetadata? Metadata = null, WorkProgress? Progress = null,
-    DateTimeOffset? CancellationRequestedAt = null);
+    DateTimeOffset? CancellationRequestedAt = null, bool DispatchBoundaryTracked = false);
 public sealed record WorkProgress(long Bytes, long TotalBytes, string Phase, DateTimeOffset UpdatedAt);
 public sealed record WorkEvent(Guid Id, Guid RequestId, Guid? ProjectId, Guid? TaskId, Guid? AttemptId, Guid? SessionId,
     Guid? EndpointId, string State, DateTimeOffset OccurredAt, string? ErrorCode = null);
@@ -31,6 +31,16 @@ public interface IWorkExecutor
     Task<WorkResult> ExecuteAsync(WorkRequest request, CancellationToken token);
 }
 
+public interface IPreparedWork : IDisposable
+{
+    Task<WorkResult> ExecuteAsync(CancellationToken token);
+}
+
+public interface IWorkPreparation
+{
+    Task<IPreparedWork> PrepareAsync(WorkRequest request, CancellationToken token);
+}
+
 public sealed class WorkService : IAsyncDisposable
 {
     private readonly IWorkStore store;
@@ -42,11 +52,15 @@ public sealed class WorkService : IAsyncDisposable
     private readonly System.Collections.Concurrent.ConcurrentDictionary<string, Guid> activeProjects = new();
     private readonly Dictionary<string, CancellationTokenSource> cancellations = new();
     private readonly Dictionary<Guid, string> operationKeys = new();
+    private sealed record Preparation(WorkRequest Request, string Key, TaskCompletionSource<WorkRecord> Completion);
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<Guid, Preparation> preparing = new();
     private readonly int maximumConcurrency;
     private int disposeState;
-    public bool IsActive => running.Values.Any(task => !task.IsCompleted);
-    public bool IsProjectActive(Guid projectId) => running.Any(item => !item.Value.IsCompleted && activeProjects.GetValueOrDefault(item.Key) == projectId);
-    public bool IsSessionActive(Guid sessionId) => running.TryGetValue("session:" + sessionId, out var task) && !task.IsCompleted;
+    public bool IsActive => !preparing.IsEmpty || running.Values.Any(task => !task.IsCompleted);
+    public bool IsProjectActive(Guid projectId) => preparing.Values.Any(item => item.Request.Scope?.ProjectId == projectId) ||
+        running.Any(item => !item.Value.IsCompleted && activeProjects.GetValueOrDefault(item.Key) == projectId);
+    public bool IsSessionActive(Guid sessionId) => preparing.Values.Any(item => item.Request.SessionId == sessionId) ||
+        running.TryGetValue("session:" + sessionId, out var task) && !task.IsCompleted;
 
     public WorkService(IWorkStore store, IWorkExecutor executor, Func<IReadOnlyCollection<WorkCapability>> capabilities, int maximumConcurrency = 4)
     {
@@ -64,6 +78,8 @@ public sealed class WorkService : IAsyncDisposable
         var capability = capabilities().SingleOrDefault(item => item.ProfileId == request.ProfileId);
         if (capability is null || !(request.Kind switch { "command" => capability.Commands, "message" => capability.Messages, _ => capability.Files }))
             throw new RelayException("capability_denied", "This profile does not permit the requested operation.");
+        Preparation claim;
+        var ownsClaim = false;
         await admission.WaitAsync(token).ConfigureAwait(false);
         try
         {
@@ -71,28 +87,73 @@ public sealed class WorkService : IAsyncDisposable
             var existing = await store.FindAsync(request.Id, token).ConfigureAwait(false);
             if (existing is not null)
             {
-                if (existing.Request != request) throw new RelayException("id_conflict", "This identifier belongs to another operation.");
+                if (existing.Request != request) throw new RelayException("id_conflict", "This identifier belongs to another operation.", false);
                 return existing;
             }
-            var key = request.SessionId is { } sessionId ? "session:" + sessionId : "profile:" + request.ProfileId;
-            if (running.TryGetValue(key, out var active) && !active.IsCompleted) throw new RelayException("busy", "This session already has an active operation.");
-            if (running.Values.Count(task => !task.IsCompleted) >= maximumConcurrency) throw new RelayException("busy", "The configured host concurrency limit is reached.");
-            foreach (var completed in running.Where(pair => pair.Value.IsCompleted).Select(pair => pair.Key).ToArray())
+            var key = request.SessionId is { } sessionId ? "session:" + sessionId :
+                request.Scope?.WorkspaceId is { } workspaceId ? "profile:" + request.ProfileId + ":" + workspaceId : "profile:" + request.ProfileId;
+            if (preparing.TryGetValue(request.Id, out var inProgress))
             {
-                running.TryRemove(completed, out _); cancellations.Remove(completed, out var previous); previous?.Dispose();
-                activeProjects.TryRemove(completed, out _);
-                foreach (var id in operationKeys.Where(pair => pair.Value == completed).Select(pair => pair.Key).ToArray()) operationKeys.Remove(id);
+                if (inProgress.Request != request) throw new RelayException("id_conflict", "This identifier belongs to another operation.", false);
+                claim = inProgress;
             }
-            var record = new WorkRecord(request, "pending", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, Metadata: metadata);
-            await store.SaveAsync(record, token).ConfigureAwait(false);
-            var cancellation = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
-            cancellations[key] = cancellation;
-            operationKeys[request.Id] = key;
-            activeProjects[key] = request.Scope?.ProjectId ?? Guid.Empty;
-            running[key] = Task.Run(() => ExecuteAsync(record, cancellation.Token));
-            return record;
+            else
+            {
+                if (preparing.Values.Any(item => item.Key == key) || running.TryGetValue(key, out var active) && !active.IsCompleted)
+                    throw new RelayException("busy", "This session already has an active operation.", false);
+                if (preparing.Count + running.Values.Count(task => !task.IsCompleted) >= maximumConcurrency)
+                    throw new RelayException("busy", "The configured host concurrency limit is reached.", false);
+                claim = new(request, key, new(TaskCreationOptions.RunContinuationsAsynchronously));
+                preparing[request.Id] = claim;
+                ownsClaim = true;
+            }
         }
         finally { admission.Release(); }
+        if (!ownsClaim) return await claim.Completion.Task.WaitAsync(token).ConfigureAwait(false);
+
+        IPreparedWork? prepared = null;
+        using var preparationCancellation = CancellationTokenSource.CreateLinkedTokenSource(stop.Token, token);
+        try
+        {
+            if (executor is IWorkPreparation port)
+                prepared = await port.PrepareAsync(request, preparationCancellation.Token).ConfigureAwait(false);
+            await admission.WaitAsync(preparationCancellation.Token).ConfigureAwait(false);
+            try
+            {
+                preparationCancellation.Token.ThrowIfCancellationRequested();
+                foreach (var completed in running.Where(pair => pair.Value.IsCompleted).Select(pair => pair.Key).ToArray())
+                {
+                    running.TryRemove(completed, out _);
+                    cancellations.Remove(completed, out var previous);
+                    previous?.Dispose();
+                    activeProjects.TryRemove(completed, out _);
+                    foreach (var id in operationKeys.Where(pair => pair.Value == completed).Select(pair => pair.Key).ToArray()) operationKeys.Remove(id);
+                }
+                var record = new WorkRecord(request, "pending", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, Metadata: metadata,
+                    DispatchBoundaryTracked: true);
+                await store.SaveAsync(record, CancellationToken.None).ConfigureAwait(false);
+                var cancellation = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
+                cancellations[claim.Key] = cancellation;
+                operationKeys[request.Id] = claim.Key;
+                activeProjects[claim.Key] = request.Scope?.ProjectId ?? Guid.Empty;
+                var dispatch = prepared;
+                running[claim.Key] = Task.Run(() => ExecuteAsync(record, cancellation.Token, dispatch));
+                prepared = null;
+                preparing.TryRemove(request.Id, out _);
+                claim.Completion.SetResult(record);
+            }
+            finally { admission.Release(); }
+        }
+        catch (Exception error)
+        {
+            try { prepared?.Dispose(); }
+            finally
+            {
+                preparing.TryRemove(request.Id, out _);
+                claim.Completion.TrySetException(error);
+            }
+        }
+        return await claim.Completion.Task.ConfigureAwait(false);
     }
 
     public async Task InterruptSessionAsync(Guid sessionId, CancellationToken token)
@@ -117,13 +178,16 @@ public sealed class WorkService : IAsyncDisposable
         finally { admission.Release(); }
     }
 
-    private async Task ExecuteAsync(WorkRecord record, CancellationToken token)
+    private async Task ExecuteAsync(WorkRecord record, CancellationToken token, IPreparedWork? prepared)
     {
+        using var reservation = prepared;
         try
         {
-            token.ThrowIfCancellationRequested();
+            if (token.IsCancellationRequested)
+                throw new RelayException("cancelled_before_dispatch", "The request was cancelled before dispatch.", false);
             await store.SaveAsync(record with { State = "running", UpdatedAt = DateTimeOffset.UtcNow }, CancellationToken.None).ConfigureAwait(false);
-            var result = await executor.ExecuteAsync(record.Request, token).ConfigureAwait(false);
+            var result = prepared is null ? await executor.ExecuteAsync(record.Request, token).ConfigureAwait(false) :
+                await prepared.ExecuteAsync(token).ConfigureAwait(false);
             await store.SaveAsync(record with { State = result.ExitCode is not (null or 0) ? "failed" : "completed", Result = result,
                 UpdatedAt = DateTimeOffset.UtcNow }, CancellationToken.None).ConfigureAwait(false);
         }
@@ -147,8 +211,14 @@ public sealed class WorkService : IAsyncDisposable
         if (Interlocked.Exchange(ref disposeState, 1) != 0) return;
         stop.Cancel();
         await admission.WaitAsync().ConfigureAwait(false);
+        var admissions = preparing.Values.Select(item => item.Completion.Task).ToArray();
         var pending = running.Values.ToArray();
         admission.Release();
+        foreach (var task in admissions)
+        {
+            try { await task.ConfigureAwait(false); }
+            catch (Exception) { /* The submission already reports its own failure. */ }
+        }
         try { await Task.WhenAll(pending).ConfigureAwait(false); }
         finally { foreach (var cancellation in cancellations.Values) cancellation.Dispose(); stop.Dispose(); admission.Dispose(); }
     }

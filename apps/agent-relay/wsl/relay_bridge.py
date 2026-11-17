@@ -21,7 +21,8 @@ def main():
     if action == 'status':
         return {'available': True} if profile == 'command' else native_clients.status(root, profile)
     if action == 'start' and profile != 'command':
-        return native_clients.start(root, profile, request.get('allowLocalWork', False), request.get('resume', False))
+        return native_clients.start(root, profile, request.get('allowLocalWork', False), request.get('resume', False),
+                                    request.get('requirePinnedConversation', False))
     if action in ['stop', 'interrupt'] and profile != 'command':
         return native_clients.control(root, profile, action == 'stop')
     if action == 'inbox':

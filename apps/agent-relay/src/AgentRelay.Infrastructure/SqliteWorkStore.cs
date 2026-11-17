@@ -115,8 +115,17 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
                 while (await reader.ReadAsync(token)) unfinished.Add(RelayJson.Deserialize<WorkRecord>(reader.GetString(0)));
             }
             if (unfinished.Count == 0) return;
-            foreach (var record in unfinished) await SaveAsync(record with { State = "unknown",
-                Error = "The host stopped before completion was confirmed. No automatic replay.", ErrorCode = "host_stopped", UpdatedAt = DateTimeOffset.UtcNow }, token);
+            foreach (var record in unfinished)
+            {
+                var beforeDispatch = record.State == "pending" && record.DispatchBoundaryTracked;
+                await SaveAsync(record with
+                {
+                    State = beforeDispatch ? "failed" : "unknown",
+                    Error = beforeDispatch ? "The host stopped before dispatch began." : "The host stopped before completion was confirmed. No automatic replay.",
+                    ErrorCode = beforeDispatch ? "host_stopped_before_dispatch" : "host_stopped",
+                    UpdatedAt = DateTimeOffset.UtcNow
+                }, token);
+            }
         }
     }
 

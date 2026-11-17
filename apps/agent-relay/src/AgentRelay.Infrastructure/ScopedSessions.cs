@@ -24,7 +24,8 @@ public sealed class ScopedSessions(SessionService sessions, AgentControl agents,
         context.ValidateDefinition(record.Definition!);
         if (record.State is "closed" or "preparing" or "setup_failed") return Snapshot(record);
         var agent = await agents.StatusAsync(await sessions.ResolveAsync(id, record.ProfileId, token), token);
-        return Snapshot(record) with { State = agent.State, Diagnostic = agent.Message, NativeConversationId = agent.NativeConversationId };
+        var observation = await sessions.ObserveAsync(id, agent, token);
+        return Snapshot(record) with { State = agent.State, Diagnostic = agent.Message, NativeConversationId = agent.NativeConversationId, Runtime = observation };
     }
 
     public async Task<ReadPage<SessionSnapshot>> ListAsync(ReadQuery query, Guid ownerId, CancellationToken token)

@@ -20,7 +20,7 @@ For example, after discovery returns an operation ID/revision:
 {"tool":"invoke_operation","arguments":{"call_id":"<new-uuid>","operation_id":"list_projects","revision":"<discovered-positive-integer>","arguments":{}}}
 ```
 
-Replace the revision placeholder with a JSON integer. All rows below are **operation** arguments passed inside this envelope; `get_connection_status` and `get_result` are also directly available as above. An older typed server needs the initial maintainer migration, not new project grants.
+Replace the revision placeholder with a JSON integer. All rows below are **operation** arguments passed inside this envelope. `get_result` is also directly available. Use the fixed `get_connection_status` tool for connection status. An older typed server needs the initial maintainer migration, not new project grants.
 
 ## Operation arguments
 
@@ -28,7 +28,6 @@ Parameters ending in `_id` are UUIDs, except `command_id` which is a configured 
 
 | Operation | Required arguments | Optional arguments / effect |
 | --- | --- | --- |
-| get_connection_status | none | Version, contract hash, build generation, current scoped host and client-refresh requirement; no model |
 | list_projects | none | Authorized contexts and explicit rights |
 | set_project_state | project_id, state, expected_state | Explicit project.manage grant; active/archived transition, guarded preflight; never stops or replays work |
 | list_profiles | none | Compatibility alias of list_projects |
@@ -60,6 +59,12 @@ Common query fields: endpoint_id, session_id, task_id, kind, state, search, sinc
 source/destination each require `{endpoint_id, workspace_id, path}`; path is relative, at most500characters. replace defaults false. Session name at most120characters. Sent session text at most8000characters. Unknown fields/type mismatches are refused. The participant-facing server enforces the bound identity/project scope; requests cannot supply an arbitrary actor_id.
 
 Tool results include MCP content plus structuredContent. The project reply holds the appropriate configuration/project/session/operation/sessions/operations/messages/events/host/partial field. Paged fields contain items/nextCursor/hasMore. A tool error uses isError and readable content; a malformed protocol request uses JSON-RPC error. Check completion state and receipt, not just successful transport.
+
+`get_session` may include `runtime` with the observed relay host, WSL distribution and native process generations, their start times, the observation time and a `cause`. Missing stamps and `unknown` mean the runtime could not establish that fact. These generations are distinct from the MCP build generation. A cause describes the latest confirmed transition. It can be `initial_observation`, `host_restart`, `wsl_restart`, `native_exit` or `native_started_or_replaced`.
+
+Before accepting a new message, the relay verifies that the assigned session is ready. A caller with both message and session management grants can trigger a model-free restart of a stopped session only when the original native conversation can be verified. `session_not_ready`, `session_awaiting_approval` or `context_lost` call for session inspection. A generation change before injection can fail an already accepted request without dispatch. An unconfirmed injection remains uncertain; retain its ID and inspect the result or correlated inbox reply. Never replay it.
+
+`workspace_busy` with `execution: not_started` means the requested surface overlaps a reservation. Holder identifiers are shown only to the same authorized project principal. Inspect the holder result or refresh its inbox when accessible. Other workspaces remain independently available. `workspace_unavailable` and `workspace_identity_changed` require checking the assigned path. A directory replacement needs an explicit reviewed workspace assignment. Git branch changes and local edits do not affect the assignment.
 
 ## Active and archived projects
 

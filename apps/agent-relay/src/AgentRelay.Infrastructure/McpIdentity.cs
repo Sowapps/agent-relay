@@ -73,6 +73,9 @@ public static class McpErrors
             "runtime_contract_mismatch" => "inspect_relay_runtime",
             "relay_start_failed" => "start_relay_or_contact_maintainer",
             "maintenance" => "wait_for_relay_maintenance",
+            "workspace_busy" => "inspect_workspace_holder",
+            "workspace_unavailable" or "workspace_identity_changed" => "verify_workspace_assignment",
+            "session_not_ready" or "session_generation_changed" or "session_awaiting_approval" or "context_lost" => "inspect_session",
             _ => "inspect_before_retry"
         };
         return new { isError = true, structuredContent = new McpFailureEnvelope(new(code, message, recovery, error is RelayException { EffectsPossible: false } ? "not_started" : "unconfirmed", diagnosticId)), content = new[] { new { type = "text", text = message + " [" + code + "]" } } };

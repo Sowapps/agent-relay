@@ -64,7 +64,7 @@ internal static class ProjectScenarios
         var localFiles = data + "-transfer-work"; Directory.CreateDirectory(localFiles);
         var final = Path.Combine(localFiles, "target.bin"); await File.WriteAllTextAsync(final, "keep");
         var partial = RuntimePaths.TransferPartial(data, operation.Id); Directory.CreateDirectory(Path.GetDirectoryName(partial)!); await File.WriteAllTextAsync(partial, "partial");
-        var bridge = new WslBridge(); var settings = new SettingsStore(data); var sessions = new SessionService(data, settings, new(settings, bridge), bridge);
+        var bridge = new WslBridge(); var settings = new SettingsStore(data); var sessions = new SessionService(data, settings, new AgentControl(settings, bridge), bridge);
         var current = store.Load();
         var retainedWorkspace = current.Workspaces.Single(item => item.Id == workspace);
         var definition = new SessionDefinition(Guid.NewGuid(), "Retained context", scope,

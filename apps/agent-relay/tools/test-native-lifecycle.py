@@ -2,6 +2,7 @@
 import json
 from pathlib import Path, PurePosixPath
 import sys
+import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -26,6 +27,48 @@ class LifecycleGuardTests(unittest.TestCase):
     def setUp(self):
         self.identifier = uuid.uuid4()
         self.owner = {'sessionId': str(self.identifier), 'user': 'relay-test'}
+
+    def test_offline_and_changed_generation_never_write_dispatch_intent(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'codex/data').mkdir(parents=True)
+            request = {'id': str(self.identifier), 'text': 'Fixture', 'expectedNativeGeneration': 'old'}
+            for available, expected in [(False, 'session_not_ready'), (True, 'session_generation_changed')]:
+                observed = {'available': available, 'mcpInitialized': available, 'pane': '', 'nativeRuntime': {'generation': 'different'}}
+                with self.subTest(available=available), patch.object(native_clients, 'find_reply', return_value=None), \
+                     patch.object(native_clients, 'status', return_value=observed), patch.object(native_clients, 'tmux') as tmux:
+                    with self.assertRaises(native_clients.NativeFailure) as caught:
+                        native_clients.send(root, 'codex', request)
+                    self.assertEqual(caught.exception.code, expected)
+                    self.assertFalse(caught.exception.effects_possible)
+                    self.assertFalse(list((root / 'codex/data').iterdir()))
+                    tmux.assert_not_called()
+
+    def test_automatic_restore_refuses_missing_pinned_history_before_start(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / 'codex').mkdir()
+            (root / 'codex/native-conversation.json').write_text(json.dumps({'id': str(self.identifier)}), encoding='utf-8')
+            with patch.object(native_clients, 'workspace', return_value=root), \
+                 patch.object(native_clients, 'context', return_value=self.owner), patch.object(native_clients, 'tmux') as tmux:
+                with self.assertRaises(native_clients.NativeFailure) as caught:
+                    native_clients.start(root, 'codex', resume=True, require_pinned=True)
+                self.assertEqual(caught.exception.code, 'context_lost')
+                self.assertFalse(caught.exception.effects_possible)
+                tmux.assert_not_called()
+
+    def test_prior_intent_remains_uncertain_even_if_native_is_offline(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            data = root / 'codex/data'
+            data.mkdir(parents=True)
+            (data / f'dispatch-{self.identifier}.json').write_text('{}', encoding='utf-8')
+            with patch.object(native_clients, 'find_reply', return_value=None), patch.object(native_clients, 'status') as status:
+                with self.assertRaises(native_clients.NativeFailure) as caught:
+                    native_clients.send(root, 'codex', {'id': str(self.identifier), 'text': 'Fixture'})
+                self.assertEqual(caught.exception.code, 'reply_unconfirmed')
+                self.assertTrue(caught.exception.effects_possible)
+                status.assert_not_called()
 
     def invoke(self, location, owner=None, symlink=False, uid=123, stop=True):
         root = PurePosixPath(location)

@@ -86,6 +86,12 @@ The application takes an exclusive offline ownership lock, or uses its authentic
 
 If another administrator changed configuration after request generation, regenerate/review rather than overwriting their additions. The example is for deliberate serialized administration, not a concurrent configuration transaction protocol. To add a second project, use a fresh request directory and rerun: the existing central configuration is merged again.
 
+### Register existing Git worktrees as project workspaces
+
+In the owned WSL repository, use `git worktree list --porcelain` to discover paths and `git worktree add -b <branch> <path>` when a new tree is needed. Use `git status --short` inside the target before moving or removing it. `git worktree move`, `lock`, `unlock` and `remove` are Git commands run directly in WSL with the operator's normal rights. Reserve a separate integration worktree for the designated integrator. Avoid concurrent operations that mutate shared Git metadata even when agents edit separate trees.
+
+In the full reviewed `configure-projects` request, add a named workspace per existing absolute Linux worktree path and endpoint. Give each workspace its own UUID and keep `concurrentWrites` false for a single-writer workspace. In the membership entries grant only the explicit workspace IDs and access modes needed by each sender and receiving endpoint. Assign the workspace ID when opening a session. The project-policy discovery and settings views expose the workspace names and grants; Git lifecycle stays outside the MCP contract. For a moved worktree, verify its new path and update the authorized configuration explicitly. A retained session tied to the old assignment may require a separately assigned session. A genuinely different directory should use a new workspace UUID.
+
 ### Configure a real native participant
 
 First create/identify a technical profile using the UI steps in section7. Then read the selected data directory’s relay-config.json and take the exact intended profile ID; do not guess it from a client name. Generate the same example without LocalOnly:

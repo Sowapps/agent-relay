@@ -64,28 +64,41 @@ def tmux(root, *arguments, check=True, input_text=None):
                           input=input_text, capture_output=True, text=True, encoding='utf-8', check=check, timeout=10)
 
 
-def submit_prompt(root, client, identifier, prompt):
+def submit_prompt(root, client, identifier, prompt, target=None):
     """Submit once after durable intent. @see send for correlation and no-replay semantics."""
+    target = target or client
     if client == 'codex':
         # Send one bracketed paste. A long burst of key events can consume Enter as part of the paste.
         buffer = 'relay-' + str(uuid.UUID(identifier))
         tmux(root, 'load-buffer', '-b', buffer, '-', input_text=prompt)
         try:
-            tmux(root, 'paste-buffer', '-dpr', '-b', buffer, '-t', client)
+            tmux(root, 'paste-buffer', '-dpr', '-b', buffer, '-t', target)
         except subprocess.CalledProcessError:
             tmux(root, 'delete-buffer', '-b', buffer, check=False)
             raise
     else:
-        tmux(root, 'send-keys', '-l', '-t', client, prompt)
+        tmux(root, 'send-keys', '-l', '-t', target, prompt)
         time.sleep(min(.5, .1 + len(prompt) / 2000))
-    tmux(root, 'send-keys', '-t', client, 'Enter')
+    tmux(root, 'send-keys', '-t', target, 'Enter')
 
 
-def start(root, client, allow_work=False, resume=False):
+def start(root, client, allow_work=False, resume=False, require_pinned=False):
     """Start without a model; @see control for the complementary owned-runtime lifecycle."""
     folder = root / client
     assigned = workspace(root, client)
     binding = context(root, client)
+    pinned = folder / 'native-conversation.json'
+    codex_logs = tuple((folder / 'config/sessions').rglob('*.jsonl')) if client == 'codex' and resume else ()
+    if require_pinned:
+        if not binding or not resume or not pinned.is_file():
+            raise NativeFailure('context_lost', 'The original conversation identity could not be verified.', False)
+        pinned_id = str(uuid.UUID(json.loads(pinned.read_text())['id']))
+        if client == 'codex':
+            has_history = any(path.name.endswith(pinned_id + '.jsonl') for path in codex_logs)
+        else:
+            has_history = pinned_id == binding['sessionId'] and any((folder / 'config/projects').rglob(pinned_id + '.jsonl'))
+        if not has_history:
+            raise NativeFailure('context_lost', 'The original native conversation history is unavailable.', False)
     if tmux(root, 'has-session', '-t', client, check=False).returncode == 0:
         dead = tmux(root, 'display-message', '-p', '-t', client, '#{pane_dead}').stdout.strip() == '1'
         if dead:
@@ -112,8 +125,7 @@ def start(root, client, allow_work=False, resume=False):
             original = config.read_text().replace(str(root / 'instructions.md'), str(instructions))
             config.write_text(original)
         argv = [executable(root,client), '-c', 'check_for_update_on_startup=false', '--no-alt-screen', '-C', str(assigned)]
-        if resume and any((folder / 'config/sessions').rglob('*.jsonl')):
-            pinned = folder/'native-conversation.json'
+        if resume and codex_logs:
             if binding and not pinned.exists():raise RuntimeError('context_lost: native conversation identity is not confirmed; refusing latest-session guessing')
             argv += ['resume', json.loads(pinned.read_text())['id']] if binding else ['resume','--last']
     else:
@@ -128,7 +140,7 @@ def start(root, client, allow_work=False, resume=False):
             expected=str(binding['sessionId']);pinned=folder/'native-conversation.json'
             argv += ['--resume',expected] if resume and pinned.exists() else ['--session-id',expected]
         elif resume and any((folder / 'config/projects').rglob('*.jsonl')):argv += ['--continue']
-    commit(folder / 'launch-state.json', {'allowLocalWork': allow_work, 'client': client})
+    commit(folder / 'launch-state.json', {'allowLocalWork': allow_work, 'client': client, 'requireNativeMarker': True})
     wrapper = folder / 'launch.py'
     wrapper.write_text('import os,sys\nfrom pathlib import Path\nsys.path.insert(0,'+repr(str(root/'install'))+')\nfrom native_clients import client_environment\nos.environ.update(' + repr(environment) + ')\nos.environ.update(client_environment(Path('+repr(str(root))+'),'+repr(client)+'))\nos.execv(' + repr(argv[0]) + ',' + repr(argv) + ')\n')
     tmux(root, 'new-session', '-d', '-s', client, '-c', str(assigned), '-x', '170', '-y', '45', 'python3', str(wrapper))
@@ -152,12 +164,53 @@ def control(root, client, stop=False):
     return {'stopRequested': stop, 'interruptRequested': not stop, 'modelPromptSent': False}
 
 
+def _process_stat(pid):
+    fields = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()
+    return int(fields[1]), int(fields[19])
+
+
+def process_stamp(pid):
+    try:
+        boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+        _, ticks = _process_stat(pid)
+        boot_time = next(int(line.split()[1]) for line in Path('/proc/stat').read_text().splitlines() if line.startswith('btime '))
+        from datetime import datetime, timezone
+        started = datetime.fromtimestamp(boot_time + ticks / os.sysconf('SC_CLK_TCK'), timezone.utc)
+        return {'generation': f'{boot}:{pid}:{ticks}', 'startedAt': started.isoformat()}
+    except (OSError, ValueError, IndexError, StopIteration):
+        return None
+
+
+def ancestor_generations():
+    """Link MCP initialization to the actual native pane process without relying on client environment inheritance."""
+    results = []
+    pid = os.getppid()
+    for _ in range(24):
+        if pid <= 1:
+            break
+        try:
+            parent, _ = _process_stat(pid)
+        except (OSError, ValueError, IndexError):
+            break
+        stamp = process_stamp(pid)
+        if stamp:
+            results.append(stamp['generation'])
+        pid = parent
+    return results
+
+
 def status(root, client):
     folder = root / client
     exists = tmux(root, 'has-session', '-t', client, check=False).returncode == 0
     available = exists
+    process = None
+    pane_id = None
     if available:
-        available = tmux(root, 'display-message', '-p', '-t', client, '#{pane_dead}').stdout.strip() != '1'
+        state = tmux(root, 'display-message', '-p', '-t', client, '#{pane_dead} #{pane_pid} #{pane_id}', check=False).stdout.split()
+        available = len(state) == 3 and state[0] == '0'
+        if available and state[1].isdigit():
+            process = process_stamp(int(state[1]))
+            pane_id = state[2]
     pane = tmux(root, 'capture-pane', '-p', '-t', client, '-S', '-35', check=False).stdout if exists else ''
     pinned=folder/'native-conversation.json';binding=context(root,client)
     if binding and not pinned.exists():
@@ -173,28 +226,52 @@ def status(root, client):
                     if value.get('type')=='session_meta':found.append(str(__import__('uuid').UUID(value['payload']['id'])))
             if len(set(found))==1:commit(pinned,{'id':found[0]})
     auth=authentication(root,client) if binding else {'authenticated':None}
-    return {'available': available, 'mcpInitialized': (folder / 'data/mcp-initialized.json').exists(), 'pane': pane[-2800:],
+    initialized = folder / 'data/mcp-initialized.json'
+    launch_file = folder / 'launch-state.json'
+    require_marker = json.loads(launch_file.read_text()).get('requireNativeMarker', False) if launch_file.is_file() else False
+    marker = json.loads(initialized.read_text()) if initialized.is_file() else {}
+    marker_matches = process is not None and process['generation'] in marker.get('nativeAncestors', [])
+    return {'available': available, 'mcpInitialized': bool(marker.get('initialized')) and (marker_matches or not require_marker), 'pane': pane[-2800:],
             'authenticated':auth['authenticated'],'authenticationChecked':bool(binding),'awaitingApproval':any(value in pane.lower() for value in APPROVAL_ATTENTION),
-            'nativeConversationId':json.loads(pinned.read_text())['id'] if pinned.exists() else None}
+            'nativeConversationId':json.loads(pinned.read_text())['id'] if pinned.exists() else None,
+            'distributionRuntime': process_stamp(1), 'nativeRuntime': process, 'paneId': pane_id}
 
 
 def send(root, client, request):
     """Retain intent before terminal input. @see submit_prompt for the single submission boundary."""
+    identifier = str(uuid.UUID(request['id']))
+    existing = find_reply(root, client, identifier)
+    if existing:
+        return {'reply': existing, 'messages': [existing]}
+    marker = root / client / 'data' / ('dispatch-' + identifier + '.json')
+    if marker.exists():
+        raise NativeFailure('reply_unconfirmed', 'Prior dispatch intent exists. Inspect the original result; no replay was attempted.')
     launched = json.loads((root / client / 'launch-state.json').read_text()) if (root / client / 'launch-state.json').exists() else {'allowLocalWork': False}
     if launched['allowLocalWork'] != request.get('allowLocalWork', False):
-        raise RuntimeError('unavailable: permissions changed; restart the dedicated session before sending')
-    existing = find_reply(root, client, request['id'])
-    if existing:return {'reply':existing,'messages':[existing]}
+        raise NativeFailure('capability_denied', 'Permissions changed; restart the dedicated session before sending.', False)
     current = status(root, client)
-    if current.get('authenticated') is False:raise RuntimeError('authentication_required: native account is not connected')
+    if current.get('authenticated') is False:raise NativeFailure('agent_authentication_required', 'Native account is not connected.', False)
     if current.get('awaitingApproval'):raise RuntimeError('approval_required: native terminal is waiting for human approval; no new prompt was sent')
     if any(value in current['pane'].lower() for value in AUTH_ATTENTION):
-        raise RuntimeError('authentication_required: native client login must be renewed by the operator')
+        raise NativeFailure('agent_authentication_required', 'Native client login must be renewed by the operator.', False)
     if not current['available'] or not current['mcpInitialized']:
-        raise RuntimeError('unavailable: native session or MCP is not ready')
+        raise NativeFailure('session_not_ready', 'Native session or MCP is not ready.', False)
+    expected = request.get('expectedNativeGeneration')
+    if expected and (current['nativeRuntime'] or {}).get('generation') != expected:
+        raise NativeFailure('session_generation_changed', 'Native process changed before dispatch.', False)
+    expected_distribution = request.get('expectedDistributionGeneration')
+    if expected_distribution and (current['distributionRuntime'] or {}).get('generation') != expected_distribution:
+        raise NativeFailure('session_generation_changed', 'WSL distribution changed before dispatch.', False)
+    expected_workspace = request.get('expectedWorkspaceIdentity')
+    if expected_workspace:
+        try:
+            directory = workspace(root, client).stat()
+        except OSError as error:
+            raise NativeFailure('workspace_unavailable', 'The assigned workspace directory is unavailable.', False) from error
+        if f'{directory.st_dev}:{directory.st_ino}' != expected_workspace:
+            raise NativeFailure('workspace_identity_changed', 'Assigned workspace changed before dispatch.', False)
     if any(value in current['pane'] for value in ['Do you trust', 'Yes, I trust', 'Sign in', 'Log in', 'Select the login']):
-        raise RuntimeError('unavailable: native client requires startup attention')
-    marker = root / client / 'data' / ('dispatch-' + request['id'] + '.json')
+        raise NativeFailure('session_not_ready', 'Native client requires startup attention.', False)
     prompt = ('Relay request ' + request['id'] + '. User message as a JSON string (preserve its content): ' + json.dumps(request['text'],ensure_ascii=False) +
               ' Reply by calling relay.send_message with your short answer in text and in_reply_to="' + request['id'] +
               '". ' + ('' if launched['allowLocalWork'] else 'Never execute commands. Use only relay message tools. ') + MESSAGE_POLICY + 'Do not use other agents. Then finish briefly.')
@@ -203,7 +280,7 @@ def send(root, client, request):
         json.dump({'request': request, 'prompt': prompt}, stream)
         stream.flush()
         os.fsync(stream.fileno())
-    submit_prompt(root, client, request['id'], prompt)
+    submit_prompt(root, client, identifier, prompt, current['paneId'])
     deadline = time.monotonic() + 120
     checked = 0
     while time.monotonic() < deadline:

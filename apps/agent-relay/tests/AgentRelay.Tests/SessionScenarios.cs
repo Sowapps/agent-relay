@@ -24,7 +24,7 @@ internal static class SessionScenarios
         var documents = new SqliteDocuments<RelaySession>(new RelayDatabase(data), "sessions");
         var record = new RelaySession(sessionA, "Named task", profile.Id, profile, "/srv/agent-relay-session-" + sessionA.ToString("N"), "created", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
         await documents.SaveAsync(sessionA, record, CancellationToken.None);
-        var bridge = new WslBridge(); var sessions = new SessionService(data, settings, new(settings, bridge), bridge);
+        var bridge = new WslBridge(); var sessions = new SessionService(data, settings, new AgentControl(settings, bridge), bridge);
         if (RelayJson.Serialize(await sessions.CreateAsync(sessionA, record.Name, profile.Id, CancellationToken.None)) != RelayJson.Serialize(record)) throw new Exception("Existing session creation was not idempotent.");
         await sessions.RenameAsync(sessionA, "Renamed task", CancellationToken.None);
         if ((await sessions.FindAsync(sessionA, CancellationToken.None)).Name != "Renamed task") throw new Exception("Session name not retained.");
