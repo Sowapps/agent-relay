@@ -19,6 +19,8 @@ The candidate must contain the independent self-contained transport, current MCP
 
 A normal schema-2 update requires an existing qualified transport selection. For the first activation, explicitly select `--initial` and coordinate a safe maintenance point with consuming agents. The same C# transaction stages the candidate and retains that intent, suspends new admission, waits for active and uncertain work, and only then requests graceful closure of legacy connections. It waits for closure before stopping the host or publishing anything. It does not relabel the old broker as a new transport. Rollback restores the original pointer and absence of a transport selection through the same snapshot owner.
 
+If the old authenticated handshake lacks process metadata, the existing `host_identity` adapter resolves the exact executable/argument/data owner, reads its OS start time and rechecks the scope. Only explicit initial preparation accepts that proof. C# retains it in the activation and revalidates PID, exact start time and image before any stop; normal updates continue using the authenticated handshake. Missing, ambiguous or changed identity refuses without stopping a process.
+
 ## Command and phases
 
 After the exact archive is verified, use the existing complete_update.py entry with --data, --release-directory and --version. Its --action status, resume, rollback and diagnostic actions need no original archive after verified staging. Packaged launchers call that same adapter. Common registration/startup/UI integration and final archive qualification must be complete before deployment; source fixtures alone are not installed readiness.

@@ -7,7 +7,7 @@ using AgentRelay.Core;
 namespace AgentRelay.Infrastructure;
 
 public sealed record InstallationUpdateRequest(string Action, string Installation, string Data, string? Candidate = null,
-    UpdateAdapterFailure? Failure = null);
+    UpdateAdapterFailure? Failure = null, InstallationHost? LegacyHost = null);
 public sealed record InstallationUpdateFile(string Name, string? Before, string? After);
 public sealed record InstallationUpdateClient(Guid? BindingId, string Client);
 public sealed record InstallationUpdateState(int Schema, string Id, string CandidateHash, string Installation, string Data, string Version,
@@ -26,7 +26,7 @@ public sealed partial class InstallationUpdate
     private readonly string journal;
     private readonly IInstallationRuntime runtime;
 
-    public InstallationUpdate(string installation, string data, IInstallationRuntime? runtime = null)
+    public InstallationUpdate(string installation, string data, IInstallationRuntime? runtime = null, InstallationHost? legacyHost = null)
     {
         this.installation = Absolute(installation);
         this.data = Absolute(data);
@@ -34,7 +34,7 @@ public sealed partial class InstallationUpdate
             throw Failure("update_scope_invalid", "Update the existing portable installation and its retained data scope.");
         directory = RuntimePaths.UpdateDirectory(this.installation);
         journal = Path.Combine(directory, "current.json");
-        this.runtime = runtime ?? new InstallationRuntime(this.data);
+        this.runtime = runtime ?? new InstallationRuntime(this.data, legacyHost);
         RuntimePaths.DemandPrivatePath(journal);
     }
 

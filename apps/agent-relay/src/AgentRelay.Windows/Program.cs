@@ -67,7 +67,9 @@ internal static class Program
                     request.Candidate ?? throw new ArgumentException("Missing diagnostic identifier."))));
                 return 0;
             }
-            var update = new InstallationUpdate(request.Installation, request.Data);
+            if (request.LegacyHost is not null && request.Action != "prepare-initial")
+                throw new ArgumentException("Legacy process proof is only accepted for explicit initial preparation.");
+            var update = new InstallationUpdate(request.Installation, request.Data, legacyHost: request.LegacyHost);
             Console.WriteLine(RelayJson.Serialize(request.Action == "start-resume" ? InstallationUpdateRecovery.Start(request.Data) ?? update.Run("status") : update.Run(request.Action, request.Candidate)));
             return 0;
         }
