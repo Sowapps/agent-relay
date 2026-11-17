@@ -11,10 +11,10 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
     public static Task DemandIdleAsync(string dataDirectory, bool allowUninitialized, CancellationToken token) =>
         DemandMaintenanceIdleAsync(dataDirectory, allowUninitialized, false, token);
 
-    internal static Task DemandUpdateIdleAsync(string dataDirectory, CancellationToken token) =>
-        DemandMaintenanceIdleAsync(dataDirectory, false, true, token);
+    internal static Task DemandUpdateIdleAsync(string dataDirectory, CancellationToken token, DateTimeOffset? historyBefore = null) =>
+        DemandMaintenanceIdleAsync(dataDirectory, false, true, token, historyBefore);
 
-    private static async Task DemandMaintenanceIdleAsync(string dataDirectory, bool allowUninitialized, bool includeUncertain, CancellationToken token)
+    private static async Task DemandMaintenanceIdleAsync(string dataDirectory, bool allowUninitialized, bool includeUncertain, CancellationToken token, DateTimeOffset? historyBefore = null)
     {
         var path = RelayDatabase.DatabasePath(dataDirectory);
         RuntimePaths.DemandPrivatePath(path);
@@ -29,7 +29,11 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
             throw new RelayException("storage_unavailable", "The selected relay database path is not a file.", false);
         using var connection = new RelayDatabase(dataDirectory, readOnly: true).Open();
         using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT id,json_extract(payload,'$.state') FROM work WHERE ({ActiveState}{(includeUncertain ? " OR json_extract(payload,'$.state')='unknown'" : "")}) LIMIT 1";
+        var uncertain = includeUncertain ? " OR (json_extract(payload,'$.state')='unknown' AND ($historyBefore IS NULL OR " +
+            "julianday(json_extract(payload,'$.createdAt')) IS NULL OR julianday(json_extract(payload,'$.updatedAt')) IS NULL OR " +
+            "julianday(json_extract(payload,'$.createdAt')) >= julianday($historyBefore) OR julianday(json_extract(payload,'$.updatedAt')) >= julianday($historyBefore)))" : "";
+        command.CommandText = $"SELECT id,json_extract(payload,'$.state') FROM work WHERE ({ActiveState}{uncertain}) LIMIT 1";
+        if (includeUncertain) command.Parameters.AddWithValue("$historyBefore", historyBefore is { } before ? before.ToString("O") : DBNull.Value);
         using var reader = await command.ExecuteReaderAsync(token);
         if (await reader.ReadAsync(token))
             throw new RelayException(includeUncertain && reader.GetString(1) == "unknown" ? "update_uncertain_work" : "busy",

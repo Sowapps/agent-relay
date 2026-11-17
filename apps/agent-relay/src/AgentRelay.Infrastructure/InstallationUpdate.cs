@@ -44,6 +44,12 @@ public sealed partial class InstallationUpdate
         if (action == "status") return Read();
         Directory.CreateDirectory(directory);
         using var ownership = AcquireOwnership(Path.Combine(directory, "update.lock"));
+        if (action is not ("prepare" or "prepare-initial") && File.Exists(journal) &&
+            Read().Activation is { } activation && runtime is InstallationRuntime native)
+        {
+            native.LegacyHost = activation.LegacyHost;
+            native.UseCurrentControl = activation.InitialActivation;
+        }
         var watch = Stopwatch.StartNew();
         var at = DateTimeOffset.UtcNow;
         var before = File.Exists(journal) ? File.ReadAllText(journal) : null;
