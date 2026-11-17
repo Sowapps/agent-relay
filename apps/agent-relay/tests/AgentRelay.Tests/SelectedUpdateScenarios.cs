@@ -10,6 +10,49 @@ internal static class SelectedUpdateScenarios
     private static void Check(bool value, string message) { if (!value) throw new Exception(message); }
     private static string Hash(string path) => Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)));
 
+    public static void Initial(string root)
+    {
+        var fixture = Seed(Path.Combine(root, "initial"));
+        File.Delete(RuntimePaths.TransportSelection(fixture.Data));
+        var previous = File.ReadAllText(Path.Combine(fixture.Data, "mcp-runtime.json"));
+        var runtime = new Runtime(fixture.Root);
+        var update = new InstallationUpdate(fixture.Installation, fixture.Data, runtime);
+        var legacy = new McpConnectionLease(Guid.NewGuid(), null, "fixture", "old", "old", "contract", "generation", null, "current", DateTimeOffset.UtcNow);
+        McpConnections.Write(fixture.Data, legacy);
+        Refuses("update_initial_migration_required", () => update.Run("prepare", fixture.Candidate));
+        var prepared = update.Run("prepare-initial", fixture.Candidate);
+        Check(prepared.Activation is { InitialActivation: true, PreviousTransport: null } &&
+            !McpConnections.CloseRequested(fixture.Data, legacy.InstanceId), "Preparation closed a legacy connection or lost initial intent");
+        var store = new SqliteWorkStore(new RelayDatabase(fixture.Data));
+        var work = new WorkRecord(new(Guid.NewGuid(), "fixture", "command", ""), "pending", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        store.SaveAsync(work, CancellationToken.None).GetAwaiter().GetResult();
+        Check(update.Run("resume").Phase == "awaiting_work" && !McpConnections.CloseRequested(fixture.Data, legacy.InstanceId) &&
+            runtime.Load().Stops == 0, "Initial activation interrupted pending work");
+        store.SaveAsync(work with { State = "unknown" }, CancellationToken.None).GetAwaiter().GetResult();
+        Check(update.Run("resume").ErrorCode == "update_uncertain_work" && !McpConnections.CloseRequested(fixture.Data, legacy.InstanceId),
+            "Initial activation interrupted uncertain work");
+        store.SaveAsync(work with { State = "completed" }, CancellationToken.None).GetAwaiter().GetResult();
+        Check(update.Run("resume").ErrorCode == "update_legacy_connection_pending" && McpConnections.CloseRequested(fixture.Data, legacy.InstanceId) &&
+            runtime.Load().Stops == 0 && File.Exists(Path.Combine(fixture.Data, "promotion.lock")), "Legacy closure bypassed admission or stopped the host early");
+        McpConnections.Write(fixture.Data, legacy with { State = "closed", LastSeen = DateTimeOffset.UtcNow });
+        Check(update.Run("resume").Phase == "complete" && File.Exists(RuntimePaths.TransportSelection(fixture.Data)) &&
+            store.FindAsync(work.Request.Id, CancellationToken.None).GetAwaiter().GetResult()?.State == "completed", "Initial activation failed or lost retained work");
+        var stops = runtime.Load().Stops;
+        Check(update.Run("prepare-initial", fixture.Candidate).Id == prepared.Id && update.Run("resume").Phase == "complete" &&
+            runtime.Load().Stops == stops, "Repeated initial activation was not idempotent");
+
+        var failed = Seed(Path.Combine(root, "initial-rollback"));
+        File.Delete(RuntimePaths.TransportSelection(failed.Data));
+        var before = File.ReadAllText(Path.Combine(failed.Data, "mcp-runtime.json"));
+        var rollback = new InstallationUpdate(failed.Installation, failed.Data, new Runtime(failed.Root) { FailCandidate = true });
+        rollback.Run("prepare-initial", failed.Candidate);
+        try { rollback.Run("resume"); throw new Exception("Expected candidate readiness refusal"); }
+        catch (IOException) { }
+        Check(rollback.Run("status").Phase == "rolled_back" && !File.Exists(RuntimePaths.TransportSelection(failed.Data)) &&
+            File.ReadAllText(Path.Combine(failed.Data, "mcp-runtime.json")) == before, "Initial rollback did not restore the prior layout");
+        Console.WriteLine("INITIAL_STABLE_ACTIVATION=PASS");
+    }
+
     public static void Run(string root)
     {
         var nominal = Seed(Path.Combine(root, "nominal"));

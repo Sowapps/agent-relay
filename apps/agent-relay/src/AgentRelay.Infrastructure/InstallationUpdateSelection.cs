@@ -7,11 +7,12 @@ namespace AgentRelay.Infrastructure;
 
 public sealed record InstallationActivation(string ReleaseRoot, string PreviousPointer, string? PreviousTransport,
     Guid[] TransportInstances, bool StartupEnabled, bool AdmissionReleased = false, bool? WasRunning = null, string? SelectionHash = null,
-    InstallationStartupSnapshot? Startup = null, bool ResumeAuthorized = false, DateTimeOffset? AuthorizedAt = null);
+    InstallationStartupSnapshot? Startup = null, bool ResumeAuthorized = false, DateTimeOffset? AuthorizedAt = null,
+    bool InitialActivation = false);
 
 public sealed partial class InstallationUpdate
 {
-    private InstallationUpdateState PrepareSelected(string candidate, string manifestPath, string version, string contractHash, Dictionary<string, string> declared)
+    private InstallationUpdateState PrepareSelected(string candidate, string manifestPath, string version, string contractHash, Dictionary<string, string> declared, bool initial = false)
     {
         var contract = RelayJson.Deserialize<McpIdentity>(File.ReadAllText(Path.Combine(candidate, "app", "mcp-contract.json")));
         if (contract.Compatibility?.Transport != McpStableProtocol.Requirement)
@@ -37,11 +38,13 @@ public sealed partial class InstallationUpdate
             if (prior.Version == version && prior.CandidateHash != digest) throw Failure("update_version_conflict", "Different bytes cannot reuse a prepared version.");
             AtomicText(Path.Combine(directory, prior.Id, "journal.json"), RelayJson.Serialize(prior));
         }
-        if (McpConnections.List(data).Any(item => item.State is not ("offline" or "closed")))
+        if (!initial && McpConnections.List(data).Any(item => item.State is not ("offline" or "closed")))
             throw Failure("update_initial_migration_required", "A legacy MCP connection must first be explicitly migrated to the stable transport; no component was changed.");
-        if (!File.Exists(RuntimePaths.TransportSelection(data)))
+        if (!initial && !File.Exists(RuntimePaths.TransportSelection(data)))
             throw Failure("update_initial_migration_required", "Prepare and qualify the initial stable-transport installation before using automatic selected-release updates.");
-        _ = McpProcessSelections.Read(RuntimePaths.TransportSelection(data));
+        if (initial && File.Exists(RuntimePaths.TransportSelection(data)))
+            throw Failure("update_initial_migration_invalid", "This installation already has a stable transport; use the normal update command.");
+        if (!initial) _ = McpProcessSelections.Read(RuntimePaths.TransportSelection(data));
         _ = runtime.Inspect(currentExecutable);
         DemandNativeCompatibility(declared, currentExecutable);
         var previousVersion = RelayJson.Deserialize<McpIdentity>(File.ReadAllText(Path.Combine(Path.GetDirectoryName(currentExecutable)!, "mcp-contract.json"))).Version;
@@ -70,7 +73,7 @@ public sealed partial class InstallationUpdate
         var startup = runtime.CaptureStartup(currentExecutable);
         var state = new InstallationUpdateState(2, id, digest, installation, data, version, contractHash, "preparing", files, [], DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 0, 0,
             Activation: new(root, previous, File.Exists(RuntimePaths.TransportSelection(data)) ? File.ReadAllText(RuntimePaths.TransportSelection(data)) : null,
-                McpTransportPresences.Read(RuntimePaths.TransportStateDirectory(data)).Where(item => item.State is not ("offline" or "closed")).Select(item => item.InstanceId).ToArray(), startup.Enabled, Startup: startup));
+                McpTransportPresences.Read(RuntimePaths.TransportStateDirectory(data)).Where(item => item.State is not ("offline" or "closed")).Select(item => item.InstanceId).ToArray(), startup.Enabled, Startup: startup, InitialActivation: initial));
         Directory.CreateDirectory(Path.Combine(directory, id));
         CacheRecoveryRunner(state, candidate, declared);
         Save(state);
@@ -145,6 +148,17 @@ public sealed partial class InstallationUpdate
                 }
                 catch (RelayException error) when (error.Code is "busy" or "update_uncertain_work")
                 { return SaveIfChanged(state with { Error = error.Message, ErrorCode = error.Code }); }
+                if (activation.InitialActivation)
+                {
+                    var legacy = McpConnections.List(data).Where(item => item.State is not ("offline" or "closed")).ToArray();
+                    foreach (var item in legacy)
+                    {
+                        try { McpConnections.RequestClose(data, item.InstanceId); }
+                        catch (RelayException error) when (error.Code == "not_found") { } // Closed naturally after the snapshot.
+                    }
+                    if (legacy.Length > 0) return SaveIfChanged(state with { ErrorCode = "update_legacy_connection_pending",
+                        Error = "Work is idle; waiting for the admitted legacy MCP connections to close before initial activation." });
+                }
                 if (host is not null) runtime.Stop(host);
                 using (RelayLocation.OpenHostOwnership(data))
                 {
@@ -363,6 +377,8 @@ public sealed partial class InstallationUpdate
         pointer["executable"] = selected.Worker.Executable;
         pointer["mcpExecutable"] = RuntimePaths.TransportBootstrapExecutable(data);
         pointer["transportSelection"] = RuntimePaths.TransportSelection(data);
+        pointer["mcpLaunch"] = JsonSerializer.SerializeToNode(McpTransportInstallation.Launch(data,
+            Guid.TryParse(pointer["connectionId"]?.GetValue<string>(), out var binding) ? binding : null), RelayJson.Options);
         return pointer.ToJsonString();
     }
 

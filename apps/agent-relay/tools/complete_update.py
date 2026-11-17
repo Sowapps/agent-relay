@@ -12,12 +12,16 @@ import subprocess
 import time
 import uuid
 import traceback
+import xml.etree.ElementTree as ET
 
 from deployment import confirm_quiescence, demand_idle, exclusive, launch, read, restore_snapshot, snapshot, write
 from host_identity import identity, resolve_host
 from relay_mcp import RelayMcp
 from release_artifact import MANIFEST_FILE, VERIFICATION_FILE, extract_archive, ordinary_directory, ordinary_file, qualified_archive, sha256, validate_version, validate_windows_name, verified_archive
 from runtime_layout import app_var, runtime_command
+import codex_registration
+import registration_migration
+from delivery_reports import latest_reports
 
 
 EXE = 'AgentRelay.Windows.exe'
@@ -200,7 +204,7 @@ def fresh_probe(runtime, data, reports, version):
     return dict(status=status, projects=projects)
 
 
-def _update(data, archive, digest, *, updater=None, verify=None, guard=None, refresh=None, action='apply', context):
+def _update(data, archive, digest, *, updater=None, verify=None, guard=None, refresh=None, action='apply', initial=False, client_registration=None, context):
     """Resume the same transaction. Never install, recreate data or replay an agent request."""
     data = ordinary_directory(data.absolute())
     installation = data.parents[3]
@@ -239,7 +243,7 @@ def _update(data, archive, digest, *, updater=None, verify=None, guard=None, ref
                 raise ValueError('Forward updates require the stable transport. Legacy transactions retain status/rollback recovery only; client-exit deployment is retired')
             updater = {'executable': str(candidate / 'app' / EXE)}
             context['updater'] = updater
-            state = invoke(updater, installation, data, 'prepare', candidate)
+            state = invoke(updater, installation, data, 'prepare-initial' if initial else 'prepare', candidate)
             updater = recovery_updater(data)
             context['updater'] = updater
         if state is None:
@@ -248,6 +252,15 @@ def _update(data, archive, digest, *, updater=None, verify=None, guard=None, ref
         receipt = transaction / 'ports.json'
         if action == 'status':
             return dict(state=state, receipt=str(receipt))
+        if (state.get('activation') or {}).get('initialActivation') and action != 'rollback':
+            request_path = transaction / 'initial-client-registration.json'
+            if client_registration is not None:
+                if request_path.exists() and read(request_path) != client_registration:
+                    raise ValueError('The retained initial client registration selection differs')
+                if not request_path.exists():
+                    write(request_path, client_registration)
+            if not request_path.exists():
+                raise ValueError('Initial activation needs retained client registration inputs before execution')
         if state['phase'] == 'rolled_back' and receipt.exists() and read(receipt).get('rollbackVerified'):
             return dict(state=state, receipt=str(receipt), rolledBack=True, alreadyCurrent=True)
         if state.get('schema') == 2:
@@ -410,6 +423,69 @@ def finalize_rollback(updater, installation, data, state, receipt, guard):
     return dict(state=state, receipt=str(receipt), rolledBack=True, alreadyCurrent=True)
 
 
+def source_candidate():
+    """Delegate to the existing one-command qualification; reuse its exact clean-source receipt."""
+    tools = Path(__file__).resolve().parent
+    root = tools.parents[2]
+    def git(*arguments):
+        return subprocess.check_output(['git', *arguments], cwd=root, text=True, creationflags=subprocess.CREATE_NO_WINDOW).strip()
+    commit = git('rev-parse', 'HEAD')
+    if git('status', '--porcelain'):
+        raise ValueError('Source promotion requires a clean identified commit')
+    version = validate_version(ET.parse(tools.parent / 'Version.props').findtext('.//Version'))
+    if '-rc.' in version:
+        raise ValueError('Select and commit the stable Version.props before source promotion')
+    reports = app_var(root) / 'isolated-delivery'
+    def matching():
+        candidates = latest_reports(reports, ('qualify',))['latest']
+        return next((item for item in candidates if item['status'] == 'passed' and item['commit'] == commit
+                     and (item.get('candidate') or {}).get('version') == version), None)
+    receipt = matching()
+    if receipt is None:
+        logs = app_var(root) / 'stable-delivery' / uuid.uuid4().hex
+        logs.mkdir(parents=True)
+        with (logs / 'qualification.log').open('w', encoding='utf-8') as output:
+            completed = subprocess.run([os.sys.executable, '-B', str(tools / 'isolated-delivery.py'), 'qualify'],
+                                       cwd=root, stdout=output, stderr=subprocess.STDOUT, creationflags=subprocess.CREATE_NO_WINDOW)
+        if completed.returncode:
+            raise RuntimeError('Source qualification failed; inspect ' + str(logs / 'qualification.log'))
+        receipt = matching()
+    if receipt is None or git('rev-parse', 'HEAD') != commit or git('status', '--porcelain'):
+        raise ValueError('No matching unchanged-source qualification was retained')
+    directory = Path(receipt['candidate']['archive']).parent
+    archive, digest = qualified_archive(directory, version)
+    with verified_archive(archive, digest):
+        pass
+    return directory, version
+
+
+def finish_command(data, result):
+    """One CLI invocation follows the existing retained runner, then finishes the paired client adapter."""
+    while result.get('state', {}).get('schema') == 2 and result['state']['phase'] not in ('complete', 'rolled_back'):
+        state = result['state']
+        if state.get('errorCode') in ('update_uncertain_work', 'update_bootstrap_pending') or state['phase'] == 'recovery_required':
+            raise RuntimeError('Update needs attention: ' + str(state.get('errorCode') or state['phase']))
+        time.sleep(1)
+        result = update(data, action='resume')
+    state = result.get('state', {})
+    if (state.get('activation') or {}).get('initialActivation') and state.get('phase') == 'complete':
+        transaction = Path(result['receipt']).parent
+        request = read(ordinary_file(transaction / 'initial-client-registration.json'))
+        result['clientRegistration'] = registration_migration.finish_initial(data, transaction, request)
+    return result
+
+
+def summary(result):
+    compact = dict(result)
+    if 'state' in compact:
+        state = compact['state']
+        compact['state'] = {key: state.get(key) for key in ('schema', 'id', 'version', 'phase', 'error', 'errorCode')}
+        compact['state']['clientCount'] = len(state.get('clients', []))
+    if isinstance(compact.get('clientRegistration'), dict):
+        compact['clientRegistration'] = {key: compact['clientRegistration'].get(key) for key in ('phase', 'applied', 'dataOrGrantsEdited')}
+    return compact
+
+
 def main():
     parser = UpdateParser(description=__doc__)
     parser.add_argument('--data', required=True, type=Path)
@@ -417,9 +493,24 @@ def main():
     parser.add_argument('--version')
     parser.add_argument('--action', choices=('apply', 'resume', 'status', 'rollback', 'diagnostic'), default='apply')
     parser.add_argument('--diagnostic-id')
+    parser.add_argument('--initial', action='store_true', help='Explicit first activation; drains work before closing legacy MCP connections')
+    parser.add_argument('--codex-config', type=Path, help='Explicit shared Codex settings for initial activation')
+    parser.add_argument('--workspace-config', type=Path, help='Explicit development Codex settings for initial activation')
+    parser.add_argument('--stable-server', default=codex_registration.LEGACY_STABLE_SERVER)
+    parser.add_argument('--details', action='store_true', help='Return full retained transaction details instead of the default bounded summary')
+    parser.add_argument('--source', action='store_true', help='Promote this clean stable source commit through the existing cached qualification and update owners')
     args = parser.parse_args()
     data = args.data.absolute()
     try:
+        if args.initial and args.action != 'apply':
+            raise ValueError('--initial is only valid for apply; recovery uses the retained transaction intent')
+        if args.source and (args.action != 'apply' or args.release_directory or args.version):
+            raise ValueError('--source selects the current stable source; do not combine it with a release directory, version or recovery action')
+        client_registration = None
+        if args.initial:
+            if not args.codex_config or not args.workspace_config:
+                raise ValueError('--initial requires explicit --codex-config and --workspace-config')
+            client_registration = registration_migration.initial_request(data, args.codex_config, args.workspace_config, args.stable_server)
         if args.action == 'diagnostic':
             if not args.diagnostic_id:
                 raise ValueError('Diagnostic retrieval requires --diagnostic-id')
@@ -428,6 +519,8 @@ def main():
         elif args.action in ('resume', 'status', 'rollback'):
             result = update(data, action=args.action)
         else:
+            if args.source:
+                args.release_directory, args.version = source_candidate()
             if not args.version or not args.release_directory:
                 raise ValueError('Apply requires --version and --release-directory; recovery actions require only --data')
             validate_version(args.version)
@@ -438,8 +531,10 @@ def main():
                                 '--directory', str(args.release_directory.absolute()), '--version', args.version],
                                check=True, timeout=180, stdout=subprocess.PIPE, creationflags=subprocess.CREATE_NO_WINDOW)
             archive, digest = qualified_archive(args.release_directory.absolute(), args.version)
-            result = update(data, archive, digest, action=args.action)
-        print(json.dumps(result))
+            result = update(data, archive, digest, action=args.action, initial=args.initial, client_registration=client_registration)
+        if args.action in ('apply', 'resume'):
+            result = finish_command(data, result)
+        print(json.dumps(result if args.details else summary(result)))
     except (Exception, KeyboardInterrupt) as error:
         print(json.dumps({'error': report_error(data, error)}), file=os.sys.stderr)
         return 1

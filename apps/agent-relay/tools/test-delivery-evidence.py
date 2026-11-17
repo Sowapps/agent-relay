@@ -4,13 +4,47 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 import zipfile
+import complete_update
 
 from delivery_reports import REPORT_FILE, latest_reports
 from release_artifact import archive_path, extract_archive, sha256, verified_archive, validate_version, verification_directory, EXTRACTED_DIRECTORY, VERIFICATION_FILE
 
 
 class DeliveryEvidenceTests(unittest.TestCase):
+    def test_source_promotion_reuses_matching_qualification_without_running_it_again(self):
+        receipt = {'status': 'passed', 'commit': 'fixture-commit',
+                   'candidate': {'version': '1.2.0', 'archive': str(self.root / 'candidate.zip')}}
+        with patch.object(complete_update.subprocess, 'check_output', side_effect=['fixture-commit', '', 'fixture-commit', '']), \
+             patch.object(complete_update.subprocess, 'run') as qualify, \
+             patch.object(complete_update, 'latest_reports', return_value={'latest': [receipt]}), \
+             patch.object(complete_update.ET, 'parse') as version, \
+             patch.object(complete_update, 'qualified_archive', return_value=(self.root / 'candidate.zip', 'fixture-hash')), \
+             patch.object(complete_update, 'verified_archive'):
+            version.return_value.findtext.return_value = '1.2.0'
+            self.assertEqual(complete_update.source_candidate(), (self.root, '1.2.0'))
+            qualify.assert_not_called()
+
+    def test_update_command_waits_on_retained_transaction_without_reapplying(self):
+        pending = {'state': {'schema': 2, 'phase': 'awaiting_work'}}
+        complete = {'state': {'schema': 2, 'phase': 'complete'}}
+        with patch.object(complete_update, 'update', return_value=complete) as resume, patch.object(complete_update.time, 'sleep'):
+            self.assertEqual(complete_update.finish_command(self.root, pending), complete)
+            resume.assert_called_once_with(self.root, action='resume')
+        with patch.object(complete_update, 'update') as resume:
+            with self.assertRaisesRegex(RuntimeError, 'update_uncertain_work'):
+                complete_update.finish_command(self.root, {'state': {'schema': 2, 'phase': 'awaiting_work', 'errorCode': 'update_uncertain_work'}})
+            resume.assert_not_called()
+
+    def test_default_update_summary_omits_full_transaction_payload(self):
+        result = complete_update.summary({'state': {'schema': 2, 'phase': 'complete', 'files': ['fixture'] * 10000,
+                                                  'activation': {'previousPointer': 'private'}, 'clients': [1, 2]}, 'receipt': 'retained'})
+        self.assertNotIn('files', result['state'])
+        self.assertNotIn('activation', result['state'])
+        self.assertEqual(result['state']['clientCount'], 2)
+        self.assertLess(len(json.dumps(result)), 500)
+
     def test_interrupted_verification_preserves_failed_output_and_retries(self):
         extracted = self.root / EXTRACTED_DIRECTORY
         extracted.mkdir()
