@@ -33,6 +33,10 @@ The check adds two local-only projects through the packaged administrative route
 
 For portable content rendering, run `render-release-check.ps1 -Receipt <qualify/result.json>`. It rechecks the archive checksum, extracts to a fresh test directory and loads the packaged application assemblies and assets. Only the test runner is added. The application captures its own WebView with synthetic data. Inspect the generated images and then store visual-verification.json beside verification.json with passed=true, the matching archiveSha256 and the inspected capture paths. The receipt is limited to application content rendered by WebView2. Portable startup and host behavior are qualified separately by Verify.
 
+## Verification retries
+
+`Verify` serializes calls for the selected package. An interrupted extraction is retained in a sibling `extracted verification.failed-*` directory before a fresh extraction; no manual deletion is required. A matching successful verification is reused after checking the actual archive checksum, without restarting its fixture host. A mismatching receipt refuses rather than silently replacing proof. Verification logs and retained extractions remain ignored local artifacts.
+
 ## Tag and publish
 
 Review git status/diff, source file inventory and secret/data exclusion before the initial source push. .codex/, IDE settings, local/, bin/, obj/ and caches are ignored. The existing GitHub repository `sowapps/agent-relay` is the explicit target. The script accepts either public or private visibility and reports the verified value. Creation and visibility changes are separately authorized actions. Git credentials and organization permission are not provided by the script.
