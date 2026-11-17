@@ -7,24 +7,40 @@ namespace AgentRelay.Infrastructure;
 public sealed partial class InstallationUpdate
 {
     private sealed record NativeHelperImage(Guid SessionId, Dictionary<string, string?> Files);
-    private sealed record NativePublication(string TransactionId, Dictionary<Guid, string> BaseImages);
+    private sealed record NativeSession(Guid Id, string Root, string Distribution, string User);
+    private sealed record NativePublication(string TransactionId, string InventoryHash, Dictionary<Guid, string> BaseImages);
+
+    private string NativeAdapterDirectory(InstallationUpdateState state) => Path.Combine(directory, state.Id, "native-adapters");
+
+    private void CaptureNativeSessionInventory(InstallationUpdateState state)
+    {
+        // The live database is stopped and owned here. Opening the verified SQLite backup can create WAL sidecars.
+        var sessions = new SqliteDocuments<RelaySession>(new RelayDatabase(data, readOnly: true), "sessions")
+            .ListAsync(CancellationToken.None).GetAwaiter().GetResult();
+        if (sessions.Any(session => session.Id == Guid.Empty || session.Template is null || !NativeLayout.IsSession(session.Root, session.Id)))
+            throw Failure("update_adapter_scope_invalid", "A retained native session does not identify an owned root.");
+        var inventory = sessions.OrderBy(session => session.Id)
+            .Select(session => new NativeSession(session.Id, session.Root, session.Template.Distribution, session.Template.User)).ToArray();
+        AtomicText(Path.Combine(NativeAdapterDirectory(state), "inventory.json"), RelayJson.Serialize(inventory));
+    }
 
     /// <summary>Reconcile checked helper bytes while deployment owns the stopped host, using the same durable before-images for rollback.</summary>
-    private void ReconcileNativeAdapters(InstallationUpdateState state, string snapshot, bool rollback)
+    private void ReconcileNativeAdapters(InstallationUpdateState state, bool rollback)
     {
-        var root = Path.Combine(directory, state.Id, "native-adapters");
+        var root = NativeAdapterDirectory(state);
         var intent = Path.Combine(root, "publication-authorized");
         bool authorized = File.Exists(intent);
         if (rollback && !authorized) return;
         var publication = authorized ? RelayJson.Deserialize<NativePublication>(McpPrivateFiles.ReadText(intent)) : null;
-        if (publication is not null && publication.TransactionId != state.Id)
-            throw Failure("update_recovery_required", "Native helper publication intent belongs to another update.");
-        InstallationSnapshot.Verify(snapshot);
-        var sessions = new SqliteDocuments<RelaySession>(new RelayDatabase(snapshot, readOnly: true), "sessions")
-            .ListAsync(CancellationToken.None).GetAwaiter().GetResult().OrderBy(session => session.Id).ToArray();
+        var inventory = McpPrivateFiles.ReadText(Path.Combine(root, "inventory.json"));
+        var inventoryHash = McpStableProtocol.Hash(inventory);
+        if (publication is not null && (publication.TransactionId != state.Id || publication.InventoryHash != inventoryHash))
+            throw Failure("update_recovery_required", "The native helper publication intent or its inventory has changed.");
+        var sessions = RelayJson.Deserialize<NativeSession[]>(inventory);
         if (sessions.Length == 0) return;
-        if (sessions.Any(session => session.Id == Guid.Empty || session.Template is null || !NativeLayout.IsSession(session.Root, session.Id)) ||
-            sessions.Select(session => (session.Template.Distribution.ToUpperInvariant(), session.Root)).Distinct().Count() != sessions.Length)
+        if (sessions.Any(session => session.Id == Guid.Empty || !NativeLayout.IsSession(session.Root, session.Id) ||
+                string.IsNullOrWhiteSpace(session.Distribution) || string.IsNullOrWhiteSpace(session.User)) ||
+            sessions.Select(session => (session.Distribution.ToUpperInvariant(), session.Root)).Distinct().Count() != sessions.Length)
             throw Failure("update_adapter_scope_invalid", "A retained native session does not identify a unique owned root.");
 
         var prefix = Path.GetRelativePath(installation, state.Activation!.ReleaseRoot).Replace('\\', '/') + "/app/wsl/";
@@ -42,7 +58,7 @@ public sealed partial class InstallationUpdate
         var names = files.Keys.Order(StringComparer.Ordinal).ToArray();
 
         var hashes = new Dictionary<Guid, string>();
-        NativeHelperImage ReadImage(RelaySession session)
+        NativeHelperImage ReadImage(NativeSession session)
         {
             var path = Path.Combine(root, session.Id.ToString("N") + ".json");
             if (!File.Exists(path))
@@ -61,14 +77,14 @@ public sealed partial class InstallationUpdate
             return image;
         }
 
-        string Run(RelaySession session, string action, Dictionary<string, string?>? expected, Dictionary<string, string?>? desired)
+        string Run(NativeSession session, string action, Dictionary<string, string?>? expected, Dictionary<string, string?>? desired)
         {
             var request = RelayJson.Serialize(new
             {
-                action, session = new { session.Id, session.Root, template = new { session.Template.User } },
+                action, session = new { session.Id, session.Root, template = new { session.User } },
                 names, layoutSource = layout, layoutDefinition, expected, files = desired
             });
-            var outcome = WslMaintenance.RunAsync(new(session.Template.Distribution, session.Template.User, script, request, 25), CancellationToken.None)
+            var outcome = WslMaintenance.RunAsync(new(session.Distribution, session.User, script, request, 25), CancellationToken.None)
                 .GetAwaiter().GetResult();
             if (outcome.ExitCode != 0)
                 throw Failure("update_adapter_sync_failed", $"Native helper {action} could not be confirmed for session {session.Id:D}. {outcome.Phase}: {outcome.Error}");
@@ -79,7 +95,7 @@ public sealed partial class InstallationUpdate
         }
 
         var images = sessions.Select(ReadImage).ToArray();
-        if (!authorized) AtomicText(intent, RelayJson.Serialize(new NativePublication(state.Id, hashes)));
+        if (!authorized) AtomicText(intent, RelayJson.Serialize(new NativePublication(state.Id, inventoryHash, hashes)));
         else if (publication!.BaseImages.Count != sessions.Length)
             throw Failure("update_recovery_required", "The retained session inventory has changed.");
         for (var index = 0; index < sessions.Length; index++)

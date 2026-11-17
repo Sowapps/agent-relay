@@ -175,6 +175,7 @@ public sealed partial class InstallationUpdate
                 {
                     DemandUpdateIdle(state);
                     InstallationSnapshot.Capture(data, snapshot);
+                    if (activation.NativeAdapters) CaptureNativeSessionInventory(state);
                     state = Save(state with { Phase = "snapshot_ready", Error = null });
                 }
             }
@@ -184,7 +185,7 @@ public sealed partial class InstallationUpdate
                 DemandStage(state);
                 using var host = RelayLocation.OpenHostOwnership(data);
                 state = Save(state with { Phase = "applying", Error = null, ErrorCode = null });
-                if (activation.NativeAdapters) ReconcileNativeAdapters(state, snapshot, rollback: false);
+                if (activation.NativeAdapters) ReconcileNativeAdapters(state, rollback: false);
                 foreach (var file in state.Files.Where(file => !IsBootstrapFile(file.Name)))
                 {
                     PublishFile(state, file);
@@ -286,7 +287,7 @@ public sealed partial class InstallationUpdate
         if (runtime.Inspect(actualExecutable) is { } host) runtime.Stop(host);
         using (RelayLocation.OpenHostOwnership(data))
         {
-            if (activation.NativeAdapters) ReconcileNativeAdapters(state, snapshotPath, rollback: true);
+            if (activation.NativeAdapters) ReconcileNativeAdapters(state, rollback: true);
             InstallationSnapshot.Restore(data, snapshotPath);
             foreach (var file in state.Files.Where(file => !Within(Inside(installation, file.Name), activation.ReleaseRoot)))
             {
