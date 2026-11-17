@@ -75,8 +75,10 @@ def main():
             with RelayMcp(client_runtime, data, ROOT, errors) as client:
                 client.call('resources/list')
                 assert host() is None, 'Public discovery started the tray'
-                with PromotionFreeze(data):
-                    assert_refused(client, 'maintenance')
+                with PromotionFreeze(data) as freeze:
+                    blocked = assert_refused(client, 'deployment_in_progress' if generic else 'maintenance')
+                    if generic:
+                        assert blocked['deploymentId'] == freeze.owner and blocked['recovery'] == 'wait_for_deployment', blocked
                     assert host() is None, 'Maintenance admitted an on-demand start'
                 with closing(sqlite3.connect(data / 'relay.sqlite')) as db:
                     row = db.execute('SELECT payload FROM connections WHERE id=?', (fixture['connectionId'],)).fetchone()[0]
