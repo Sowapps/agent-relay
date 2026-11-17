@@ -9,12 +9,44 @@ import zipfile
 import complete_update
 import host_identity
 from types import SimpleNamespace
+import io
+from contextlib import redirect_stdout
+import relay_mcp
 
 from delivery_reports import REPORT_FILE, latest_reports
-from release_artifact import archive_path, extract_archive, sha256, verified_archive, validate_version, verification_directory, EXTRACTED_DIRECTORY, VERIFICATION_FILE
+from release_artifact import archive_path, extract_archive, sha256, verified_archive, validate_version, verification_directory, EXTRACTED_DIRECTORY, VERIFICATION_FILE, python_module_closure
 
 
 class DeliveryEvidenceTests(unittest.TestCase):
+    def test_packaged_module_dependencies_follow_imports_and_cycles(self):
+        (self.root / 'entry.py').write_text('import json\nfrom worker import run\n', encoding='utf-8')
+        (self.root / 'worker.py').write_text('import entry\nimport helper\ndef run(): pass\n', encoding='utf-8')
+        (self.root / 'helper.py').write_text('value = 1\n', encoding='utf-8')
+        self.assertEqual(python_module_closure(self.root, ['entry.py']), ['entry.py', 'helper.py', 'worker.py'])
+        with self.assertRaises(ValueError):
+            python_module_closure(self.root, ['../entry.py'])
+
+    def test_stable_client_returns_selected_fields_and_never_replays_timeout(self):
+        config = self.root / 'client.toml'
+        args = ['mcp', '--data-dir', str(self.root), '--connection-id', '00000000-0000-0000-0000-000000000001']
+        config.write_text('[mcp_servers.agent_relay]\ncommand="fixture.exe"\nargs='+json.dumps(args), encoding='utf-8')
+        output = io.StringIO()
+        with patch.object(relay_mcp, 'McpRpc') as factory, redirect_stdout(output):
+            client = factory.return_value.__enter__.return_value
+            client.inventory = [{'name': 'invoke_operation'}, {'name': 'get_connection_status'}]
+            client.tool.return_value = {'version': 'fixture', 'extra': 'omitted'}
+            self.assertEqual(relay_mcp.main(['--config', str(config), '--operation', 'get_connection_status', '--fields', 'version']), 0)
+            self.assertEqual(json.loads(output.getvalue())['result'], {'version': 'fixture'})
+            client.tool.assert_called_once()
+        output = io.StringIO()
+        with patch.object(relay_mcp, 'McpRpc') as factory, redirect_stdout(output):
+            client = factory.return_value.__enter__.return_value
+            client.inventory = [{'name': 'invoke_operation'}, {'name': 'get_connection_status'}]
+            client.tool.side_effect = relay_mcp.McpRemoteError({'structuredContent': {'error': {'code': 'relay_timeout', 'execution': 'unconfirmed'}}})
+            self.assertEqual(relay_mcp.main(['--config', str(config), '--operation', 'get_connection_status']), 1)
+            self.assertEqual(json.loads(output.getvalue())['error']['code'], 'relay_timeout')
+            client.tool.assert_called_once()
+
     def test_automatic_rollback_is_not_reported_as_successful_deployment(self):
         with self.assertRaisesRegex(RuntimeError, 'Update rolled back: startup failed'):
             complete_update.finish_command(self.root, {'state': {'schema': 2, 'phase': 'rolled_back', 'error': 'startup failed'}})

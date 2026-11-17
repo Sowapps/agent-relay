@@ -149,15 +149,27 @@ def main():
         verify_package(directory, args.version)
 
 
+def verify_packaged_clients(extracted):
+    environment = dict(os.environ)
+    environment.pop('PYTHONPATH', None)
+    environment.pop('PYTHONHOME', None)
+    for name in ('complete_update.py', 'relay_mcp.py'):
+        checked = subprocess.run([os.sys.executable, '-S', '-B', str(extracted / 'tools/updater' / name), '--help'],
+                                 cwd=extracted, env=environment, capture_output=True, text=True, encoding='utf-8',
+                                 timeout=20, creationflags=subprocess.CREATE_NO_WINDOW)
+        require(checked.returncode == 0, 'Packaged client entry failed: ' + name + ': ' + checked.stderr[-1000:])
+
+
 def verify_package(directory, version):
     extracted, digest = extract_package(directory, version)
     documentation_links = verify_documentation(extracted)
+    verify_packaged_clients(extracted)
     resources = verify_runtime(directory, extracted, version)
     result = {'passed': True, 'archiveSha256': digest, 'version': version, 'extracted': str(extracted),
               'resources': resources, 'tools': EXPECTED_TOOLS, 'selfContained': True, 'frenchReadme': True,
               'documentationLinks': documentation_links,
               'runtimeIsolation': 'No dotnet/NuGet variables, nonexistent DOTNET_ROOT, PATH restricted to Windows System32',
-              'projectPreservation': True, 'scopedConnectionAndForeignProjectRefusal': True,
+              'projectPreservation': True, 'scopedConnectionAndForeignProjectRefusal': True, 'packagedClientsStandalone': True,
               'restartAndDuplicateOwner': True, 'modelCalls': 0, 'wslCalls': 0,
               'guiVerification': 'Separate exact-archive native capture required before Publish'}
     with (directory / VERIFICATION_FILE).open('x', encoding='utf-8') as output:

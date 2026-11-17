@@ -435,6 +435,8 @@ def finalize_rollback(updater, installation, data, state, receipt, guard):
 def source_candidate():
     """Delegate to the existing one-command qualification; reuse its exact clean-source receipt."""
     tools = Path(__file__).resolve().parent
+    if not (tools.parent / 'Version.props').is_file() or not (tools / 'isolated-delivery.py').is_file():
+        raise ValueError('--source requires the development checkout; installed updates accept an explicit verified release directory/version')
     root = tools.parents[2]
     def git(*arguments):
         return subprocess.check_output(['git', *arguments], cwd=root, text=True, creationflags=subprocess.CREATE_NO_WINDOW).strip()

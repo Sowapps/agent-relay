@@ -4,6 +4,7 @@
 """
 
 import argparse
+import ast
 from contextlib import contextmanager
 import hashlib
 import json
@@ -19,6 +20,28 @@ VERIFICATION_FILE = 'verification.json'
 EXTRACTED_DIRECTORY = 'extracted verification'
 WINDOWS_REPARSE_POINT = getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0x400)
 MANIFEST_FILE = 'release-manifest.json'
+
+
+def python_module_closure(directory, entrypoints):
+    """Package local imports from their owning source, not a second handwritten dependency list."""
+    pending, selected = list(entrypoints), set()
+    while pending:
+        name = pending.pop()
+        if name in selected:
+            continue
+        if Path(name).name != name or not name.endswith('.py'):
+            raise ValueError('Python tool entrypoints must be flat local files')
+        source = ordinary_file(Path(directory) / name)
+        selected.add(name)
+        for node in ast.walk(ast.parse(source.read_text(encoding='utf-8-sig'), filename=str(source))):
+            modules = [item.name for item in node.names] if isinstance(node, ast.Import) else [node.module] if isinstance(node, ast.ImportFrom) else []
+            if isinstance(node, ast.ImportFrom) and node.level:
+                raise ValueError('Relative tool imports need an explicit supported package layout')
+            for module in modules:
+                dependency = module.split('.')[0] + '.py' if module else ''
+                if dependency and (Path(directory) / dependency).is_file():
+                    pending.append(dependency)
+    return sorted(selected)
 
 
 def verification_directory(directory):

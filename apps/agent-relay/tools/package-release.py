@@ -3,15 +3,14 @@ Usage: called by release.ps1 Package; never includes local application data or u
 """
 import argparse, json, shutil, zipfile, subprocess
 from pathlib import Path
-from release_artifact import MANIFEST_FILE, archive_path, sha256
+from release_artifact import MANIFEST_FILE, archive_path, sha256, python_module_closure
 p=argparse.ArgumentParser(description=__doc__)
 for name in ['payload','output','cache','sdk']:p.add_argument('--'+name,type=Path,required=True)
 p.add_argument('--version',required=True);a=p.parse_args()
 payload=a.payload.resolve();notices=payload/'third-party';notices.mkdir()
 app=Path(__file__).resolve().parents[1]
 root=app.parents[1]
-update_tools = ['complete_update.py', 'deployment.py', 'host_identity.py', 'release_artifact.py', 'portable_fixture.py',
-                'runtime_layout.py', 'relay_mcp.py', 'stdio_rpc.py', 'verify-release.py']
+update_tools = python_module_closure(app / 'tools', ['complete_update.py', 'verify-release.py', 'relay_mcp.py'])
 updater = payload / 'tools/updater'
 updater.mkdir(parents=True)
 for name in update_tools:
