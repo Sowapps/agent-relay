@@ -8,7 +8,7 @@ namespace AgentRelay.Infrastructure;
 public sealed record InstallationActivation(string ReleaseRoot, string PreviousPointer, string? PreviousTransport,
     Guid[] TransportInstances, bool StartupEnabled, bool AdmissionReleased = false, bool? WasRunning = null, string? SelectionHash = null,
     InstallationStartupSnapshot? Startup = null, bool ResumeAuthorized = false, DateTimeOffset? AuthorizedAt = null,
-    bool InitialActivation = false, InstallationHost? LegacyHost = null);
+    bool InitialActivation = false, InstallationHost? LegacyHost = null, bool NativeAdapters = false);
 
 public sealed partial class InstallationUpdate
 {
@@ -47,7 +47,9 @@ public sealed partial class InstallationUpdate
             throw Failure("update_initial_migration_invalid", "This installation already has a stable transport; use the normal update command.");
         if (!initial) _ = McpProcessSelections.Read(RuntimePaths.TransportSelection(data));
         _ = runtime.Inspect(currentExecutable);
-        DemandNativeCompatibility(declared, currentExecutable);
+        var nativeAdapters = NativeAdaptersChanged(declared, currentExecutable);
+        if (nativeAdapters && !declared.ContainsKey("app/wsl/session_adapter_files.py"))
+            DemandNativeCompatibility(declared, currentExecutable); // Older candidates retain the conservative guard.
         var previousVersion = RelayJson.Deserialize<McpIdentity>(File.ReadAllText(Path.Combine(Path.GetDirectoryName(currentExecutable)!, "mcp-contract.json"))).Version;
         if (previousVersion == version) throw Failure("update_version_conflict", "Select a new numbered RC or stable version for different installed bytes.");
         var historyPath = Path.Combine(data, "mcp-contract-history.json");
@@ -78,7 +80,8 @@ public sealed partial class InstallationUpdate
         var state = new InstallationUpdateState(2, id, digest, installation, data, version, contractHash, "preparing", files, [], DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 0, 0,
             Activation: new(root, previous, File.Exists(RuntimePaths.TransportSelection(data)) ? File.ReadAllText(RuntimePaths.TransportSelection(data)) : null,
                 McpTransportPresences.Read(RuntimePaths.TransportStateDirectory(data)).Where(item => item.Admitted && item.State is not ("offline" or "closed")).Select(item => item.InstanceId).ToArray(), startup.Enabled, Startup: startup, InitialActivation: initial,
-                LegacyHost: initial ? (runtime as InstallationRuntime)?.LegacyHost : null));
+                LegacyHost: initial ? (runtime as InstallationRuntime)?.LegacyHost : null,
+                NativeAdapters: nativeAdapters && declared.ContainsKey("app/wsl/session_adapter_files.py")));
         Directory.CreateDirectory(Path.Combine(directory, id));
         CacheRecoveryRunner(state, candidate, declared);
         Save(state);
@@ -181,6 +184,7 @@ public sealed partial class InstallationUpdate
                 DemandStage(state);
                 using var host = RelayLocation.OpenHostOwnership(data);
                 state = Save(state with { Phase = "applying", Error = null, ErrorCode = null });
+                if (activation.NativeAdapters) ReconcileNativeAdapters(state, snapshot, rollback: false);
                 foreach (var file in state.Files.Where(file => !IsBootstrapFile(file.Name)))
                 {
                     PublishFile(state, file);
@@ -282,6 +286,7 @@ public sealed partial class InstallationUpdate
         if (runtime.Inspect(actualExecutable) is { } host) runtime.Stop(host);
         using (RelayLocation.OpenHostOwnership(data))
         {
+            if (activation.NativeAdapters) ReconcileNativeAdapters(state, snapshotPath, rollback: true);
             InstallationSnapshot.Restore(data, snapshotPath);
             foreach (var file in state.Files.Where(file => !Within(Inside(installation, file.Name), activation.ReleaseRoot)))
             {
@@ -440,10 +445,13 @@ public sealed partial class InstallationUpdate
 
     private void DemandNativeCompatibility(Dictionary<string, string> declared, string executable)
     {
-        if (!declared.Where(item => item.Key.StartsWith("app/wsl/", StringComparison.Ordinal))
-            .Any(item => OptionalHash(Path.Combine(Path.GetDirectoryName(executable)!, item.Key[4..])) != item.Value)) return;
+        if (!NativeAdaptersChanged(declared, executable)) return;
         using var database = new RelayDatabase(data, readOnly: true).Open();
         using var command = database.CreateCommand(); command.CommandText = "SELECT count(*) FROM sessions";
         if (Convert.ToInt64(command.ExecuteScalar()) != 0) throw Failure("update_adapter_sync_required", "Changed native adapters require owned-session synchronization qualification before update.");
     }
+
+    private static bool NativeAdaptersChanged(Dictionary<string, string> declared, string executable) =>
+        declared.Where(item => item.Key.StartsWith("app/wsl/", StringComparison.Ordinal))
+            .Any(item => OptionalHash(Path.Combine(Path.GetDirectoryName(executable)!, item.Key[4..])) != item.Value);
 }

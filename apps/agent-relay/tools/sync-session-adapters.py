@@ -19,19 +19,7 @@ from wsl_maintenance import run_script
 
 application = Path(__file__).resolve().parents[1]
 root = application.parents[1]
-script = '''
-import base64,json,os,pathlib,sys,uuid
-c=json.load(sys.stdin);s=c['session'];p=pathlib.Path(s['root'])
-namespace={};exec(base64.b64decode(c['files']['native_layout.py']),namespace)
-layout=namespace['layout_from_payload'](c['files'])
-assert layout.is_session(p,s['id']) and p.resolve()==p and p.stat().st_uid==os.getuid()
-assert json.loads((p/'provision-owner.json').read_text())=={'sessionId':s['id'],'user':s['template']['user']}
-install=p/'install';assert install.resolve()==install
-for name,value in c['files'].items():
- target=install/name;assert target.parent==install and not target.is_symlink()
- temporary=target.with_suffix('.pending-'+uuid.uuid4().hex);temporary.write_bytes(base64.b64decode(value));os.replace(temporary,target)
-print(json.dumps({'sessionId':s['id'],'files':len(c['files']),'modelPrompts':0}))
-'''
+script = (application / 'wsl/session_adapter_files.py').read_text(encoding='utf-8')
 
 
 def synchronize(data, session_ids=None, runtime_pointer=None):
@@ -50,7 +38,8 @@ def synchronize(data, session_ids=None, runtime_pointer=None):
         for session in sessions:
             template = session['template']
             result = run_script(runtime, data, template['distribution'], template['user'], script,
-                                {'session': session, 'files': files}, 20)
+                                {'action': 'refresh', 'session': session, 'names': list(files), 'files': files,
+                                 'layoutSource': files['native_layout.py'], 'layoutDefinition': files['native-layout.json']}, 20)
             print(result['output'].strip())
 
 

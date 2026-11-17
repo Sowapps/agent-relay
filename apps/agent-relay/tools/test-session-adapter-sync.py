@@ -148,12 +148,41 @@ def main():
         assert all(hashes == expected for hashes in native('inspect').values())
         assert (data / 'mcp-runtime.json').read_bytes() == pointer_before
         assert (data / 'relay.sqlite').read_bytes() == database_before
+        def helper(action, desired, previous=None):
+            session = sessions[0]
+            message = {'action': action, 'session': session, 'names': list(desired), 'files': desired,
+                       'expected': previous, 'layoutSource': files['native_layout.py'], 'layoutDefinition': files['native-layout.json']}
+            result = run_script(runtime, data, args.distribution, args.user, sync.script, message, 20)
+            return json.loads(result['output'])
+
+        # Simulate a process exit after one file was replaced, retaining a second old file and one absent file.
+        desired = {name: base64.b64encode(content).decode('ascii') for name, content in {
+            'native_clients.py': b'# changed fixture\n', 'relay_bridge.py': b'# next bridge\n', 'new_probe.py': b'# new fixture\n'}.items()}
+        prior = helper('capture', desired)['files']
+        assert prior['new_probe.py'] is None
+        changed = {'native_clients.py': desired['native_clients.py']}
+        helper('replace', changed, {name: prior[name] for name in changed})
+        helper('replace', desired, prior)
+        helper('replace', desired, prior)  # repeated forward no-op
+        assert helper('capture', desired)['files'] == desired
+        helper('replace', prior, desired)
+        assert helper('capture', desired)['files'] == prior
+        conflict = {'relay_bridge.py': base64.b64encode(b'# foreign edit\n').decode('ascii')}
+        helper('refresh', conflict)
+        try:
+            helper('replace', desired, prior)
+        except WslMaintenanceError:
+            assert helper('capture', desired)['files'] == dict(prior, **conflict), 'Conflict caused a partial write'
+        else:
+            raise AssertionError('Unknown helper contents were overwritten')
+        helper('refresh', {'relay_bridge.py': prior['relay_bridge.py']})
         enter_competing_owner(data)
         report.update(passed=True, activeStatesRefused=['pending', 'running'], hostOwnershipRefused=True,
                       guardHeldThroughCopy=True, unknownSelectionRefused=True,
                       defaultRuntimeChecked=True, legacyOverrideChecked=bool(args.legacy_runtime_pointer),
                       selectedCurrentAndLegacyRootsUpdated=True, otherSessionPreserved=True,
-                      databaseAndRuntimeUnchanged=True, synchronizedSessions=len(wsl_calls))
+                      databaseAndRuntimeUnchanged=True, synchronizedSessions=len(wsl_calls),
+                      mixedImagesResumed=True, rollbackRestoredAbsence=True, foreignHelperRefused=True)
     except BaseException as error:
         report['error'] = str(error) or type(error).__name__
         if isinstance(error, WslMaintenanceError):
