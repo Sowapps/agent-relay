@@ -73,6 +73,8 @@ public sealed class RelayPipeServer : IDisposable
                     deadline.CancelAfter(PipeDeadlines.For(request.Operation));
                     if (request.Version != 1) throw new RelayException("unsupported_version", "Unsupported local protocol version.");
                     var authenticated = connections is null ? null : await connections.AuthenticateAsync(request.AccessToken, deadline.Token);
+                    // Authenticated host identity remains a read-only deployment control, not MCP client admission.
+                    // McpGateway owns client initialization; PromotionAdmission owns work admission and drain.
                     var passive = request.Operation is "mcp_handshake" or "configuration" or "history" or "read" or "show_window" ||
                         request.Operation == "project" && request.ProjectAction is { } query &&
                         (query.Name is "configuration" or "describe_endpoints" or "get_result" or "cancel_operation" or "reconcile_operation" or "list_sessions" or "list_results" or "list_events" ||

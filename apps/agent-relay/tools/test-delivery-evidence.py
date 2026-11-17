@@ -18,6 +18,21 @@ from release_artifact import archive_path, extract_archive, sha256, verified_arc
 
 
 class DeliveryEvidenceTests(unittest.TestCase):
+    def test_passive_update_status_never_takes_the_writer_lock(self):
+        installation = self.root / 'installation'
+        data = installation / 'var/apps/agent-relay/default'
+        data.mkdir(parents=True)
+        (data / 'mcp-runtime.json').write_text('{}', encoding='utf-8')
+        reports = installation / 'var/apps/agent-relay/update'
+        reports.mkdir()
+        (reports / 'recovery.json').write_text('{}', encoding='utf-8')
+        with patch.object(complete_update, 'recovery_updater', return_value={'executable': 'fixture'}), \
+             patch.object(complete_update, 'invoke', return_value={'id': 'fixture', 'phase': 'awaiting_work'}) as invoke, \
+             patch.object(complete_update, 'exclusive', side_effect=AssertionError('Passive status took writer lock')):
+            result = complete_update.update(data, action='status')
+        self.assertEqual(result['state']['phase'], 'awaiting_work')
+        invoke.assert_called_once_with({'executable': 'fixture'}, installation, data, 'status')
+
     def test_packaged_module_dependencies_follow_imports_and_cycles(self):
         (self.root / 'entry.py').write_text('import json\nfrom worker import run\n', encoding='utf-8')
         (self.root / 'worker.py').write_text('import entry\nimport helper\ndef run(): pass\n', encoding='utf-8')

@@ -225,6 +225,10 @@ def _update(data, archive, digest, *, updater=None, verify=None, guard=None, ref
         raise RuntimeError('No retained recovery runtime. Select a verified candidate for the first update')
     context['updater'] = updater
     reports = app_var(installation) / 'update'
+    if action == 'status':
+        # C# publishes the journal atomically. A passive reader must not compete for the writer's driver lock.
+        state = invoke(updater, installation, data, 'status')
+        return dict(state=state, receipt=str(reports / state['id'] / 'ports.json'))
     reports.mkdir(exist_ok=True)
     started = time.monotonic()
     with exclusive(data, 'update-driver.lock'):

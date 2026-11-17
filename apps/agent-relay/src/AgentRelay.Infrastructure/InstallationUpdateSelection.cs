@@ -77,7 +77,7 @@ public sealed partial class InstallationUpdate
         var startup = runtime.CaptureStartup(currentExecutable);
         var state = new InstallationUpdateState(2, id, digest, installation, data, version, contractHash, "preparing", files, [], DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 0, 0,
             Activation: new(root, previous, File.Exists(RuntimePaths.TransportSelection(data)) ? File.ReadAllText(RuntimePaths.TransportSelection(data)) : null,
-                McpTransportPresences.Read(RuntimePaths.TransportStateDirectory(data)).Where(item => item.State is not ("offline" or "closed")).Select(item => item.InstanceId).ToArray(), startup.Enabled, Startup: startup, InitialActivation: initial,
+                McpTransportPresences.Read(RuntimePaths.TransportStateDirectory(data)).Where(item => item.Admitted && item.State is not ("offline" or "closed")).Select(item => item.InstanceId).ToArray(), startup.Enabled, Startup: startup, InitialActivation: initial,
                 LegacyHost: initial ? (runtime as InstallationRuntime)?.LegacyHost : null));
         Directory.CreateDirectory(Path.Combine(directory, id));
         CacheRecoveryRunner(state, candidate, declared);
@@ -130,13 +130,16 @@ public sealed partial class InstallationUpdate
             return state;
         }
         if (state.Phase == "reopening") return FinishSelectedUpdate(state);
-        var marker = Path.Combine(data, "promotion.lock");
-        if (!File.Exists(marker))
+        var admission = new McpDeploymentAdmission(data);
+        if (!admission.Suspended && activation.AdmissionReleased)
+            throw Failure("update_recovery_required", "Admission already reopened; do not recreate an earlier update boundary.");
+        admission.Suspend(state.Id, () =>
         {
-            if (activation.AdmissionReleased) throw Failure("update_recovery_required", "Admission already reopened; do not recreate an earlier update boundary.");
-            using var barrier = new FileStream(marker, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
-            barrier.Write(System.Text.Encoding.ASCII.GetBytes(state.Id)); barrier.Flush(true);
-        }
+            var required = activation.TransportInstances.Concat(McpTransportPresences.Read(RuntimePaths.TransportStateDirectory(data))
+                .Where(item => item.Admitted && item.State is not ("offline" or "closed")).Select(item => item.InstanceId)).Distinct().ToArray();
+            if (!required.SequenceEqual(activation.TransportInstances))
+                state = Save(state with { Activation = activation = activation with { TransportInstances = required } });
+        });
         DemandBarrier(state);
         var previousExecutable = JsonNode.Parse(activation.PreviousPointer)!["executable"]!.GetValue<string>();
         var snapshot = Path.Combine(directory, state.Id, "data-before");
@@ -353,7 +356,7 @@ public sealed partial class InstallationUpdate
     /// <seealso cref="CompleteSelectedRollback"/>
     private bool TransportsReady(McpProcessSelection selected, IReadOnlyList<Guid> required)
     {
-        var leases = McpTransportPresences.Read(RuntimePaths.TransportStateDirectory(data));
+        var leases = McpTransportPresences.Read(RuntimePaths.TransportStateDirectory(data)).Where(item => item.Admitted).ToArray();
         var gateway = McpProcessSelections.Identity(selected.Gateway); var worker = McpProcessSelections.Identity(selected.Worker);
         bool Current(McpTransportPresence item) => item.State == "current" && item.GatewayIdentity == gateway && item.SelectedWorkerIdentity == worker &&
             (item.ActiveWorkerIdentity is null || item.ActiveWorkerIdentity == item.SelectedWorkerIdentity);
@@ -420,8 +423,7 @@ public sealed partial class InstallationUpdate
     }
     private void ReleaseSelectedBarrier(InstallationUpdateState state)
     {
-        var marker = Path.Combine(data, "promotion.lock");
-        if (File.Exists(marker)) { DemandBarrier(state); File.Delete(marker); }
+        new McpDeploymentAdmission(data).Release(state.Id);
     }
 
     private void ValidateActivation(InstallationUpdateState state)

@@ -6,7 +6,8 @@ namespace AgentRelay.Protocol;
 
 public sealed record McpTransportPresence(Guid InstanceId, int ProcessId, Guid? BindingId, string Version,
     string GatewayIdentity, string? ActiveWorkerIdentity, string SelectedWorkerIdentity, string State, DateTimeOffset SeenAt,
-    long BufferedInputBytes = 0, DateTimeOffset? ProcessStartedAt = null, string? BundleDirectory = null, string? Client = null);
+    long BufferedInputBytes = 0, DateTimeOffset? ProcessStartedAt = null, string? BundleDirectory = null, string? Client = null,
+    DateTimeOffset? ConnectedAt = null, string? ClientVersion = null, string Activity = "idle", bool Admitted = true);
 
 /// <summary>Diagnostic process presence; never authentication or permission to execute/replay work.</summary>
 public static class McpTransportPresences

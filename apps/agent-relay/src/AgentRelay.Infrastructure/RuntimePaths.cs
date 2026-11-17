@@ -35,7 +35,7 @@ public static class RuntimePaths
             string.Equals(actual, ReleaseDirectory(installation, candidateHash, legacy: true), StringComparison.OrdinalIgnoreCase);
     }
     public static string TransportSelection(string data) => Path.Combine(Path.GetFullPath(data), "transport-selection.json");
-    public static string TransportStateDirectory(string data) => Path.Combine(Path.GetFullPath(data), "transport");
+    public static string TransportStateDirectory(string data) => AgentRelay.Protocol.McpDeploymentAdmission.StateDirectoryFor(data);
     public static string TransportBootstrapDirectory(string data) => Path.Combine(Path.GetFullPath(data), "transport-bootstrap");
     public static string TransportBootstrapExecutable(string data) => Path.Combine(TransportBootstrapDirectory(data), "AgentRelay.Transport.exe");
     public static string TransportEntryScript(string data) => Path.Combine(Path.GetFullPath(data), "launch.ps1");

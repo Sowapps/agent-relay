@@ -3,6 +3,7 @@ using AgentRelay.Infrastructure;
 using System.IO.Pipes;
 
 if (args.Length == 2 && args[0] == "mcp-connection-inspection") { McpConnectionInspectionScenarios.Run(Path.GetFullPath(args[1])); return; }
+if (args.Length == 2 && args[0] == "promotion-admission") { await VerifyPromotionAsync(Path.GetFullPath(args[1])); return; }
 if (args.Length == 2 && args[0] == "initial-stable-activation") { SelectedUpdateScenarios.Initial(Path.GetFullPath(args[1])); return; }
 
 if (args.Length == 4 && args[0] == "transport-fixture") { await McpTransportScenarios.FixtureAsync(args[1], args[2], args[3]); return; }
@@ -150,7 +151,7 @@ static async Task VerifyPromotionAsync(string data)
             await admitted;
             var ack = await client.RequestAsync(confirm, CancellationToken.None);
             Check(ack.Warnings?.Single() == "deployment-quiescent-v1", "promotion confirms drained admissions");
-            await RefusesBeforeExecution("maintenance", () => client.SendAsync(LocalDemo.Message("too late"), CancellationToken.None));
+            await RefusesBeforeExecution("deployment_in_progress", () => client.SendAsync(LocalDemo.Message("too late"), CancellationToken.None));
         }
         finally { File.Delete(marker); }
         await client.SendAsync(LocalDemo.Message("after promotion"), CancellationToken.None);

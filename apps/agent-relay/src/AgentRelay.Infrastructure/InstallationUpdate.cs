@@ -324,8 +324,7 @@ public sealed partial class InstallationUpdate
         if (state.Phase != "rolled_back") throw Failure("update_recovery_required", "Finish rollback before releasing its admission barrier.");
         if (state.Files.Any(file => OptionalHash(Inside(installation, file.Name)) != file.Before))
             throw Failure("update_recovery_required", "Restored files changed; the recovery barrier was retained.");
-        var marker = Path.Combine(data, "promotion.lock");
-        if (File.Exists(marker)) { DemandBarrier(state); File.Delete(marker); }
+        new AgentRelay.Protocol.McpDeploymentAdmission(data).Release(state.Id);
         return state;
     }
 
@@ -475,7 +474,7 @@ public sealed partial class InstallationUpdate
 
     private void DemandBarrier(InstallationUpdateState state)
     {
-        var marker = Path.Combine(data, "promotion.lock");
+        var marker = AgentRelay.Protocol.McpDeploymentAdmission.MarkerFor(data);
         if (!File.Exists(marker) || File.ReadAllText(marker) != state.Id)
             throw Failure("update_barrier_required", "The complete-update admission barrier is missing or belongs to another operation.");
     }

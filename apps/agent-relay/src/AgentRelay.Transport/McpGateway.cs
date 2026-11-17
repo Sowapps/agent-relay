@@ -7,7 +7,7 @@ using AgentRelay.Protocol;
 namespace AgentRelay.Transport;
 
 public sealed record McpTransferState(string Selection, string StateDirectory, string GatewayIdentity,
-    JsonNode? Initialization, string? PendingFrame, byte[] Unread, Guid InstanceId, Guid? BindingId = null);
+    JsonNode? Initialization, string? PendingFrame, byte[] Unread, Guid InstanceId, Guid? BindingId = null, DateTimeOffset? ConnectedAt = null);
 
 /// <summary>Serialized stdio ownership and worker replacement. No application routing or credentials live here.</summary>
 public sealed class McpGateway : IAsyncDisposable
@@ -18,8 +18,13 @@ public sealed class McpGateway : IAsyncDisposable
     private readonly McpFrames input;
     private readonly Guid instance;
     private readonly Guid? binding;
+    private readonly McpDeploymentAdmission admission;
+    private readonly DateTimeOffset connectedAt;
+    private bool admitted;
+    private string activity = "idle";
     private string? pending, selectedText, gatewayIdentity, workerIdentity;
     private JsonNode? initialization;
+    private JsonNode? clientMetadata;
     private McpProcessSelection? selection;
     private Process? worker;
     private McpFrames? responses;
@@ -40,7 +45,11 @@ public sealed class McpGateway : IAsyncDisposable
         this.input = new(input, transfer?.Unread);
         instance = transfer?.InstanceId ?? Guid.NewGuid();
         binding = transfer?.BindingId;
+        admission = McpDeploymentAdmission.ForStateDirectory(this.stateDirectory);
+        connectedAt = transfer?.ConnectedAt ?? DateTimeOffset.UtcNow;
+        admitted = transfer?.Initialization is not null;
         initialization = transfer?.Initialization?.DeepClone();
+        clientMetadata = initialization is JsonObject initial ? initial["clientInfo"]?.DeepClone() : null;
         pending = transfer?.PendingFrame;
         gatewayIdentity = transfer?.GatewayIdentity;
     }
@@ -68,7 +77,7 @@ public sealed class McpGateway : IAsyncDisposable
                 {
                     if (failedGateway == nextGateway) throw new McpProtocolException("transport_update_failed", "This successor already failed readiness; correct its selected bundle before retrying.");
                     var transfer = new McpTransferState(selectionPath, stateDirectory, nextGateway,
-                        initialization?.DeepClone(), frame, input.ExportUnread(), instance, binding);
+                        initialization?.DeepClone(), frame, input.ExportUnread(), instance, binding, connectedAt);
                     if (await McpSuccession.TransferAsync(next.Gateway, transfer, DropWorkerAsync)) { relinquished = true; return; }
                     failedGateway = nextGateway;
                     throw new McpProtocolException("transport_update_failed", "The successor did not become ready. This request was not forwarded; inspect transport diagnostics.");
@@ -78,7 +87,14 @@ public sealed class McpGateway : IAsyncDisposable
                 switch (method)
                 {
                     case "initialize":
-                        initialization = request["params"]?.DeepClone();
+                        clientMetadata = request["params"] is JsonObject initialParameters ? initialParameters["clientInfo"]?.DeepClone() : null;
+                        using (admission.Acquire())
+                        {
+                            admission.DemandOpen();
+                            initialization = request["params"]?.DeepClone();
+                            admitted = true;
+                            WritePresence(next);
+                        }
                         result = new { protocolVersion = initialization?["protocolVersion"]?.GetValue<string>() ?? "2025-11-25",
                             capabilities = new { tools = new { }, resources = new { subscribe = false } },
                             serverInfo = new { name = "agent-relay", version = Version },
@@ -87,6 +103,20 @@ public sealed class McpGateway : IAsyncDisposable
                     case "tools/list": result = new { tools = McpStableProtocol.Tools }; break;
                     case "ping": result = new { }; break;
                     default:
+                        using (admission.Acquire())
+                        {
+                            if (admission.Suspended && method == "tools/call" && request["params"]?["name"]?.GetValue<string>() == "get_connection_status")
+                            {
+                                result = new { structuredContent = new { available = false, state = "deployment_in_progress", deploymentId = admission.DeploymentId,
+                                    admissionSuspended = true, brokerVersion = Version, recovery = "wait_for_deployment" },
+                                    content = new[] { new { type = "text", text = "Relay deployment in progress; work admission is suspended." } } };
+                                break;
+                            }
+                            admission.DemandOpen();
+                            if (!admitted) throw new McpProtocolException("not_initialized", "Initialize this MCP connection before requesting operations.");
+                            activity = "forwarding";
+                            WritePresence(next);
+                        }
                         await EnsureWorkerAsync(next.Worker);
                         if (method == "tools/call")
                         {
@@ -101,6 +131,8 @@ public sealed class McpGateway : IAsyncDisposable
                             ?? throw new IOException("Worker closed before its reply.")) as JsonObject ?? throw new JsonException("Invalid worker reply.");
                         if (!JsonNode.DeepEquals(id, response["id"])) throw new IOException("Worker correlation mismatch.");
                         await McpFrames.WriteAsync(output, response.ToJsonString(McpProcessSelections.Json));
+                        activity = "idle";
+                        WritePresence(next);
                         continue;
                 }
                 await McpFrames.WriteAsync(output, JsonSerializer.Serialize(new { jsonrpc = "2.0", id, result }, McpProcessSelections.Json));
@@ -111,7 +143,7 @@ public sealed class McpGateway : IAsyncDisposable
                 var next = ReadSelection();
                 var identity = McpProcessSelections.Identity(next.Gateway);
                 var transfer = new McpTransferState(selectionPath, stateDirectory, identity, initialization?.DeepClone(), null,
-                    input.ExportUnread(), instance, binding);
+                    input.ExportUnread(), instance, binding, connectedAt);
                 try { if (await McpSuccession.TransferAsync(next.Gateway, transfer, DropWorkerAsync)) { relinquished = true; return; } }
                 catch (Exception error) { Record(error); }
                 failedGateway = identity;
@@ -119,14 +151,18 @@ public sealed class McpGateway : IAsyncDisposable
             }
             catch (Exception error)
             {
-                try { await DropWorkerAsync(); }
+                try { if (error is not McpDeploymentException) await DropWorkerAsync(); }
                 catch (Exception cleanup) { Record(cleanup); }
-                var code = forwarded ? "mcp_transport_lost" : error is McpProtocolException protocol ? protocol.Code : "transport_unavailable";
+                var blocked = error as McpDeploymentException;
+                activity = blocked is not null ? "blocked" : "idle";
+                try { if (selection is not null) WritePresence(selection); }
+                catch (Exception retention) when (retention is IOException or UnauthorizedAccessException) { Record(retention); }
+                var code = forwarded ? "mcp_transport_lost" : blocked is not null ? "deployment_in_progress" : error is McpProtocolException protocol ? protocol.Code : "transport_unavailable";
                 var diagnostic = Record(error);
                 var message = forwarded ? "Worker response lost; execution is unconfirmed. Inspect retained results; never replay automatically."
-                    : "Transport request refused before forwarding. Inspect the diagnostic and selected installation.";
+                    : blocked?.Message ?? "Transport request refused before forwarding. Inspect the diagnostic and selected installation.";
                 var failure = new { isError = true, structuredContent = new { error = new { code, message,
-                    execution = forwarded ? "unconfirmed" : "not_started", recovery = "inspect_before_retry", diagnosticId = diagnostic.Id,
+                    execution = forwarded ? "unconfirmed" : "not_started", recovery = blocked is null ? "inspect_before_retry" : "wait_for_deployment", deploymentId = blocked?.DeploymentId, diagnosticId = diagnostic.Id,
                     diagnosticStorageFailed = diagnostic.Failed } }, content = new[] { new { type = "text", text = message + " [" + code + "]" } } };
                 await McpFrames.WriteAsync(output, method == "tools/call"
                     ? JsonSerializer.Serialize(new { jsonrpc = "2.0", id, result = failure }, McpProcessSelections.Json)
@@ -146,9 +182,7 @@ public sealed class McpGateway : IAsyncDisposable
             if (workerIdentity is not null && workerIdentity != McpProcessSelections.Identity(selected.Worker)) await DropWorkerAsync();
             if (DateTimeOffset.UtcNow - lastPresence > TimeSpan.FromSeconds(1))
             {
-                McpTransportPresences.Write(stateDirectory, new(instance, Environment.ProcessId, binding, Version, gatewayIdentity!, workerIdentity,
-                    McpProcessSelections.Identity(selected.Worker), identity == gatewayIdentity ? "current" : "update_failed", DateTimeOffset.UtcNow, input.BufferedBytes, started,
-                    Environment.GetEnvironmentVariable("DOTNET_BUNDLE_EXTRACT_BASE_DIR"), ClientName()));
+                WritePresence(selected);
                 lastPresence = DateTimeOffset.UtcNow;
             }
             pollError = null;
@@ -175,8 +209,21 @@ public sealed class McpGateway : IAsyncDisposable
 
     private string ClientName()
     {
-        var name = initialization?["clientInfo"]?["name"]?.GetValue<string>() ?? "MCP client";
+        var name = ClientField("name") ?? "MCP client";
         return new string(name.Where(character => !char.IsControl(character)).Take(200).ToArray());
+    }
+
+    private string? ClientField(string name) => clientMetadata is JsonObject client &&
+        client[name] is JsonValue value && value.TryGetValue<string>(out var text) ? text : null;
+
+    private void WritePresence(McpProcessSelection selected, bool closed = false)
+    {
+        var clientVersion = ClientField("version");
+        clientVersion = clientVersion is null ? null : new string(clientVersion.Where(character => !char.IsControl(character)).Take(100).ToArray());
+        McpTransportPresences.Write(stateDirectory, new(instance, Environment.ProcessId, binding, Version, gatewayIdentity!, workerIdentity,
+            McpProcessSelections.Identity(selected.Worker), closed ? "closed" : McpProcessSelections.Identity(selected.Gateway) == gatewayIdentity ? "current" : "update_failed",
+            DateTimeOffset.UtcNow, input.BufferedBytes, started, Environment.GetEnvironmentVariable("DOTNET_BUNDLE_EXTRACT_BASE_DIR"), ClientName(),
+            connectedAt, clientVersion, activity, admitted));
     }
 
     private async Task EnsureWorkerAsync(McpProcessImage image)
@@ -245,7 +292,9 @@ public sealed class McpGateway : IAsyncDisposable
     {
         await DropWorkerAsync();
         if (!relinquished && selection is { } selected)
-            McpTransportPresences.Write(stateDirectory, new(instance, Environment.ProcessId, binding, Version, gatewayIdentity!, null,
-                McpProcessSelections.Identity(selected.Worker), "closed", DateTimeOffset.UtcNow, ProcessStartedAt: started));
+        {
+            activity = "closed";
+            WritePresence(selected, closed: true);
+        }
     }
 }

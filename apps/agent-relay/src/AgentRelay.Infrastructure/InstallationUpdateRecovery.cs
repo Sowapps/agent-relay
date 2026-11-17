@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Diagnostics;
 using System.Text.Json;
 using AgentRelay.Core;
+using AgentRelay.Protocol;
 
 namespace AgentRelay.Infrastructure;
 
@@ -22,7 +23,7 @@ public static class InstallationUpdateRecovery
         await ConnectionStore.DemandStartupAsync(data, binding, secret, token);
         if (start) return Start(data, authorize: false);
         var state = new InstallationUpdate(RuntimePaths.PortableInstallationForData(data), data).Run("status");
-        return (state.Phase is "complete" or "rolled_back" || state.Activation?.ResumeAuthorized != true) && !File.Exists(Path.Combine(data, "promotion.lock")) ? null : state;
+        return (state.Phase is "complete" or "rolled_back" || state.Activation?.ResumeAuthorized != true) && !File.Exists(McpDeploymentAdmission.MarkerFor(data)) ? null : state;
     }
 
     public static InstallationUpdateState? Start(string data, bool authorize = true)
@@ -30,7 +31,7 @@ public static class InstallationUpdateRecovery
         var root = RuntimePaths.PortableInstallationForData(data);
         var update = new InstallationUpdate(root, data);
         var state = update.Run("status");
-        if (state.Phase is "complete" or "rolled_back" && !File.Exists(Path.Combine(data, "promotion.lock"))) return null;
+        if (state.Phase is "complete" or "rolled_back" && !File.Exists(McpDeploymentAdmission.MarkerFor(data))) return null;
         if (!authorize && state.Activation?.ResumeAuthorized != true) return null;
         if (state.Schema != 2) throw new RelayException("update_legacy_recovery_required", "The retained legacy transaction needs the relay maintainer's explicit recovery. No project work was admitted.", false);
         if (state.Phase == "preparing") throw new RelayException("update_candidate_incomplete", "The retained candidate stage is incomplete. Ask the relay maintainer to resume preparation from its reviewed artifact.", false);

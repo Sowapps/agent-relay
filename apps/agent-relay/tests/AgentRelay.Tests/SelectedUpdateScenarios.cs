@@ -128,14 +128,16 @@ internal static class SelectedUpdateScenarios
         void Presence(McpProcessSelection selected) => McpTransportPresences.Write(RuntimePaths.TransportStateDirectory(pending.Data),
             new(instance, Environment.ProcessId, null, "fixture", McpProcessSelections.Identity(selected.Gateway), null,
                 McpProcessSelections.Identity(selected.Worker), "current", DateTimeOffset.UtcNow));
-        Presence(old);
-        var stale = McpTransportPresences.Read(RuntimePaths.TransportStateDirectory(pending.Data)).Single();
-        McpTransportPresences.Write(RuntimePaths.TransportStateDirectory(pending.Data), stale with { SeenAt = DateTimeOffset.UtcNow.AddMinutes(-1) });
-        Check(McpTransportPresences.Read(RuntimePaths.TransportStateDirectory(pending.Data)).Single().State == "unresponsive", "A live quiet/busy transport was discarded as offline");
         var port = new Runtime(pending.Root);
         var waiting = new InstallationUpdate(pending.Installation, pending.Data, port);
         waiting.Run("prepare", pending.Candidate);
+        Presence(old); // Connected after preparation, before admission closes.
+        var stale = McpTransportPresences.Read(RuntimePaths.TransportStateDirectory(pending.Data)).Single();
+        McpTransportPresences.Write(RuntimePaths.TransportStateDirectory(pending.Data), stale with { SeenAt = DateTimeOffset.UtcNow.AddMinutes(-1) });
+        Check(McpTransportPresences.Read(RuntimePaths.TransportStateDirectory(pending.Data)).Single().State == "unresponsive", "A live quiet/busy transport was discarded as offline");
         Check(waiting.Run("resume").Phase == "awaiting_transports" && File.Exists(Path.Combine(pending.Data, "promotion.lock")), "Admission reopened before transport acknowledgement");
+        Check(waiting.Run("status").Activation!.TransportInstances.Contains(instance), "Connection arriving after preparation escaped the atomic admission snapshot");
+        McpTransportPresences.Write(RuntimePaths.TransportStateDirectory(pending.Data), stale with { InstanceId = Guid.NewGuid(), Admitted = false });
         Presence(McpProcessSelections.Read(RuntimePaths.TransportSelection(pending.Data)));
         Check(waiting.Run("resume").Phase == "complete" && port.Load().Starts == 1, "Acknowledgement resume failed or restarted host");
 
