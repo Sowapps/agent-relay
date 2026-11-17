@@ -146,15 +146,19 @@ def main():
                         if len(active) != 1:
                             raise RuntimeError('Refusing to stop an unverified qualification runner')
                         os.kill(continuation['processId'], signal.SIGTERM)
-                        # Wait on the observable projection, not a fixed assumption about process exit.
+                        # A suspended gateway reports the barrier locally. Older gateways also exposed worker continuation details.
                         interrupted_deadline = time.monotonic() + 10
                         while True:
                             observed = tool('get_connection_status')
                             recovery = observed.get('update', {}).get('continuation', {})
-                            if recovery.get('state') == 'interrupted':
+                            local_barrier = (observed.get('state') == 'deployment_in_progress'
+                                             and observed.get('deploymentId') == prepared['id']
+                                             and observed.get('admissionSuspended') is True)
+                            if recovery.get('state') == 'interrupted' or (local_barrier and not owned_runner(retained, data, continuation['processId'])):
                                 break
                             if time.monotonic() > interrupted_deadline:
-                                raise RuntimeError('Killed recovery still appeared active: ' + json.dumps(recovery))
+                                raise RuntimeError('Recovered owner exit or suspended admission could not be confirmed: '
+                                                   + json.dumps({'continuation': recovery, 'state': observed.get('state')}))
                             time.sleep(.1)
                         retained_state = invoke(retained, installed, data, 'status')
                         if retained_state['id'] != prepared['id'] or not (data / 'promotion.lock').exists():
