@@ -26,7 +26,14 @@ public static class RuntimePaths
 
     public static string ApplicationDirectory(string installation) => Path.Combine(Path.GetFullPath(installation), "var", "apps", "agent-relay");
     public static string PortableDataDirectory(string installation) => Path.Combine(ApplicationDirectory(installation), "default");
-    public static string ReleaseDirectory(string installation, string candidateHash) => Path.Combine(ApplicationDirectory(installation), "releases", candidateHash);
+    public static string ReleaseDirectory(string installation, string candidateHash, bool legacy = false) =>
+        Path.Combine(ApplicationDirectory(installation), "releases", legacy ? candidateHash : candidateHash[..32]);
+    public static bool IsReleaseDirectory(string installation, string candidateHash, string directory)
+    {
+        var actual = Path.GetFullPath(directory);
+        return string.Equals(actual, ReleaseDirectory(installation, candidateHash), StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(actual, ReleaseDirectory(installation, candidateHash, legacy: true), StringComparison.OrdinalIgnoreCase);
+    }
     public static string TransportSelection(string data) => Path.Combine(Path.GetFullPath(data), "transport-selection.json");
     public static string TransportStateDirectory(string data) => Path.Combine(Path.GetFullPath(data), "transport");
     public static string TransportBootstrapDirectory(string data) => Path.Combine(Path.GetFullPath(data), "transport-bootstrap");

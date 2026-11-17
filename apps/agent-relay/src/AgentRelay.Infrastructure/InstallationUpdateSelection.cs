@@ -60,6 +60,9 @@ public sealed partial class InstallationUpdate
             ? RelayJson.Deserialize<McpOperationManifest>(File.ReadAllText(previousOperations)).Operations : [], operations.Operations);
         if (operations.RegistryHash != contract.Compatibility.OperationsHash) throw Failure("update_candidate_invalid", "Operation manifest disagrees with candidate identity.");
         var root = RuntimePaths.ReleaseDirectory(installation, digest);
+        var retainedManifest = Path.Combine(root, "release-manifest.json");
+        if (File.Exists(retainedManifest) && Hash(retainedManifest) != digest)
+            throw Failure("update_slot_conflict", "The compact immutable slot already belongs to a different manifest.");
         var slot = Path.GetRelativePath(installation, root).Replace('\\', '/');
         if (declared.Keys.Count(name => name.StartsWith("transport/", StringComparison.Ordinal)) != 1)
             throw Failure("update_candidate_invalid", "The fixed entry requires the qualified single-file transport payload.");
@@ -424,7 +427,7 @@ public sealed partial class InstallationUpdate
     private void ValidateActivation(InstallationUpdateState state)
     {
         if (state.CandidateHash.Length != 64 || !state.CandidateHash.All(Uri.IsHexDigit) || state.Activation is not { } activation ||
-            !Same(activation.ReleaseRoot, RuntimePaths.ReleaseDirectory(installation, state.CandidateHash)) || activation.TransportInstances is null ||
+            !RuntimePaths.IsReleaseDirectory(installation, state.CandidateHash, activation.ReleaseRoot) || activation.TransportInstances is null ||
             activation.TransportInstances.Any(id => id == Guid.Empty) || activation.TransportInstances.Distinct().Count() != activation.TransportInstances.Length ||
             activation.AdmissionReleased && state.Phase is not ("reopening" or "complete") ||
             state.Files.Any(file => file.Name.StartsWith("var/", StringComparison.OrdinalIgnoreCase) && !Within(Inside(installation, file.Name), activation.ReleaseRoot) && !IsBootstrapFile(file.Name)))

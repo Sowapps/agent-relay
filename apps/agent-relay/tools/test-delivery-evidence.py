@@ -15,6 +15,10 @@ from release_artifact import archive_path, extract_archive, sha256, verified_arc
 
 
 class DeliveryEvidenceTests(unittest.TestCase):
+    def test_automatic_rollback_is_not_reported_as_successful_deployment(self):
+        with self.assertRaisesRegex(RuntimeError, 'Update rolled back: startup failed'):
+            complete_update.finish_command(self.root, {'state': {'schema': 2, 'phase': 'rolled_back', 'error': 'startup failed'}})
+
     def test_initial_host_proof_rechecks_exact_scope_after_reading_start_time(self):
         observed = SimpleNamespace(returncode=0, stdout='2026-01-01T00:00:00.0000000Z')
         runtime = {'executable': 'fixture.exe'}
