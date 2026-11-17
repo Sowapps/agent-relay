@@ -31,6 +31,8 @@ Other applications define their own domains. Shared statements link to their own
 
 ## Evidence and observations
 
+Diagnostics, execution logs, captures, exports, measurements, calculated reports and other temporary or generated artifacts must remain outside Git tracking. For agent-requested investigations, use an explicitly chosen ignored location such as `local/apps/<application>/reports/`; application-owned runtime output belongs in `var/`. Never commit a diagnostic by recasting it as a dated workstream note. This rule also applies to indexes or issue updates that reproduce its local observations. Keep durable, authored design decisions and reusable procedures in their owning documentation; they must not contain machine-specific diagnostic payloads. Preserve investigation checkpoints and raw results together in the ignored location, and verify exclusion with `git check-ignore` before delivery.
+
 Operator decisions retain the exact exchange needed to establish their scope, including the assistant's proposal when an acceptance depends on it. Quotes remain in their original language.
 Evidence references use an identifier; they do not create links outside the documentation tree.
 

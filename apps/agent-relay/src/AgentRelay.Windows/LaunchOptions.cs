@@ -7,6 +7,14 @@ internal sealed record LaunchOptions(string Mode, string DataDirectory, string? 
     public static LaunchOptions Parse(string[] arguments)
     {
         var mode = arguments.Length > 0 && !arguments[0].StartsWith('-') ? arguments[0] : "tray";
+        if (mode == "mcp-connections")
+        {
+            if (arguments.Length is not (3 or 5) || arguments[1] != "--data-dir" || !Path.IsPathFullyQualified(arguments[2]) ||
+                arguments.Length == 5 && (arguments[3] != "--input" || !Path.IsPathFullyQualified(arguments[4])))
+                throw new ArgumentException("Connection inspection requires --data-dir <absolute-directory> and optional --input <absolute-query-file>.");
+            return new(mode, Path.GetFullPath(arguments[2]), null, null, false, null, null, null, null,
+                InputFile: arguments.Length == 5 ? arguments[4] : null);
+        }
         if (mode is "wsl-maintenance" or "installation-update" or "installation-resume") return Maintenance(arguments);
         if (mode is not ("tray" or "startup" or "startup-enable" or "startup-disable" or "startup-status" or "startup-transfer" or "startup-entry" or "send" or "read" or "mcp" or "mcp-worker" or "mcp-stable-worker" or "mcp-contract" or "mcp-operations" or "portable-layout" or "prepare" or "submit" or "result" or "history" or "inbox" or "profiles" or "start-profile" or "admin" or "initialize" or "deployment-quiesce" or "maintenance-idle")) throw new ArgumentException("Unsupported application mode.");
         var values = new Dictionary<string, string>(StringComparer.Ordinal);
