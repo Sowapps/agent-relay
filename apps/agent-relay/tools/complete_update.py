@@ -477,6 +477,8 @@ def finish_command(data, result):
         time.sleep(1)
         result = update(data, action='resume')
     state = result.get('state', {})
+    if state.get('phase') == 'rolled_back':
+        raise RuntimeError('Update rolled back: ' + str(state.get('error') or 'Inspect the retained transaction'))
     if (state.get('activation') or {}).get('initialActivation') and state.get('phase') == 'complete':
         transaction = Path(result['receipt']).parent
         request = read(ordinary_file(transaction / 'initial-client-registration.json'))

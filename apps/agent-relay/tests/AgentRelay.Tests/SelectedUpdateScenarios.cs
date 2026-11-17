@@ -12,6 +12,21 @@ internal static class SelectedUpdateScenarios
 
     public static void Initial(string root)
     {
+        var retained = Seed(Path.Combine(root, "legacy-slot-metadata"));
+        var retainedUpdate = new InstallationUpdate(retained.Installation, retained.Data, new Runtime(retained.Root));
+        var retainedState = retainedUpdate.Run("prepare", retained.Candidate);
+        var shortSlot = Path.GetRelativePath(retained.Installation, retainedState.Activation!.ReleaseRoot).Replace('\\', '/');
+        var legacyRoot = RuntimePaths.ReleaseDirectory(retained.Installation, retainedState.CandidateHash, legacy: true);
+        var legacySlot = Path.GetRelativePath(retained.Installation, legacyRoot).Replace('\\', '/');
+        var legacyState = retainedState with { Activation = retainedState.Activation with { ReleaseRoot = legacyRoot },
+            Files = retainedState.Files.Select(file => file.Name.StartsWith(shortSlot + "/", StringComparison.Ordinal)
+                ? file with { Name = legacySlot + file.Name[shortSlot.Length..] } : file).ToArray() };
+        var retainedJournal = Path.Combine(RuntimePaths.UpdateDirectory(retained.Installation), "current.json");
+        File.WriteAllText(retainedJournal, RelayJson.Serialize(legacyState));
+        Check(retainedUpdate.Run("status").Id == retainedState.Id, "Retained full-hash release metadata was rejected");
+        File.WriteAllText(retainedJournal, RelayJson.Serialize(legacyState with { Activation = legacyState.Activation! with { ReleaseRoot = Path.Combine(root, "foreign") } }));
+        Refuses("update_recovery_required", () => retainedUpdate.Run("status"));
+
         var fixture = Seed(Path.Combine(root, "initial"));
         File.Delete(RuntimePaths.TransportSelection(fixture.Data));
         var previous = File.ReadAllText(Path.Combine(fixture.Data, "mcp-runtime.json"));
