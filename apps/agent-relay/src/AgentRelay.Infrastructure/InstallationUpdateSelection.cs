@@ -111,11 +111,6 @@ public sealed partial class InstallationUpdate
     {
         var state = Read();
         if (state.Activation is not { } activation) throw Failure("update_legacy_transaction", "Finish this legacy transaction with its retained recovery procedure before using selected-release updates.");
-        if (runtime is InstallationRuntime native)
-        {
-            native.LegacyHost = activation.LegacyHost;
-            native.UseCurrentControl = activation.InitialActivation;
-        }
         if (state.Phase is "rolling_back" or "files_restored" or "recovery_required") return RollbackSelected(state);
         if (state.Phase == "rolled_back") return state;
         if (state.Phase == "preparing") throw Failure("update_candidate_invalid", "The candidate stage is incomplete. Repeat preparation with the same verified source.");
@@ -151,7 +146,7 @@ public sealed partial class InstallationUpdate
                 try
                 {
                     if (host is not null) runtime.ConfirmDrain();
-                    DemandUpdateIdle();
+                    DemandUpdateIdle(state);
                 }
                 catch (RelayException error) when (error.Code is "busy" or "update_uncertain_work")
                 { return SaveIfChanged(state with { Error = error.Message, ErrorCode = error.Code }); }
@@ -169,7 +164,7 @@ public sealed partial class InstallationUpdate
                 if (host is not null) runtime.Stop(host);
                 using (RelayLocation.OpenHostOwnership(data))
                 {
-                    DemandUpdateIdle();
+                    DemandUpdateIdle(state);
                     InstallationSnapshot.Capture(data, snapshot);
                     state = Save(state with { Phase = "snapshot_ready", Error = null });
                 }
@@ -323,9 +318,11 @@ public sealed partial class InstallationUpdate
         return state;
     }
 
-    private void DemandUpdateIdle()
+    private void DemandUpdateIdle(InstallationUpdateState state)
     {
-        SqliteWorkStore.DemandUpdateIdleAsync(data, CancellationToken.None).GetAwaiter().GetResult();
+        // Pre-existing unknown outcomes are retained history, never success or permission to replay.
+        // Active work and any uncertainty created/changed since this transaction began still block.
+        SqliteWorkStore.DemandUpdateIdleAsync(data, CancellationToken.None, state.StartedAt).GetAwaiter().GetResult();
     }
 
     private InstallationUpdateState SaveIfChanged(InstallationUpdateState state)

@@ -17,6 +17,11 @@ internal static class SelectedUpdateScenarios
         var previous = File.ReadAllText(Path.Combine(fixture.Data, "mcp-runtime.json"));
         var runtime = new Runtime(fixture.Root);
         var update = new InstallationUpdate(fixture.Installation, fixture.Data, runtime);
+        var history = new WorkRecord(new(Guid.NewGuid(), "fixture", "message", "retained history"), "unknown",
+            DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddDays(-1));
+        var historyStore = new SqliteWorkStore(new RelayDatabase(fixture.Data));
+        historyStore.SaveAsync(history, CancellationToken.None).GetAwaiter().GetResult();
+        Refuses("update_uncertain_work", () => SqliteWorkStore.DemandUpdateIdleAsync(fixture.Data, CancellationToken.None).GetAwaiter().GetResult());
         var legacy = new McpConnectionLease(Guid.NewGuid(), null, "fixture", "old", "old", "contract", "generation", null, "current", DateTimeOffset.UtcNow);
         McpConnections.Write(fixture.Data, legacy);
         Refuses("update_initial_migration_required", () => update.Run("prepare", fixture.Candidate));
@@ -37,6 +42,8 @@ internal static class SelectedUpdateScenarios
         McpConnections.Write(fixture.Data, legacy with { State = "closed", LastSeen = DateTimeOffset.UtcNow });
         Check(update.Run("resume").Phase == "complete" && File.Exists(RuntimePaths.TransportSelection(fixture.Data)) &&
             store.FindAsync(work.Request.Id, CancellationToken.None).GetAwaiter().GetResult()?.State == "completed", "Initial activation failed or lost retained work");
+        Check(historyStore.FindAsync(history.Request.Id, CancellationToken.None).GetAwaiter().GetResult()?.State == "unknown",
+            "Retained uncertainty was erased, relabelled or replayed instead of preserved");
         var stops = runtime.Load().Stops;
         Check(update.Run("prepare-initial", fixture.Candidate).Id == prepared.Id && update.Run("resume").Phase == "complete" &&
             runtime.Load().Stops == stops, "Repeated initial activation was not idempotent");

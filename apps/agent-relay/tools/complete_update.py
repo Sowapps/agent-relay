@@ -245,6 +245,12 @@ def _update(data, archive, digest, *, updater=None, verify=None, guard=None, ref
                 raise ValueError('Forward updates require the stable transport. Legacy transactions retain status/rollback recovery only; client-exit deployment is retired')
             updater = {'executable': str(candidate / 'app' / EXE)}
             context['updater'] = updater
+            if (initial and existing and existing.get('schema') == 2 and existing['phase'] in ('prepared', 'awaiting_work')
+                    and existing['candidateHash'] != sha256(candidate / MANIFEST_FILE)):
+                # C# verifies cancellation is before publication and preserves the working host.
+                cancelled = invoke(updater, installation, data, 'rollback')
+                if cancelled['phase'] != 'rolled_back':
+                    raise RuntimeError('The prior unpublished preparation still needs recovery before replacement')
             legacy = legacy_host(read(data / 'mcp-runtime.json'), data) if initial else None
             state = invoke(updater, installation, data, 'prepare-initial' if initial else 'prepare', candidate, legacy=legacy)
             updater = recovery_updater(data)
