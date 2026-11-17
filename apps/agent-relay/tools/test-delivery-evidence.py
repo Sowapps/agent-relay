@@ -7,12 +7,31 @@ import unittest
 from unittest.mock import patch
 import zipfile
 import complete_update
+import host_identity
+from types import SimpleNamespace
 
 from delivery_reports import REPORT_FILE, latest_reports
 from release_artifact import archive_path, extract_archive, sha256, verified_archive, validate_version, verification_directory, EXTRACTED_DIRECTORY, VERIFICATION_FILE
 
 
 class DeliveryEvidenceTests(unittest.TestCase):
+    def test_initial_host_proof_rechecks_exact_scope_after_reading_start_time(self):
+        observed = SimpleNamespace(returncode=0, stdout='2026-01-01T00:00:00.0000000Z')
+        runtime = {'executable': 'fixture.exe'}
+        with patch.object(host_identity, 'resolve_host', return_value={'pid': 123}), \
+             patch.object(host_identity, 'identity', return_value=True) as recheck, \
+             patch.object(host_identity.subprocess, 'run', return_value=observed), \
+             patch.object(host_identity, 'runtime_command', return_value=['fixture.exe']):
+            proof = host_identity.legacy_host(runtime, self.root)
+            self.assertEqual(proof['processId'], 123)
+            self.assertEqual(proof['startedAt'], observed.stdout)
+            recheck.assert_called_once_with({'pid': 123}, self.root)
+        with patch.object(host_identity, 'resolve_host', return_value={'pid': 123}), \
+             patch.object(host_identity, 'identity', return_value=False), \
+             patch.object(host_identity.subprocess, 'run', return_value=observed):
+            with self.assertRaisesRegex(RuntimeError, 'no process was stopped'):
+                host_identity.legacy_host(runtime, self.root)
+
     def test_source_promotion_reuses_matching_qualification_without_running_it_again(self):
         receipt = {'status': 'passed', 'commit': 'fixture-commit',
                    'candidate': {'version': '1.2.0', 'archive': str(self.root / 'candidate.zip')}}

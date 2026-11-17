@@ -8,12 +8,13 @@ namespace AgentRelay.Infrastructure;
 public sealed record InstallationActivation(string ReleaseRoot, string PreviousPointer, string? PreviousTransport,
     Guid[] TransportInstances, bool StartupEnabled, bool AdmissionReleased = false, bool? WasRunning = null, string? SelectionHash = null,
     InstallationStartupSnapshot? Startup = null, bool ResumeAuthorized = false, DateTimeOffset? AuthorizedAt = null,
-    bool InitialActivation = false);
+    bool InitialActivation = false, InstallationHost? LegacyHost = null);
 
 public sealed partial class InstallationUpdate
 {
     private InstallationUpdateState PrepareSelected(string candidate, string manifestPath, string version, string contractHash, Dictionary<string, string> declared, bool initial = false)
     {
+        if (runtime is InstallationRuntime control) control.UseCurrentControl = initial;
         var contract = RelayJson.Deserialize<McpIdentity>(File.ReadAllText(Path.Combine(candidate, "app", "mcp-contract.json")));
         if (contract.Compatibility?.Transport != McpStableProtocol.Requirement)
             throw Failure("transport_incompatible", "Qualify the candidate's exact stable transport requirement before preparation.");
@@ -73,7 +74,8 @@ public sealed partial class InstallationUpdate
         var startup = runtime.CaptureStartup(currentExecutable);
         var state = new InstallationUpdateState(2, id, digest, installation, data, version, contractHash, "preparing", files, [], DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 0, 0,
             Activation: new(root, previous, File.Exists(RuntimePaths.TransportSelection(data)) ? File.ReadAllText(RuntimePaths.TransportSelection(data)) : null,
-                McpTransportPresences.Read(RuntimePaths.TransportStateDirectory(data)).Where(item => item.State is not ("offline" or "closed")).Select(item => item.InstanceId).ToArray(), startup.Enabled, Startup: startup, InitialActivation: initial));
+                McpTransportPresences.Read(RuntimePaths.TransportStateDirectory(data)).Where(item => item.State is not ("offline" or "closed")).Select(item => item.InstanceId).ToArray(), startup.Enabled, Startup: startup, InitialActivation: initial,
+                LegacyHost: initial ? (runtime as InstallationRuntime)?.LegacyHost : null));
         Directory.CreateDirectory(Path.Combine(directory, id));
         CacheRecoveryRunner(state, candidate, declared);
         Save(state);
@@ -109,6 +111,11 @@ public sealed partial class InstallationUpdate
     {
         var state = Read();
         if (state.Activation is not { } activation) throw Failure("update_legacy_transaction", "Finish this legacy transaction with its retained recovery procedure before using selected-release updates.");
+        if (runtime is InstallationRuntime native)
+        {
+            native.LegacyHost = activation.LegacyHost;
+            native.UseCurrentControl = activation.InitialActivation;
+        }
         if (state.Phase is "rolling_back" or "files_restored" or "recovery_required") return RollbackSelected(state);
         if (state.Phase == "rolled_back") return state;
         if (state.Phase == "preparing") throw Failure("update_candidate_invalid", "The candidate stage is incomplete. Repeat preparation with the same verified source.");

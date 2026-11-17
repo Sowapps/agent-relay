@@ -77,3 +77,16 @@ def resolve_host(previous, data, inventory=None):
 def identity(previous, data):
     current = resolve_host(previous, data)
     return current is not None and current['pid'] == previous['pid']
+
+
+def legacy_host(previous, data):
+    """OS proof for explicit initial activation; C# rechecks PID, start time and image before stopping."""
+    owner = resolve_host(previous, data)
+    if owner is None:
+        return None
+    script = f"(Get-Process -Id {owner['pid']} -ErrorAction Stop).StartTime.ToUniversalTime().ToString('O')"
+    result = subprocess.run(['pwsh', '-NoProfile', '-Command', script], capture_output=True,
+                            text=True, encoding='utf-8', timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)
+    if result.returncode or not result.stdout.strip() or not identity(owner, data):
+        raise RuntimeError('The exact legacy host identity could not be retained; no process was stopped')
+    return dict(processId=owner['pid'], startedAt=result.stdout.strip(), executable=runtime_command(previous)[0])

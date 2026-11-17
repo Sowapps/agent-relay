@@ -21,8 +21,10 @@ public interface IInstallationRuntime
     void ReconcileStartup(string executable, InstallationStartupSnapshot before, bool restore);
 }
 
-internal sealed class InstallationRuntime(string data) : IInstallationRuntime
+internal sealed class InstallationRuntime(string data, InstallationHost? legacyHost = null) : IInstallationRuntime
 {
+    internal InstallationHost? LegacyHost { get; set; } = legacyHost;
+    internal bool UseCurrentControl { get; set; }
     private static T Wait<T>(Task<T> task) => task.GetAwaiter().GetResult();
     private McpHostStatus Handshake()
     {
@@ -39,7 +41,14 @@ internal sealed class InstallationRuntime(string data) : IInstallationRuntime
         catch (IOException error) when (RelayLocation.IsSharingConflict(error)) { }
         var status = Handshake();
         if (status.ProcessId is not { } pid || status.ProcessStartedAt is not { } started)
+        {
+            if (LegacyHost is { } legacy && string.Equals(Path.GetFullPath(executable), legacy.Executable, StringComparison.OrdinalIgnoreCase))
+            {
+                using var verified = DemandProcess(legacy);
+                return legacy;
+            }
             throw new RelayException("update_host_identity_required", "The running host must expose its authenticated process identity before automatic cutover.", false);
+        }
         var host = new InstallationHost(pid, started, Path.GetFullPath(executable));
         using var process = DemandProcess(host);
         return host;
@@ -85,6 +94,8 @@ internal sealed class InstallationRuntime(string data) : IInstallationRuntime
     public void Start(string executable)
     {
         using var process = AgentRelay.Protocol.WindowsStdioProcess.StartDetached(executable, ["tray", "--data-dir", data]);
+        if (LegacyHost is { } prior && string.Equals(executable, prior.Executable, StringComparison.OrdinalIgnoreCase))
+            LegacyHost = new(process.Id, new DateTimeOffset(process.StartTime.ToUniversalTime()), executable);
     }
 
     public void DemandReady(string executable, string version, string contractHash)
@@ -135,6 +146,12 @@ internal sealed class InstallationRuntime(string data) : IInstallationRuntime
 
     private JsonElement Command(string executable, string mode, string? input = null)
     {
+        if (UseCurrentControl)
+        {
+            executable = Environment.ProcessPath ?? throw new IOException("The retained update controller is unavailable.");
+            if (!Path.GetFileName(executable).Equals("AgentRelay.Windows.exe", StringComparison.OrdinalIgnoreCase))
+                throw new IOException("Initial startup inspection requires the verified portable update controller.");
+        }
         var arguments = new List<string> { mode, "--data-dir", data };
         if (input is not null) arguments.Add("--apply");
         var result = LocalProcess.RunAsync(executable, arguments, input, TimeSpan.FromSeconds(12), CancellationToken.None).GetAwaiter().GetResult();

@@ -15,7 +15,7 @@ import traceback
 import xml.etree.ElementTree as ET
 
 from deployment import confirm_quiescence, demand_idle, exclusive, launch, read, restore_snapshot, snapshot, write
-from host_identity import identity, resolve_host
+from host_identity import identity, resolve_host, legacy_host
 from relay_mcp import RelayMcp
 from release_artifact import MANIFEST_FILE, VERIFICATION_FILE, extract_archive, ordinary_directory, ordinary_file, qualified_archive, sha256, validate_version, validate_windows_name, verified_archive
 from runtime_layout import app_var, runtime_command
@@ -37,10 +37,12 @@ class UpdateFailure(RuntimeError):
                          + (' Diagnostic persistence: ' + error['diagnosticStorageError'] if error.get('diagnosticStorageError') else ''))
 
 
-def invoke(updater, installation, data, action, candidate=None, failure=None):
+def invoke(updater, installation, data, action, candidate=None, failure=None, legacy=None):
     request = dict(action=action, installation=str(installation), data=str(data), candidate=str(candidate) if candidate else None)
     if failure is not None:
         request['failure'] = failure
+    if legacy is not None:
+        request['legacyHost'] = legacy
     result = subprocess.run(runtime_command(updater) + ['installation-update', '--data-dir', str(data)],
                             input=json.dumps(request), capture_output=True, text=True, encoding='utf-8',
                             timeout=180, creationflags=subprocess.CREATE_NO_WINDOW)
@@ -243,7 +245,8 @@ def _update(data, archive, digest, *, updater=None, verify=None, guard=None, ref
                 raise ValueError('Forward updates require the stable transport. Legacy transactions retain status/rollback recovery only; client-exit deployment is retired')
             updater = {'executable': str(candidate / 'app' / EXE)}
             context['updater'] = updater
-            state = invoke(updater, installation, data, 'prepare-initial' if initial else 'prepare', candidate)
+            legacy = legacy_host(read(data / 'mcp-runtime.json'), data) if initial else None
+            state = invoke(updater, installation, data, 'prepare-initial' if initial else 'prepare', candidate, legacy=legacy)
             updater = recovery_updater(data)
             context['updater'] = updater
         if state is None:
