@@ -15,10 +15,12 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
     public static Task DemandIdleAsync(string dataDirectory, bool allowUninitialized, CancellationToken token) =>
         DemandMaintenanceIdleAsync(dataDirectory, allowUninitialized, false, token);
 
-    internal static Task DemandUpdateIdleAsync(string dataDirectory, CancellationToken token, DateTimeOffset? historyBefore = null) =>
-        DemandMaintenanceIdleAsync(dataDirectory, false, true, token, historyBefore);
+    internal static Task DemandUpdateIdleAsync(string dataDirectory, CancellationToken token, DateTimeOffset? historyBefore = null,
+        Func<WorkRecord, bool>? historicalApproval = null) =>
+        DemandMaintenanceIdleAsync(dataDirectory, false, true, token, historyBefore, historicalApproval);
 
-    private static async Task DemandMaintenanceIdleAsync(string dataDirectory, bool allowUninitialized, bool includeUncertain, CancellationToken token, DateTimeOffset? historyBefore = null)
+    private static async Task DemandMaintenanceIdleAsync(string dataDirectory, bool allowUninitialized, bool includeUncertain, CancellationToken token,
+        DateTimeOffset? historyBefore = null, Func<WorkRecord, bool>? historicalApproval = null)
     {
         var path = RelayDatabase.DatabasePath(dataDirectory);
         RuntimePaths.DemandPrivatePath(path);
@@ -38,11 +40,15 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
             "julianday(json_extract(payload,'$.createdAt')) >= julianday($historyBefore) OR julianday(json_extract(payload,'$.updatedAt')) >= julianday($historyBefore)))" : "";
         var approval = $"({RetainedApproval}) OR ({LegacyApprovalStop})";
         // An approval needs the participant to resolve it. Report it before other blockers so that prepublication admission can reopen.
-        command.CommandText = $"SELECT id,json_extract(payload,'$.state'),({approval}) AS approval FROM work WHERE ({ActiveState} OR ({approval}){uncertain}) ORDER BY approval DESC LIMIT 1";
+        command.CommandText = $"SELECT id,json_extract(payload,'$.state'),({approval}) AS approval,payload FROM work WHERE ({ActiveState} OR ({approval}){uncertain}) ORDER BY approval DESC";
         if (includeUncertain) command.Parameters.AddWithValue("$historyBefore", historyBefore is { } before ? before.ToString("O") : DBNull.Value);
         using var reader = await command.ExecuteReaderAsync(token);
-        if (await reader.ReadAsync(token))
+        while (await reader.ReadAsync(token))
         {
+            if (reader.GetString(1) == "awaiting_approval" && historicalApproval is not null && historyBefore is { } started &&
+                RelayJson.Deserialize<WorkRecord>(reader.GetString(3)) is { ApprovalStopRequestedAt: null } retained &&
+                retained.CreatedAt != default && retained.UpdatedAt != default && retained.CreatedAt <= retained.UpdatedAt &&
+                retained.UpdatedAt < started && historicalApproval(retained)) continue;
             if (reader.GetBoolean(2))
                 throw new RelayException("update_approval_pending", "Operation " + reader.GetString(0) +
                     " may still continue. Resolve its approval or verify its cancellation before resuming maintenance.", false);

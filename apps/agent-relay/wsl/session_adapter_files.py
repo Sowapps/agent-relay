@@ -16,6 +16,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import uuid
 
 
 def owned_install(request):
@@ -120,9 +121,40 @@ def replace(install, observed, desired):
         os.close(directory)
 
 
+def historical_approval(install, request):
+    demand_stopped(install)
+    identifier = str(uuid.UUID(request['requestId']))
+    client = request['client']
+    if client not in ('codex', 'claude'):
+        raise ValueError('Unsupported approval client')
+    folder = install.parent / client
+    scope = request['scope']
+    for path in (folder, folder / 'data', folder / 'context.json', folder / 'data' / f'dispatch-{identifier}.json'):
+        if path.resolve(strict=True) != path or path.stat().st_uid != os.getuid():
+            raise PermissionError('Retained approval path is not owned')
+    binding = json.loads((folder / 'context.json').read_text(encoding='utf-8'))
+    marker = folder / 'data' / f'dispatch-{identifier}.json'
+    if not marker.is_file() or marker.stat().st_size > 1024 * 1024:
+        raise ValueError('Retained dispatch marker is invalid')
+    dispatch = json.loads(marker.read_text(encoding='utf-8'))['request']
+    keys = ('projectId', 'senderId', 'recipientId')
+    scoped = binding.get('sessionId') == request['session']['id'] and all(binding.get(k) == scope[k] for k in keys)
+    retained_scope = dispatch.get('scope')
+    if retained_scope is not None:
+        scoped = scoped and all(retained_scope.get(k) == scope[k] for k in (*keys, 'workspaceId'))
+    boot = next(int(line.split()[1]) for line in Path('/proc/stat').read_text().splitlines() if line.startswith('btime '))
+    current_boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
+    generation = dispatch.get('expectedNativeGeneration')
+    ended = max(marker.stat().st_mtime, request['updated']) < boot and (
+        generation is None or str(uuid.UUID(generation.split(':', 1)[0])) != current_boot)
+    return {'requestId': identifier, 'historical': scoped and str(uuid.UUID(dispatch['id'])) == identifier and ended}
+
+
 def maintain(request):
     install = owned_install(request)
     action = request['action']
+    if action == 'approval-history':
+        return historical_approval(install, request)
     names = request['names']
     if not names or len(names) > 64 or len(set(names)) != len(names):
         raise ValueError('Expected a unique, bounded native helper set')

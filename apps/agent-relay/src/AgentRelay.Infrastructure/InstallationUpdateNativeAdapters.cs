@@ -12,6 +12,43 @@ public sealed partial class InstallationUpdate
 
     private string NativeAdapterDirectory(InstallationUpdateState state) => Path.Combine(directory, state.Id, "native-adapters");
 
+    private bool IsHistoricalApproval(InstallationUpdateState state, WorkRecord work)
+    {
+        if (work.Request is not { Kind: "message", SessionId: { } id, Scope: { } scope }) return false;
+        var session = new SqliteDocuments<RelaySession>(new RelayDatabase(data, readOnly: true), "sessions")
+            .FindAsync(id, CancellationToken.None).GetAwaiter().GetResult();
+        if (session?.Definition is not { } definition || definition.Scope != scope || session.RetiredForCancellationId is not null ||
+            session.Template.Client is not ("codex" or "claude") || !NativeLayout.IsSession(session.Root, id)) return false;
+        var prefix = Path.GetRelativePath(installation, state.Activation!.ReleaseRoot).Replace('\\', '/') + "/app/wsl/";
+        byte[] ReadHelper(string name)
+        {
+            var file = state.Files.SingleOrDefault(item => item.Name == prefix + name)
+                ?? throw Failure("update_adapter_payload_invalid", "The staged history probe is missing.");
+            var path = Inside(Stage(state), file.Name);
+            if (file.After is null || OptionalHash(path) != file.After)
+                throw Failure("update_adapter_payload_invalid", "A staged history probe has changed.");
+            return File.ReadAllBytes(path);
+        }
+        try
+        {
+            var request = RelayJson.Serialize(new
+            {
+                action = "approval-history", session = new { session.Id, session.Root, template = new { session.Template.User } },
+                session.Template.Client, requestId = work.Request.Id, scope, updated = work.UpdatedAt.ToUnixTimeSeconds(),
+                layoutSource = Convert.ToBase64String(ReadHelper("native_layout.py")), layoutDefinition = Convert.ToBase64String(ReadHelper("native-layout.json"))
+            });
+            var script = System.Text.Encoding.UTF8.GetString(ReadHelper("session_adapter_files.py"));
+            var response = WslMaintenance.RunAsync(new(session.Template.Distribution, session.Template.User, script, request, 25),
+                CancellationToken.None).GetAwaiter().GetResult();
+            if (response.ExitCode != 0) return false;
+            using var proof = JsonDocument.Parse(response.Output);
+            return proof.RootElement.GetProperty("requestId").GetGuid() == work.Request.Id &&
+                   proof.RootElement.GetProperty("historical").ValueKind == JsonValueKind.True;
+        }
+        catch (Exception error) when (error is IOException or JsonException or TimeoutException or RelayException)
+        { return false; }
+    }
+
     private void CaptureNativeSessionInventory(InstallationUpdateState state)
     {
         // The live database is stopped and owned here. Opening the verified SQLite backup can create WAL sidecars.

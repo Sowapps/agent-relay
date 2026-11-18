@@ -249,7 +249,8 @@ def _update(data, archive, digest, *, updater=None, verify=None, guard=None, ref
                 raise ValueError('Forward updates require the stable transport. Legacy transactions retain status/rollback recovery only; client-exit deployment is retired')
             updater = {'executable': str(candidate / 'app' / EXE)}
             context['updater'] = updater
-            if (initial and existing and existing.get('schema') == 2 and existing['phase'] in ('prepared', 'awaiting_work')
+            if (existing and existing.get('schema') == 2 and existing['phase'] in ('prepared', 'awaiting_work')
+                    and (initial or existing.get('errorCode') == 'update_approval_pending')
                     and existing['candidateHash'] != sha256(candidate / MANIFEST_FILE)):
                 # C# verifies cancellation is before publication and preserves the working host.
                 cancelled = invoke(updater, installation, data, 'rollback')
@@ -478,7 +479,7 @@ def finish_command(data, result):
     """One CLI invocation follows the existing retained runner, then finishes the paired client adapter."""
     while result.get('state', {}).get('schema') == 2 and result['state']['phase'] not in ('complete', 'rolled_back'):
         state = result['state']
-        if state.get('errorCode') in ('update_uncertain_work', 'update_bootstrap_pending') or state['phase'] == 'recovery_required':
+        if state.get('errorCode') in ('update_approval_pending', 'update_uncertain_work', 'update_bootstrap_pending') or state['phase'] == 'recovery_required':
             raise RuntimeError('Update needs attention: ' + str(state.get('errorCode') or state['phase']))
         time.sleep(1)
         result = update(data, action='resume')

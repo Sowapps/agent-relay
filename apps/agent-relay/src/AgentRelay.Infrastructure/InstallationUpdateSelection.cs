@@ -267,6 +267,9 @@ public sealed partial class InstallationUpdate
         var activation = state.Activation!;
         if (activation.AdmissionReleased || state.Phase is "complete" or "reopening") throw Failure("update_recovery_required", "Admission may have reopened. Never restore an old database over new work.");
         if (state.Phase == "rolled_back") { ReleaseSelectedBarrier(state); return state; }
+        if (state is { Phase: "awaiting_work", ErrorCode: "update_approval_pending" } &&
+            !Directory.Exists(Path.Combine(directory, state.Id, "data-before")))
+            new McpDeploymentAdmission(data).Suspend(state.Id, () => { });
         DemandBarrier(state);
         if (state.Phase == "files_restored") return CompleteSelectedRollback(state);
         var actualTransport = File.Exists(RuntimePaths.TransportSelection(data)) ? File.ReadAllText(RuntimePaths.TransportSelection(data)) : null;
@@ -341,7 +344,8 @@ public sealed partial class InstallationUpdate
     {
         // Pre-existing unknown outcomes are retained history, never success or permission to replay.
         // Active work and any uncertainty created/changed since this transaction began still block.
-        SqliteWorkStore.DemandUpdateIdleAsync(data, CancellationToken.None, state.StartedAt).GetAwaiter().GetResult();
+        SqliteWorkStore.DemandUpdateIdleAsync(data, CancellationToken.None, state.StartedAt,
+            work => IsHistoricalApproval(state, work)).GetAwaiter().GetResult();
     }
 
     private InstallationUpdateState SaveIfChanged(InstallationUpdateState state)
