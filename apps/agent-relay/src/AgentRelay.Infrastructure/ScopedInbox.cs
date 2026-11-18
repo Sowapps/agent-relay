@@ -48,11 +48,7 @@ public sealed class ScopedInbox(SessionService sessions, WslBridge bridge, Sqlit
                 throw new InvalidDataException("Native message project/session/origin binding was not confirmed.");
             message = message with { ProfileId = scope.RecipientId.ToString("D") };
             if (message.InReplyTo is { } replyId)
-            {
-                var original = await store.FindAsync(replyId, token);
-                if (original?.Request.Scope != scope || original.Request.SessionId != record.Id) throw new InvalidDataException("Native reply does not belong to the selected task/project.");
-                if (original.State is "unknown" or "awaiting_approval") await store.SaveAsync(original with { State = "completed", Result = new(message.Sender, message.Text), Error = null, ErrorCode = null, UpdatedAt = DateTimeOffset.UtcNow }, token);
-            }
+                await store.AttachNativeReplyAsync(replyId, scope, record.Id, new(message.Sender, message.Text), token);
             await store.AddInboxAsync(message, token);
         }
     }

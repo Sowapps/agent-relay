@@ -68,6 +68,10 @@ internal static class McpStableFacadeScenarios
         using (var humanResult = JsonDocument.Parse(observations[^1].GetProperty("content")[0].GetProperty("text").GetString()!))
             Check(humanResult.RootElement.GetProperty("cancellation").GetProperty("nextAction").GetString() == "close_session", "Text content includes the cancellation continuation");
         // The isolated native test supplies stop proof separately; exercise the persisted outcome through the same MCP path.
+        Check(await store.BeginApprovalStopAsync(awaiting, CancellationToken.None), "Approval stop intent was not retained");
+        var stopping = (await Call("get_result", new { request_id = awaiting })).GetProperty("cancellation");
+        Check(stopping.GetProperty("state").GetString() == "stop_unconfirmed" && stopping.GetProperty("reservationMayRemain").GetBoolean(),
+            "MCP must distinguish a closure attempt from the initial cancellation");
         await store.ConfirmApprovalCancellationAsync(awaiting, CancellationToken.None);
         var confirmed = await Call("get_result", new { request_id = awaiting });
         progress = confirmed.GetProperty("cancellation");

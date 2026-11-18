@@ -24,6 +24,9 @@ internal sealed class TechnicalConsoleWindow : Form
     private readonly System.Windows.Forms.Timer timer = new() { Interval = 1800 };
     private bool loading, polling, raw, sent;
     private object? selected;
+    private readonly Button closeCancellation;
+    private Guid? cancellationRequest;
+    private CancellationProgress? cancellation;
     private long? more;
     private long? inboxCursor;
     private readonly List<WorkRecord> retained = [];
@@ -61,7 +64,11 @@ internal sealed class TechnicalConsoleWindow : Form
         ActivityListStyle.Apply(inbox, row => row is InboxMessage item ? (item.InReplyTo is null ? "Message indépendant" : "Réponse") + " · " + EndpointName(item.SenderEndpointId) : "", row => row is InboxMessage item ? DisplayDateTime.Format(item.ReceivedAt) + " · " + item.Text.ReplaceLineEndings(" ") : "");
         ActivityListStyle.Apply(events, row => row is WorkEvent item ? State(item.State) + " · " + EndpointName(item.EndpointId) : "", row => row is WorkEvent item ? DisplayDateTime.Format(item.OccurredAt, seconds: true) + " · Tâche " + item.TaskId : "");
         var detail = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1 }; detail.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); detail.RowStyles.Add(new RowStyle(SizeType.AutoSize)); detail.RowStyles.Add(new RowStyle(SizeType.AutoSize)); detail.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); detail.Controls.Add(title);
-        var detailActions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Top }; detailActions.Controls.Add(UiTheme.Button("Copier", Copy)); detailActions.Controls.Add(UiTheme.Button("Message envoyé", (_, _) => { sent = !sent; raw = false; Render(); })); detailActions.Controls.Add(UiTheme.Button("Détails techniques", (_, _) => { raw = !raw; Render(); })); detailActions.Controls.Add(UiTheme.Button("Annuler l’opération", Cancel)); detail.Controls.Add(detailActions); output.BackColor = UiTheme.Surface; output.BorderStyle = BorderStyle.None; detail.Controls.Add(output); split.Panel2.Controls.Add(UiTheme.Card(detail)); layout.Controls.Add(split); layout.Controls.Add(status); Controls.Add(layout);
+        var detailActions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Top }; detailActions.Controls.Add(UiTheme.Button("Copier", Copy)); detailActions.Controls.Add(UiTheme.Button("Message envoyé", (_, _) => { sent = !sent; raw = false; Render(); })); detailActions.Controls.Add(UiTheme.Button("Détails techniques", (_, _) => { raw = !raw; Render(); })); detailActions.Controls.Add(UiTheme.Button("Annuler l’opération", Cancel));
+        closeCancellation = UiTheme.Button("Fermer la session liée", CloseCancellation);
+        closeCancellation.Visible = false;
+        detailActions.Controls.Add(closeCancellation);
+        detail.Controls.Add(detailActions); output.BackColor = UiTheme.Surface; output.BorderStyle = BorderStyle.None; detail.Controls.Add(output); split.Panel2.Controls.Add(UiTheme.Card(detail)); layout.Controls.Add(split); layout.Controls.Add(status); Controls.Add(layout);
         detailActions.Controls.Add(UiTheme.Button("Événements", ReadEvents)); detailActions.Controls.Add(UiTheme.Button("Inspecter l’environnement", InspectHost));
         detailActions.Controls.Add(UiTheme.Button("Fichier partiel", (_, _) => Partial(false))); detailActions.Controls.Add(UiTheme.Button("Nettoyer le partiel", (_, _) => Partial(true)));
         project.SelectedIndexChanged += async (_, _) => { if (!loading) await SelectProject(); }; actor.SelectedIndexChanged += async (_, _) => { if (!loading) await SelectEndpoint(); }; endpoint.SelectedIndexChanged += async (_, _) => { if (!loading) await SelectEndpoint(); };
@@ -90,7 +97,7 @@ internal sealed class TechnicalConsoleWindow : Form
     private async Task SelectProject()
     {
         Text = project.SelectedItem is RelayProject chosen ? "Agent Relay · " + chosen.Name : "Agent Relay";
-        selected = null; taskFilter = null; output.Clear(); title.Text = "Activité du projet";
+        selected = null; taskFilter = null; closeCancellation.Visible = false; output.Clear(); title.Text = "Activité du projet";
         loading = true; actor.Items.Clear(); endpoint.Items.Clear(); workspace.Items.Clear(); session.Items.Clear(); retained.Clear(); more = null; inboxCursor = null; operations.Items.Clear(); inbox.Items.Clear(); events.Items.Clear();
         actor.Items.AddRange(configuration.Endpoints.Where(item => configuration.Memberships.Any(member => member.ProjectId == ProjectId && member.EndpointId == item.Id && member.Role == "main")).Cast<object>().ToArray());
         if (actor.Items.Count > 0) actor.SelectedIndex = 0;
@@ -161,7 +168,33 @@ internal sealed class TechnicalConsoleWindow : Form
     private async void Inspect(object? sender, EventArgs args)
     { try { if (session.SelectedItem is SessionSnapshot current) { selected = (await Call(new("get_session", SessionId: current.Id))).Session; Render(); } } catch (Exception error) { Error(error); } }
     private async void Cancel(object? sender, EventArgs args)
-    { try { if (selected is WorkRecord record) { selected = (await Call(new("cancel_operation", RequestId: record.Request.Id))).Operation; Render(); } } catch (Exception error) { Error(error); } }
+    {
+        if (selected is not WorkRecord record) return;
+        var requestedProject = ProjectId;
+        var requestedActor = ActorId;
+        try
+        {
+            var reply = await Call(new("cancel_operation", RequestId: record.Request.Id));
+            if (ProjectId == requestedProject && ActorId == requestedActor && (selected as WorkRecord)?.Request.Id == record.Request.Id)
+                ShowOperation(reply);
+        }
+        catch (Exception error) { Error(error); }
+    }
+    private async void CloseCancellation(object? sender, EventArgs args)
+    {
+        if (SelectedCancellation is not { NextAction: "close_session" } progress || selected is not WorkRecord record) return;
+        var requestedProject = ProjectId;
+        var requestedActor = ActorId;
+        closeCancellation.Enabled = false;
+        try
+        {
+            await Call(new("control_session", SessionId: progress.SessionId, Control: "close", RequestId: record.Request.Id));
+            if (ProjectId == requestedProject && ActorId == requestedActor && (selected as WorkRecord)?.Request.Id == record.Request.Id)
+                await ShowOperation(record.Request.Id);
+        }
+        catch (Exception error) { Error(error); }
+        finally { closeCancellation.Enabled = true; }
+    }
     private async void Receive(object? sender, EventArgs args)
     {
         try { if (ProjectId == Guid.Empty || ActorId == Guid.Empty) return; var requestedProject = ProjectId; var requestedActor = ActorId; var response = await Call(new("read_inbox", Query: new(ProjectId, Cursor: inboxCursor))); if (ProjectId != requestedProject || ActorId != requestedActor) return; foreach (var item in response.Messages!.Items) if (!inbox.Items.Cast<InboxMessage>().Any(existing => existing.Id == item.Id)) inbox.Items.Insert(0, item); inboxCursor = response.Messages.NextCursor; status.Text = response.Messages.Warnings?.FirstOrDefault() ?? "Messages relevés. Aucun contenu reçu n’est exécuté."; }
@@ -229,15 +262,36 @@ internal sealed class TechnicalConsoleWindow : Form
         finally { polling = false; }
     }
     private async Task ShowOperation(Guid id)
-    { try { var requestedProject = ProjectId; var record = (await Call(new("get_result", RequestId: id))).Operation; if (ProjectId != requestedProject) return; selected = record; Render(); } catch (Exception error) { Error(error); } }
+    {
+        try
+        {
+            var requestedProject = ProjectId;
+            var requestedActor = ActorId;
+            var result = await Call(new("get_result", RequestId: id));
+            if (ProjectId == requestedProject && ActorId == requestedActor) ShowOperation(result);
+        }
+        catch (Exception error) { Error(error); }
+    }
+    private CancellationProgress? SelectedCancellation => selected is WorkRecord record &&
+        record.Request.Scope is { } scope && scope.SenderId == ActorId && scope.ProjectId == ProjectId &&
+        cancellationRequest == record.Request.Id && record.Request.SessionId == cancellation?.SessionId ? cancellation : null;
+    private void ShowOperation(ProjectReply reply)
+    {
+        selected = reply.Operation;
+        cancellationRequest = reply.Operation?.Request.Id;
+        cancellation = reply.Cancellation;
+        Render();
+    }
     private void Render()
     {
+        var progress = SelectedCancellation;
+        closeCancellation.Visible = progress?.NextAction == "close_session";
         title.Text = selected is WorkRecord work ? State(work.State) + " · " + work.Metadata?.Label : selected is SessionSnapshot named ? named.Name : "Détail du projet";
         output.Text = raw && selected is not null ? System.Text.Json.JsonSerializer.Serialize(selected, selected.GetType(), new System.Text.Json.JsonSerializerOptions(RelayJson.Options) { WriteIndented = true }) : selected switch
         {
             WorkRecord record when sent => record.Request.Text,
             WorkRecord record when record.Error is not null => UserMessages.Error(record.ErrorCode) + "\r\n" + (record.Metadata?.Context ?? ""),
-            WorkRecord record => (record.Metadata?.Context ?? "") + "\r\n" + (record.Result?.Output ?? "En attente de confirmation…") + (record.Progress is { } progress ? $"\r\n{progress.Bytes:N0} / {progress.TotalBytes:N0} octets · {progress.Phase}" : ""),
+            WorkRecord record => (record.Metadata?.Context ?? "") + "\r\n" + (record.Result?.Output ?? "En attente de confirmation…") + (record.Progress is { } transfer ? $"\r\n{transfer.Bytes:N0} / {transfer.TotalBytes:N0} octets · {transfer.Phase}" : ""),
             InboxMessage received => received.Text,
             SessionSnapshot snapshot => UserMessages.AgentState(snapshot.State) + "\r\n" + snapshot.Diagnostic,
             WorkEvent item => State(item.State) + "\r\nTâche : " + item.TaskId + "\r\nOpération : " + item.RequestId + "\r\nTentative : " + item.AttemptId,
@@ -245,6 +299,7 @@ internal sealed class TechnicalConsoleWindow : Form
             TransferPartial part => part.RelativePath + "\r\n" + (part.Removed ? "Fichier temporaire supprimé. Destination finale conservée." : part.Exists ? $"Fichier temporaire présent : {part.Bytes:N0} octets." : "Aucun fichier temporaire conservé."),
             _ => "Sélectionnez une opération ou un message."
         };
+        if (!raw && progress is not null) output.AppendText("\r\n\r\n" + UserMessages.Cancellation(progress.State));
     }
     private void Error(Exception error) { status.Text = error is ArgumentException ? error.Message : UserMessages.Error(error); }
     private void Copy(object? sender, EventArgs args) { try { if (output.Text.Length > 0) { Clipboard.SetText(output.Text); status.Text = "Contenu copié."; } } catch (System.Runtime.InteropServices.ExternalException) { status.Text = "Presse-papiers occupé. Réessayez dans un instant."; } }

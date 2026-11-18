@@ -20,6 +20,7 @@ public sealed record CancellationProgress(Guid SessionId, string State, string? 
     {
         if (operation.CancellationRequestedAt is null || operation.Request.SessionId is not { } sessionId) return null;
         if (operation.CancellationConfirmedAt is not null) return new(sessionId, "stop_confirmed", null, false);
+        if (WorkExecution.ApprovalStopPending(operation)) return new(sessionId, "stop_unconfirmed", "close_session", true);
         return operation.State switch
         {
             "awaiting_approval" => new(sessionId, "close_required", "close_session", true),
@@ -125,7 +126,7 @@ public sealed class ProjectCoordinator : IAsyncDisposable
             "open_session" => new(Session: await Application.OpenSessionAsync(caller, Required(action.ProjectId, "projectId"), Required(action.EndpointId, "endpointId"), Required(action.WorkspaceId, "workspaceId"), Required(action.SessionId, "sessionId"), action.DisplayName ?? "", token)),
             "get_session" => new(Session: await Application.SessionAsync(caller, Required(action.SessionId, "sessionId"), token)),
             "list_sessions" => new(Sessions: await Application.SessionsAsync(caller, action.Query ?? new(Required(action.ProjectId, "projectId")), token)),
-            "control_session" => new(Session: await Application.ControlSessionAsync(caller, Required(action.SessionId, "sessionId"), action.Control ?? "", token)),
+            "control_session" => new(Session: await Application.ControlSessionAsync(caller, Required(action.SessionId, "sessionId"), action.Control ?? "", token, action.RequestId)),
             "send_message" => new(Operation: await Application.MessageAsync(caller, Required(action.SessionId, "sessionId"), identifier, action.Text ?? "", action.TaskId, token)),
             "execute_command" => new(Operation: await Application.CommandAsync(caller, Required(action.ProjectId, "projectId"), Required(action.EndpointId, "endpointId"), Required(action.WorkspaceId, "workspaceId"), action.CommandId ?? "", identifier, token)),
             "transfer_file" => new(Operation: await Application.TransferAsync(caller, Required(action.SessionId, "sessionId"), action.Transfer ?? throw new RelayException("invalid_request", "Source and destination artifacts are required."), identifier, token)),

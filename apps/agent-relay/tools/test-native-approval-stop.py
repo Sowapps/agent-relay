@@ -31,13 +31,13 @@ def refuses(recover, root, request, stop, effects_possible=False):
         raise AssertionError('Expected unconfirmed stop')
 
 
-def dispatch_for(data, scope, native, distribution):
+def dispatch_for(data, scope, native, distribution, allow_work=True):
     from relay_files import commit
     identifier = str(uuid.uuid4())
     request = {'requestId': identifier, 'scope': scope}
     commit(data / f'dispatch-{identifier}.json', {'request': {
         'id': identifier, 'scope': scope, 'expectedNativeGeneration': native,
-        'expectedDistributionGeneration': distribution}})
+        'expectedDistributionGeneration': distribution, 'allowLocalWork': allow_work}})
     return request
 
 
@@ -78,7 +78,7 @@ def exercise(base, adapter):
         identifier = str(uuid.uuid4())
         request = {'requestId': identifier, 'scope': scope}
         dispatch = {'id': identifier, 'scope': scope, 'expectedNativeGeneration': 'wrong-generation',
-                    'expectedDistributionGeneration': process_stamp(1)['generation']}
+                    'expectedDistributionGeneration': process_stamp(1)['generation'], 'allowLocalWork': False}
         path = data / f'dispatch-{identifier}.json'
         commit(path, {'request': dispatch})
         refuses(recover, root, request, False)
@@ -109,6 +109,27 @@ def exercise(base, adapter):
         refuses(recover, root, missing, False)
         os.kill(child, signal.SIGTERM)
 
+        # An already detached child is invisible to a later ancestry/SID census.
+        orphan = root / 'orphan.py'
+        orphan.write_text('import os, time\nfrom pathlib import Path\n'
+                          'if os.fork(): os._exit(0)\n'
+                          'os.setsid()\n'
+                          f'Path({str(pid_file)!r}).write_text(str(os.getpid()))\n'
+                          'time.sleep(30)\n')
+        pid_file.unlink()
+        tmux(root, 'new-session', '-d', '-s', 'codex', 'sh', '-c', f'{sys.executable} {orphan}; exec sleep 30')
+        child = int(wait_for(lambda: pid_file.exists() and pid_file.read_text()))
+        child_stamp = process_stamp(child)
+        assert child_stamp is not None
+        from approval_stop import owned_processes, tracked
+        leader, original, _ = pane(root, 'codex')
+        assert str(child) not in tracked(owned_processes(), leader)
+        writable = dispatch_for(data, scope, original, distribution)
+        assert recover(root, 'codex', writable, False)['prepared']
+        refuses(recover, root, writable, True, effects_possible=True)
+        assert pane(root, 'codex') is None and process_stamp(child) == child_stamp
+        os.kill(child, signal.SIGTERM)
+
         # Encode a prior boot in an isolated copy. The local WSL kernel never restarts.
         previous_boot = str(uuid.uuid4())
         previous_native = previous_boot + ':' + original.split(':', 1)[1]
@@ -124,7 +145,7 @@ def exercise(base, adapter):
         assert recover(root, 'codex', previous, True)['stopped']
         assert recover(root, 'codex', previous, True)['stopped']
         assert pane(root, 'independent') is not None
-        print('NATIVE_APPROVAL_STOP=PASS (same-boot absence and detached writer refused, prior boot recovered, replacement and independent terminals preserved)')
+        print('NATIVE_APPROVAL_STOP=PASS (detached writer missing from census retains writable lease; prior boot recovered; independent terminal preserved)')
     finally:
         if child_stamp is not None and process_stamp(child) == child_stamp:
             os.kill(child, signal.SIGTERM)

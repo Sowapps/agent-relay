@@ -157,6 +157,13 @@ public sealed partial class InstallationUpdate
                     if (host is not null) runtime.ConfirmDrain();
                     DemandUpdateIdle(state);
                 }
+                catch (RelayException error) when (error.Code == "update_approval_pending")
+                {
+                    // There has been no stop, snapshot or publication. Existing users must be able to resolve the approval.
+                    state = SaveIfChanged(state with { Error = error.Message, ErrorCode = error.Code });
+                    ReleaseSelectedBarrier(state);
+                    return state;
+                }
                 catch (RelayException error) when (error.Code is "busy" or "update_uncertain_work")
                 { return SaveIfChanged(state with { Error = error.Message, ErrorCode = error.Code }); }
                 if (activation.InitialActivation)

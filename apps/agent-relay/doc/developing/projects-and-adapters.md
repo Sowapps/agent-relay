@@ -39,6 +39,10 @@ Startup marks unfinished rows unknown, including older retained rows. Scoped get
 
 One relay operation runs per session. Independent sessions use the configurable host capacity (default4,1..64). Shared-workspace operations use adapter resource leases unless concurrentWrites is explicitly enabled. These leases coordinate the relay process, not unrelated terminals or applications; avoid simultaneous manual input into an active relay conversation.
 
+Closing a retained approval records a stop intent before contacting the adapter. Correlated replies and stop confirmation are independent, durable facts. A reply does not release a pending stop. The same close can resume after interruption, and only a verified stop or proof that a final reply preceded the stop clears the execution blocker. The native adapter can rely on an exact earlier WSL boot with no replacement terminal. A same-kernel process inventory cannot justify releasing a writable launch, because a detached process can outlive the observed ancestry.
+
+An isolated WSL test showed that a detached process cannot outlive PID 1 in a private PID namespace. This qualifies the operating-system primitive only. Integrating it requires terminal, provider sandbox, identity and shutdown checks for managed native launches. Existing sessions keep the conservative recovery rule.
+
 ## Project lifecycle and admission
 
 Configuration version1 retains enabled as the compatible state source: true is active, false archived; state is derived. Project IDs, memberships, grants, credentials and journals survive transitions. Scoped discovery includes archived projects. ProjectPolicy permits their retained history and inbox reads but refuses new work/session mutations/host inspection/file access; archived session/result/inbox reads skip native inspection, recovery and import. Lifecycle authority is the explicit project.manage capability, independent of role; local authenticated administration invokes the same use case without impersonating an endpoint.

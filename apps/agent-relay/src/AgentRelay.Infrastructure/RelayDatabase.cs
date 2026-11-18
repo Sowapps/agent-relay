@@ -24,7 +24,7 @@ public sealed class RelayDatabase
         using var transaction = connection.BeginTransaction();
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
-        command.CommandText = """
+        command.CommandText = $$"""
             CREATE TABLE IF NOT EXISTS exchanges(request_id TEXT PRIMARY KEY,payload TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS work(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS inbox(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
@@ -41,7 +41,15 @@ public sealed class RelayDatabase
             CREATE INDEX IF NOT EXISTS work_project ON work(json_extract(payload,'$.request.scope.projectId'));
             CREATE INDEX IF NOT EXISTS work_session_approval ON work(json_extract(payload,'$.request.sessionId'))
                 WHERE json_extract(payload,'$.state')='awaiting_approval';
+            CREATE INDEX IF NOT EXISTS work_session_stopping ON work(json_extract(payload,'$.request.sessionId'))
+                WHERE {{SqliteWorkStore.PendingApprovalStop}};
             CREATE INDEX IF NOT EXISTS inbox_project_recipient ON inbox(json_extract(payload,'$.projectId'),json_extract(payload,'$.recipientEndpointId'));
+            UPDATE work SET payload=json_set(payload,'$.approvalStopRequestedAt',json_extract(payload,'$.cancellationRequestedAt'))
+            WHERE json_extract(payload,'$.approvalStopRequestedAt') IS NULL
+              AND json_extract(payload,'$.cancellationRequestedAt') IS NOT NULL
+              AND json_extract(payload,'$.cancellationConfirmedAt') IS NULL
+              AND id IN (SELECT json_extract(payload,'$.retiredForCancellationId') FROM sessions
+                         WHERE json_extract(payload,'$.retiredForCancellationId') IS NOT NULL);
             PRAGMA user_version=4;
             """;
         command.ExecuteNonQuery();

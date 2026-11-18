@@ -28,7 +28,8 @@ internal sealed class WorkspaceLease : IDisposable
                 using var lookup = connection.CreateCommand();
                 lookup.Transaction = transaction;
                 lookup.CommandText = """
-                    SELECT r.request_id, r.project_id, r.sender_id, r.session_id, json_extract(w.payload,'$.state'), json_extract(w.payload,'$.cancellationConfirmedAt')
+                    SELECT r.request_id, r.project_id, r.sender_id, r.session_id, json_extract(w.payload,'$.state'),
+                           json_extract(w.payload,'$.cancellationConfirmedAt'), json_extract(w.payload,'$.approvalStopRequestedAt')
                     FROM workspace_reservations r LEFT JOIN work w ON w.id=r.request_id WHERE r.resource=$resource
                     """;
                 lookup.Parameters.AddWithValue("$resource", resource);
@@ -39,8 +40,9 @@ internal sealed class WorkspaceLease : IDisposable
                     var sameCaller = owner.GetString(1) == scope.ProjectId.ToString("D") && owner.GetString(2) == scope.SenderId.ToString("D");
                     var sessionId = owner.IsDBNull(3) ? null : owner.GetString(3);
                     var state = owner.IsDBNull(4) ? null : owner.GetString(4);
-                    var confirmedStop = state == "unknown" && !owner.IsDBNull(5);
-                    if (Live.Contains((database.DataDirectory, requestId)) || !confirmedStop && state is not (null or "completed" or "failed"))
+                    var stopConfirmed = !owner.IsDBNull(5);
+                    if (Live.Contains((database.DataDirectory, requestId)) || state is not null &&
+                        WorkExecution.MayContinue(state, !owner.IsDBNull(6) && !stopConfirmed, stopConfirmed))
                     {
                         var detail = sameCaller ? $" Holder request: {requestId:D}." + (sessionId is null ? "" : $" Session: {sessionId}.") : "";
                         var surface = scope.WorkspaceId is { } workspace ? $"Workspace {workspace:D}" : "The requested workspace surface";

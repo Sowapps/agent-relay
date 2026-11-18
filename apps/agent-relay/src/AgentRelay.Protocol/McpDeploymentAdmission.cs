@@ -58,7 +58,7 @@ public sealed class McpDeploymentAdmission(string data)
         snapshot();
     }
 
-    /// <summary>Only the owning completed update or verified rollback may reopen admission.</summary>
+    /// <summary>The owner may reopen after completion, verified rollback, or deferral before any stop or publication.</summary>
     /// <seealso cref="Suspend"/>
     public void Release(string id)
     {

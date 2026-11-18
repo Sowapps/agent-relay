@@ -51,7 +51,23 @@ internal static class SelectedUpdateScenarios
         store.SaveAsync(work with { State = "unknown" }, CancellationToken.None).GetAwaiter().GetResult();
         Check(update.Run("resume").ErrorCode == "update_uncertain_work" && !McpConnections.CloseRequested(fixture.Data, legacy.InstanceId),
             "Initial activation interrupted uncertain work");
+        var approval = new WorkRecord(new(Guid.NewGuid(), "fixture", "message", "approval"), "awaiting_approval",
+            DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch, CancellationRequestedAt: DateTimeOffset.UnixEpoch);
+        store.SaveAsync(approval, CancellationToken.None).GetAwaiter().GetResult();
+        var blocked = update.Run("resume");
+        Check(blocked.Id == prepared.Id && blocked.ErrorCode == "update_approval_pending" &&
+            runtime.Load().Stops == 0 && !McpConnections.CloseRequested(fixture.Data, legacy.InstanceId) &&
+            !File.Exists(McpDeploymentAdmission.MarkerFor(fixture.Data)), "Approval must defer before stopping, with admission reopened for recovery");
+        var connection = Guid.NewGuid();
+        var credentials = new ConnectionStore(fixture.Data);
+        credentials.CreateAsync(connection, Guid.NewGuid(), [Guid.NewGuid()], false, CancellationToken.None).GetAwaiter().GetResult();
+        Check(InstallationUpdateRecovery.RequestAsync(fixture.Data, connection, credentials.Secret(connection), CancellationToken.None)
+            .GetAwaiter().GetResult() is null, "A recovery request restarted a deferred update and blocked the participant");
         store.SaveAsync(work with { State = "completed" }, CancellationToken.None).GetAwaiter().GetResult();
+        Check(store.BeginApprovalStopAsync(approval.Request.Id, CancellationToken.None).GetAwaiter().GetResult(), "Approval stop did not persist");
+        store.SaveAsync(approval with { State = "completed", Result = new("fixture", "late reply") }, CancellationToken.None).GetAwaiter().GetResult();
+        Check(update.Run("resume").ErrorCode == "update_approval_pending", "A late result bypassed maintenance approval during an unverified stop");
+        store.ConfirmApprovalCancellationAsync(approval.Request.Id, CancellationToken.None).GetAwaiter().GetResult();
         Check(update.Run("resume").ErrorCode == "update_legacy_connection_pending" && McpConnections.CloseRequested(fixture.Data, legacy.InstanceId) &&
             runtime.Load().Stops == 0 && File.Exists(Path.Combine(fixture.Data, "promotion.lock")), "Legacy closure bypassed admission or stopped the host early");
         McpConnections.Write(fixture.Data, legacy with { State = "closed", LastSeen = DateTimeOffset.UtcNow });

@@ -58,9 +58,11 @@ public sealed partial class RelayApplication
             {
                 var page = await journal.OperationsAsync(new(projectId, Cursor: cursor, Limit: 100), token);
                 if (page.Warnings?.Count > 0 || page.Items.Any(item => item.Request.Scope?.ProjectId != projectId)) throw new RelayException("archive_unverified", "Project work verification is incomplete.");
-                var blocking = page.Items.FirstOrDefault(item => item.State is not ("completed" or "failed"));
+                var blocking = page.Items.FirstOrDefault(WorkExecution.MayContinue);
                 if (blocking is not null) throw new RelayException(blocking.State is "running" or "pending" ? "archive_waiting" : "archive_unverified",
-                    "Waiting for operation " + blocking.Request.Id + " (" + blocking.State + "). No work is retried or approved automatically.");
+                    "Waiting for operation " + blocking.Request.Id + " (" +
+                    (WorkExecution.ApprovalStopPending(blocking) ? "stop_unconfirmed" : blocking.State) +
+                    "). Resolve its approval, cancellation or retained result as applicable. No work is retried automatically.");
                 cursor = Next(page.HasMore, page.NextCursor, cursor);
             } while (cursor is not null);
             do

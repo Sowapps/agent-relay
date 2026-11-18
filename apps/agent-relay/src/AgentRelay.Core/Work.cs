@@ -9,7 +9,20 @@ public sealed record WorkResult(string Origin, string Output, string ErrorOutput
 public sealed record WorkRecord(WorkRequest Request, string State, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,
     WorkResult? Result = null, string? Error = null, string? ErrorCode = null, WorkMetadata? Metadata = null, WorkProgress? Progress = null,
     DateTimeOffset? CancellationRequestedAt = null, bool DispatchBoundaryTracked = false,
-    DateTimeOffset? CancellationConfirmedAt = null);
+    DateTimeOffset? CancellationConfirmedAt = null, DateTimeOffset? ApprovalStopRequestedAt = null);
+
+/// <summary>Execution evidence is independent of a result received during an explicit stop.</summary>
+public static class WorkExecution
+{
+    public static bool ApprovalStopPending(WorkRecord record) =>
+        record.ApprovalStopRequestedAt is not null && record.CancellationConfirmedAt is null;
+
+    public static bool MayContinue(WorkRecord record) =>
+        MayContinue(record.State, ApprovalStopPending(record), record.CancellationConfirmedAt is not null);
+
+    public static bool MayContinue(string state, bool approvalStopPending, bool stopConfirmed) =>
+        approvalStopPending || !stopConfirmed && state is not ("completed" or "failed");
+}
 public sealed record WorkProgress(long Bytes, long TotalBytes, string Phase, DateTimeOffset UpdatedAt);
 public sealed record WorkEvent(Guid Id, Guid RequestId, Guid? ProjectId, Guid? TaskId, Guid? AttemptId, Guid? SessionId,
     Guid? EndpointId, string State, DateTimeOffset OccurredAt, string? ErrorCode = null);
@@ -25,8 +38,12 @@ public interface IWorkStore
     Task<IReadOnlyList<WorkRecord>> ListAsync(CancellationToken token);
     Task RecoverAsync(CancellationToken token);
     Task RequestCancellationAsync(Guid id, CancellationToken token) => Task.CompletedTask;
-    Task<IReadOnlyList<WorkRecord>> AwaitingApprovalAsync(Guid sessionId, CancellationToken token) =>
+    Task<IReadOnlyList<WorkRecord>> RetainedApprovalsAsync(Guid sessionId, CancellationToken token) =>
         Task.FromResult<IReadOnlyList<WorkRecord>>([]);
+    Task<bool> BeginApprovalStopAsync(Guid id, CancellationToken token) =>
+        throw new RelayException("cancellation_unavailable", "This work store cannot retain a pending approval stop.", false);
+    Task ClearApprovalStopAsync(Guid id, CancellationToken token) =>
+        throw new RelayException("cancellation_unavailable", "This work store cannot clear a pending approval stop.", false);
     Task ConfirmApprovalCancellationAsync(Guid id, CancellationToken token) =>
         throw new RelayException("cancellation_unavailable", "This work store cannot retain a cancellation confirmation.", false);
 }
@@ -104,7 +121,7 @@ public sealed class WorkService : IAsyncDisposable
             }
             else
             {
-                if (request.SessionId is { } targetSession && (await store.AwaitingApprovalAsync(targetSession, token)).Count != 0)
+                if (request.SessionId is { } targetSession && (await store.RetainedApprovalsAsync(targetSession, token)).Count != 0)
                     throw new RelayException("session_awaiting_approval", "A retained approval still belongs to this session. Resolve it before submitting new work.", false);
                 if (preparing.Values.Any(item => item.Key == key) || running.TryGetValue(key, out var active) && !active.IsCompleted)
                     throw new RelayException("busy", "This session already has an active operation.", false);
@@ -185,8 +202,8 @@ public sealed class WorkService : IAsyncDisposable
         finally { admission.Release(); }
     }
 
-    public Task<IReadOnlyList<WorkRecord>> AwaitingApprovalAsync(Guid sessionId, CancellationToken token) =>
-        store.AwaitingApprovalAsync(sessionId, token);
+    public Task<IReadOnlyList<WorkRecord>> RetainedApprovalsAsync(Guid sessionId, CancellationToken token) =>
+        store.RetainedApprovalsAsync(sessionId, token);
 
     public async Task<WorkRecord> RequestCancellationAsync(Guid id, CancellationToken token)
     {
@@ -199,6 +216,8 @@ public sealed class WorkService : IAsyncDisposable
         return record;
     }
 
+    public Task<bool> BeginApprovalStopAsync(Guid id, CancellationToken token) => store.BeginApprovalStopAsync(id, token);
+    public Task ClearApprovalStopAsync(Guid id, CancellationToken token) => store.ClearApprovalStopAsync(id, token);
     public Task ConfirmApprovalCancellationAsync(Guid id, CancellationToken token) => store.ConfirmApprovalCancellationAsync(id, token);
 
     private async Task ExecuteAsync(WorkRecord record, CancellationToken token, IPreparedWork? prepared)

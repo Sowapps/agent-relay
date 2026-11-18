@@ -76,6 +76,7 @@ public static class McpErrors
             "workspace_busy" => "inspect_workspace_holder",
             "operation_cancellation_required" => "cancel_operation_then_close_session",
             "approval_already_resolved" => "read_inbox",
+            "approval_stop_mismatch" => "inspect_result",
             "cancellation_unconfirmed" => "inspect_native_cancellation",
             "session_retired_for_cancellation" => "open_new_session",
             "workspace_unavailable" or "workspace_identity_changed" => "verify_workspace_assignment",

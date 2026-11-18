@@ -51,7 +51,30 @@ internal static class ApApprovalCancellationScenarios
         await app.ControlSessionAsync(caller, session.Id, "close", token);
         Check(backend.Stops == 1, "Repeating an acknowledged close stopped the terminal again.");
 
-        // A correlated final outcome that wins the storage race cannot be overwritten by a stop confirmation.
+        // The worker has stopped reporting and the native stop is interrupted before proof arrives.
+        var race = request with { Id = Guid.NewGuid() };
+        using (WorkspaceLease.Acquire(database, race.Id, scope, session.Id, "race-surface"))
+            await store.SaveAsync(new(race, "awaiting_approval", now, now), token);
+        await app.CancelAsync(caller, race.Id, token);
+        backend.OwnedStopVerified = false;
+        await RefusesAsync("cancellation_unconfirmed", () => app.ControlSessionAsync(caller, session.Id, "close", token));
+        var late = new WorkResult("fixture", "original late result");
+        await store.AttachNativeReplyAsync(race.Id, scope, session.Id, late, token);
+        var restarted = new RelayDatabase(data);
+        var lateOutcome = (await new SqliteWorkStore(restarted).FindAsync(race.Id, token))!;
+        Check(lateOutcome.Result == late && lateOutcome.State == "completed" && WorkExecution.ApprovalStopPending(lateOutcome),
+            "The late result erased a durable unverified stop.");
+        await RefusesAsync("workspace_busy", () => Task.FromResult(WorkspaceLease.Acquire(restarted, writer, scope, Guid.NewGuid(), "race-surface")));
+        backend.OwnedStopVerified = true;
+        await RefusesAsync("approval_stop_mismatch", () => app.ControlSessionAsync(caller, session.Id, "close", token, finished.Request.Id));
+        await app.ControlSessionAsync(caller, session.Id, "close", token, race.Id);
+        var final = await app.ResultAsync(caller, race.Id, token);
+        Check(final.Result == late && final.State == "completed" && final.CancellationConfirmedAt is not null && !WorkExecution.MayContinue(final),
+            "Verified continuation must preserve the genuine result and release the reservation.");
+        using (WorkspaceLease.Acquire(restarted, writer, scope, Guid.NewGuid(), "race-surface")) { }
+        await app.ControlSessionAsync(caller, session.Id, "close", token, race.Id);
+        Check(backend.Stops == 2, "Retry repeated a verified stop.");
+
         await store.ConfirmApprovalCancellationAsync(finished.Request.Id, token);
         Check(await store.FindAsync(finished.Request.Id, token) == finished, "Stop confirmation overwrote a final result.");
         var native = new SessionService(data, null!, null!, null!);
@@ -59,7 +82,13 @@ internal static class ApApprovalCancellationScenarios
         await new SqliteDocuments<RelaySession>(database, "sessions").SaveAsync(session.Id,
             new(session.Id, session.Name, profile.Id, profile, profile.Root, "closed", now, now, RetiredForCancellationId: request.Id), token);
         await RefusesAsync("session_retired_for_cancellation", () => native.ReopenAsync(session.Id, token));
-        Console.WriteLine("AP_APPROVAL_CANCELLATION=PASS (terminal refusal, durable intent, retained lease, verified close, late-result protection and reopen fence)");
+        var legacy = finished with { Request = finished.Request with { Id = Guid.NewGuid() }, CancellationRequestedAt = now };
+        await store.SaveAsync(legacy, token);
+        await new SqliteDocuments<RelaySession>(database, "sessions").SaveAsync(session.Id,
+            new(session.Id, session.Name, profile.Id, profile, profile.Root, "created", now, now, RetiredForCancellationId: legacy.Request.Id), token);
+        var adopted = await new SqliteWorkStore(new RelayDatabase(data)).FindAsync(legacy.Request.Id, token);
+        Check(adopted is not null && WorkExecution.ApprovalStopPending(adopted), "An older retained session fence was discarded during upgrade.");
+        Console.WriteLine("AP_APPROVAL_CANCELLATION=PASS (late reply preserves lease until verified close, guarded retry, legacy fence)");
     }
 
     private static void Check(bool condition, string message)

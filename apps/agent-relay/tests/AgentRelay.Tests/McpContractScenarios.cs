@@ -50,7 +50,13 @@ internal static class McpContractScenarios
             [original.Descriptors[0] with { SchemaHash = "forged" }]), "invalid_operation_manifest");
         using (var duplicate = JsonDocument.Parse("{\"request_id\":\"" + id + "\",\"request_id\":\"" + id + "\"}"))
             Refused(() => McpStableProtocol.Validate("get_result", duplicate.RootElement), "invalid_request");
-        Check(McpToolCatalog.Operations.Count == McpFacade.ToolDefinitions.Length - 1, "every legacy project route has one registry descriptor");
+        Check(McpToolCatalog.Operations.Select(item => item.Id).Distinct().Count() == McpFacade.ToolDefinitions.Length - 1,
+            "every legacy project route has a registry descriptor");
+        var closeArgs = Json(new { session_id = id, request_id = id });
+        Refused(() => McpToolCatalog.ResolveOperation(new(id, "close_session", 1, closeArgs)), "invalid_request");
+        Check(McpToolCatalog.ResolveOperation(new(id, "close_session", 2, closeArgs)).RequestId == id &&
+            McpToolCatalog.ResolveOperation(new(id, "close_session", 1, Json(new { session_id = id }))).SessionId == id,
+            "both close-session revisions remain compatible and only revision 2 accepts the request guard");
         var project = Guid.NewGuid();
         var endpoint = Guid.NewGuid();
         var settings = new ProjectSettingsStore(data);

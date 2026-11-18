@@ -118,7 +118,7 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
 
     /// <summary>Control the same owned conversation opened by OpenSessionAsync; never substitute identity.</summary>
     /// <seealso cref="OpenSessionAsync"/>
-    public async Task<SessionSnapshot> ControlSessionAsync(CallerIdentity caller, Guid id, string action, CancellationToken token)
+    public async Task<SessionSnapshot> ControlSessionAsync(CallerIdentity caller, Guid id, string action, CancellationToken token, Guid? approvalRequestId = null)
     {
         using var projectLease = Admission.Enter((await sessions.GetAsync(id, token)).Scope.ProjectId);
         using var policySnapshot = policy.Pin();
@@ -128,17 +128,34 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
             throw new RelayException("project_draining", "New session changes are suspended during archival; closing or interrupting existing work remains available.");
         if (action is not ("start" or "reopen" or "close" or "interrupt") && !action.StartsWith("rename:", StringComparison.Ordinal))
             throw new RelayException("invalid_operation", "Unknown session action.");
+        if (approvalRequestId is not null && action != "close")
+            throw new RelayException("invalid_request", "An approval request can only guard a session close.", false);
         if (action.StartsWith("rename:", StringComparison.Ordinal)) action = "rename:" + SessionNames.Normalize(action[7..]);
         if (action == "close" && work.IsSessionActive(id)) throw new RelayException("busy", "Inspect or interrupt the active operation before closing the session.");
         if (action == "close")
         {
-            var approvals = await work.AwaitingApprovalAsync(id, token);
+            var approvals = await work.RetainedApprovalsAsync(id, token);
             if (approvals.Count > 1) throw new RelayException("cancellation_unconfirmed", "More than one retained approval belongs to this session. The native owner cannot be selected safely.", false);
-            if (approvals.SingleOrDefault() is { } approval)
+            var approval = approvals.SingleOrDefault();
+            if (approvalRequestId is { } expected && approval?.Request.Id != expected)
+            {
+                var original = await work.ReadAsync(expected, token);
+                if (original.Request.SessionId == id && original.Request.Scope == session.Scope && original.CancellationConfirmedAt is not null)
+                    return await sessions.InspectAsync(id, token);
+                throw new RelayException("approval_stop_mismatch", "This request no longer owns a pending stop in the selected session. Inspect its retained result.", false);
+            }
+            if (approval is not null)
             {
                 if (approval.CancellationRequestedAt is null)
                     throw new RelayException("operation_cancellation_required", "Request cancellation of the retained approval before closing this session.", false);
-                await sessions.ConfirmApprovalStopAsync(approval.Request, token);
+                if (!await work.BeginApprovalStopAsync(approval.Request.Id, token))
+                    throw new RelayException("approval_already_resolved", "The approval reached a result before the stop began. Read its result.", false);
+                try { await sessions.ConfirmApprovalStopAsync(approval.Request, token); }
+                catch (RelayException error) when (error.Code == "approval_already_resolved")
+                {
+                    await work.ClearApprovalStopAsync(approval.Request.Id, CancellationToken.None);
+                    throw;
+                }
                 await work.ConfirmApprovalCancellationAsync(approval.Request.Id, token);
                 return await sessions.InspectAsync(id, token);
             }

@@ -25,6 +25,12 @@ internal static class UserMessages
         "relay_timeout" or "timeout" => "Le délai d’attente est dépassé. L’action peut être encore en cours ; vérifiez son état avant de réessayer.",
         "busy" => "Une opération est déjà en cours sur cette destination.",
         "review_stale" => "L’opération a évolué. Consultez son état actuel avant de la marquer comme examinée.",
+        "operation_already_finished" => "L’opération est terminée. Son résultat est conservé.",
+        "operation_cancellation_required" => "Demandez d’abord l’annulation de l’opération en attente.",
+        "approval_already_resolved" => "Une réponse finale est arrivée. Consultez le résultat ou les messages.",
+        "approval_stop_mismatch" => "Cette opération n’attend plus de fermeture dans cette session. Consultez son résultat.",
+        "cancellation_unconfirmed" => "L’arrêt reste à vérifier. Cette opération peut encore bloquer le worktree.",
+        "cancelled_effects_unconfirmed" => "L’arrêt est confirmé. Les effets déjà produits restent à vérifier.",
         "not_found" => "Cette opération ou cette destination n’est plus disponible.",
         "result_too_large" => "Le détail dépasse la taille autorisée. Utilisez les aperçus filtrés ou la référence du fichier produit.",
         "command_denied" or "capability_denied" => "Cette action n’est pas autorisée par les permissions de ce projet.",
@@ -34,6 +40,15 @@ internal static class UserMessages
 
     public static string Error(Exception error) => error is RelayException relay ? Error(relay.Code) :
         error is TimeoutException ? Error("timeout") : Error((string?)null);
+
+    public static string Cancellation(string state) => state switch
+    {
+        "close_required" => "Annulation enregistrée. Vous pouvez fermer la session liée pour vérifier l’arrêt.",
+        "stop_unconfirmed" => "Fermeture en attente de preuve. Le worktree peut encore être bloqué par cette opération.",
+        "stop_confirmed" => "Arrêt confirmé. Cette opération ne retient plus le worktree.",
+        "finished" => "L’opération a atteint un résultat final.",
+        _ => "Annulation demandée. Consultez le résultat pour suivre sa confirmation."
+    };
 
     public static string AgentState(string state) => state switch
     {

@@ -4,6 +4,7 @@ using System.IO.Pipes;
 
 if (args.Length == 2 && args[0] == "ap-session-resilience") { await ApSessionResilienceScenarios.RunAsync(Path.GetFullPath(args[1])); return; }
 if (args.Length == 2 && args[0] == "ap-approval-cancellation") { await ApApprovalCancellationScenarios.RunAsync(Path.GetFullPath(args[1])); return; }
+if (args.Length == 2 && args[0] == "project-lifecycle") { await ProjectLifecycleScenarios.Run(Path.GetFullPath(args[1])); return; }
 if (args.Length == 2 && args[0] == "mcp-connection-inspection") { McpConnectionInspectionScenarios.Run(Path.GetFullPath(args[1])); return; }
 if (args.Length == 2 && args[0] == "promotion-admission") { await VerifyPromotionAsync(Path.GetFullPath(args[1])); return; }
 if (args.Length == 2 && args[0] == "initial-stable-activation") { SelectedUpdateScenarios.Initial(Path.GetFullPath(args[1])); return; }

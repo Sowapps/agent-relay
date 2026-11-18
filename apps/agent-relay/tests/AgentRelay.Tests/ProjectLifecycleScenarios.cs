@@ -47,7 +47,10 @@ internal static class ProjectLifecycleScenarios
         await app.SetProjectStateAsync(caller,a,false,true,token);
         await app.ReconcileArchivesAsync(token);
         if(fake.Inspected!=previousInspections||!settings.Load().Projects.Single(p=>p.Id==a).ArchiveRequested||settings.Load().Projects.Single(p=>p.Id==a).ArchiveDiagnostic?.Contains("unknown")!=true)throw new Exception("Paged preflight missed old uncertain work or touched an adapter too early.");
-        await store.SaveAsync(uncertain with {State="failed"},token);
+        var stopped = uncertain with {Request=uncertain.Request with {Kind="message"}, State="awaiting_approval", CancellationRequestedAt=now};
+        await store.SaveAsync(stopped,token);
+        if(!await store.BeginApprovalStopAsync(stopped.Request.Id,token))throw new Exception("Approval stop could not be recorded.");
+        await store.ConfirmApprovalCancellationAsync(stopped.Request.Id,token);
         fake.State="ready";fake.Failure=true;
         await app.ReconcileArchivesAsync(token);
         if(settings.Load().Projects.Single(p=>p.Id==a).ArchiveDiagnostic?.StartsWith("adapter_unavailable:")!=true)throw new Exception("Verification failure disappeared.");
@@ -64,6 +67,8 @@ internal static class ProjectLifecycleScenarios
         while((await app.ResultAsync(foreign,otherWork.Request.Id,token)).State is "pending" or "running" && DateTime.UtcNow<deadline)await Task.Delay(10);
         fake.Release.TrySetResult();await archive;var archived=settings.Load().Projects.Single(p=>p.Id==a);
         if(archived.Enabled||fake.Executed!=2)throw new Exception("Unrelated project was blocked or a forbidden project operation ran.");
+        if(await store.FindAsync(stopped.Request.Id,token) is not {State:"unknown",CancellationConfirmedAt:not null})
+            throw new Exception("Archival discarded historical effect uncertainty.");
         var discover=app.Discover(caller);
         if(discover.Projects.Single().State!="archived"||discover.Projects[0].Id!=a)throw new Exception("Archived discovery lost scope or status.");
         await Refuses("project_archived",()=>app.MessageAsync(caller,sessionId,Guid.NewGuid(),"blocked",null,token));
