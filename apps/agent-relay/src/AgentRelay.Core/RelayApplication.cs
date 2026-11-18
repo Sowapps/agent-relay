@@ -24,6 +24,7 @@ public interface IRelaySessions
     Task<SessionSnapshot> OpenAsync(SessionDefinition definition, CancellationToken token);
     Task<SessionSnapshot> GetAsync(Guid id, CancellationToken token);
     Task<SessionSnapshot> InspectAsync(Guid id, CancellationToken token);
+    Task<SessionSnapshot> InspectForArchiveAsync(Guid id, CancellationToken token) => InspectAsync(id, token);
     Task<ReadPage<SessionSnapshot>> ListAsync(ReadQuery query, Guid ownerId, CancellationToken token);
     Task<SessionSnapshot> ControlAsync(Guid id, string action, CancellationToken token);
     Task ConfirmApprovalStopAsync(WorkRequest request, CancellationToken token) =>

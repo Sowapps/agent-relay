@@ -17,6 +17,8 @@ Archiver opens a confirmation. On confirmation, the relay persists an archival r
 
 The request belongs to the relay host, not its window or the submitting agent. It survives restarts and is checked periodically while the relay runs. Closing the window does not cancel it. In the project directory or project banner, Archivage en cours explains suspended admission; Détails de l’attente shows the reason if verification cannot finish. Annuler l’archivage cancels the request and restores eligibility without restarting work. This is transitional metadata on an active project, not a third project state.
 
+If a profile's template root was moved, archival can verify a dormant retained session in its exact owned native root when the client, distribution, user and project binding still match. This check does not reopen the session or change the profile. A live terminal or a missing proof leaves the request pending.
+
 Réactiver restores normal visibility and eligibility using the existing permissions. It does not reopen sessions or restart old work. State is retained across relay restarts. The two states are reversible; there is no project deletion or “mis de côté” state.
 
 ## Agents and limits

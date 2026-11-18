@@ -4,7 +4,7 @@ namespace AgentRelay.Infrastructure;
 
 // Session capability only; command execution/recovery and inbox import have separate owners.
 public sealed class ScopedSessions(SessionService sessions, AgentControl agents, ProjectSettingsStore projects,
-    ProjectJournal journal, ScopedInbox inbox, ScopedSessionContext context, Func<Guid, bool> active) : IRelaySessions
+    ProjectJournal journal, ScopedInbox inbox, ScopedSessionContext context, Func<Guid, bool> active, bool detachedArchiveCheck = false) : IRelaySessions
 {
     public async Task<SessionSnapshot> OpenAsync(SessionDefinition definition, CancellationToken token)
     {
@@ -27,6 +27,18 @@ public sealed class ScopedSessions(SessionService sessions, AgentControl agents,
         var agent = await agents.StatusAsync(await sessions.ResolveAsync(id, record.ProfileId, token, allowClosed: true), token);
         var observation = await sessions.ObserveAsync(id, agent, token);
         return Snapshot(record) with { State = agent.State, Diagnostic = agent.Message, NativeConversationId = agent.NativeConversationId, Runtime = observation };
+    }
+
+    public async Task<SessionSnapshot> InspectForArchiveAsync(Guid id, CancellationToken token)
+    {
+        var record = await context.RecordAsync(id, token);
+        context.ValidateDefinition(record.Definition!);
+        if (record.State is "closed" or "preparing" or "setup_failed") return Snapshot(record);
+        if (await sessions.VerifyDormantRetainedRootForArchiveAsync(record, token))
+            return Snapshot(record) with { State = "not_started" };
+        if (detachedArchiveCheck)
+            throw new RelayException("archive_unverified", "The detached archive check only verifies a dormant retained root after a template relocation.", false);
+        return await InspectAsync(id, token);
     }
 
     public async Task<ReadPage<SessionSnapshot>> ListAsync(ReadQuery query, Guid ownerId, CancellationToken token)

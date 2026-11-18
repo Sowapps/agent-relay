@@ -34,6 +34,38 @@ public sealed record CancellationProgress(Guid SessionId, string State, string? 
 
 public sealed class ProjectCoordinator : IAsyncDisposable
 {
+    /// <summary>Local administrator recovery for a project already draining work; the database is opened read-only.</summary>
+    public static async Task<RelayProject> RecheckDormantArchiveAsync(string data, Guid projectId, CancellationToken token)
+    {
+        new AgentRelay.Protocol.McpDeploymentAdmission(data).DemandOpen();
+        var settings = new ProjectSettingsStore(data);
+        RelayProject Selected() => settings.Load().Projects.SingleOrDefault(project => project.Id == projectId)
+            ?? throw new RelayException("not_found", "Unknown project.");
+        var project = Selected();
+        if (!project.Enabled) return project;
+        if (!project.ArchiveRequested)
+            throw new RelayException("archive_unverified", "The project must already be draining under the running relay.", false);
+        var database = new RelayDatabase(data, readOnly: true);
+        var store = new SqliteWorkStore(database);
+        var technical = new SettingsStore(data);
+        var bridge = new WslBridge();
+        var agents = new AgentControl(technical, bridge);
+        var sessions = new SessionService(database, technical, agents, bridge);
+        var context = new ScopedSessionContext(settings, sessions);
+        var journal = new ProjectJournal(database);
+        var inbox = new ScopedInbox(sessions, bridge, store, journal, new(database, "cursors"), context);
+        var adapter = new ScopedSessions(sessions, agents, settings, journal, inbox, context, _ => false, detachedArchiveCheck: true);
+        await using var work = new WorkService(store, new ArchiveReadOnlyExecutor(), () => []);
+        var application = new RelayApplication(new(settings), work, adapter, journal, projectStates: settings);
+        await application.ReconcileProjectArchiveAsync(projectId, token);
+        return Selected();
+    }
+
+    private sealed class ArchiveReadOnlyExecutor : IWorkExecutor
+    {
+        public Task<WorkResult> ExecuteAsync(WorkRequest request, CancellationToken token) =>
+            throw new RelayException("capability_denied", "The detached archive check cannot execute work.", false);
+    }
     public ProjectSettingsStore Settings { get; }
     public WorkService Work { get; }
     public RelayApplication Application { get; }

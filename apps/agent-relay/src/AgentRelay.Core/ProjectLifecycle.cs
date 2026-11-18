@@ -35,13 +35,14 @@ public sealed partial class RelayApplication
         foreach (var project in projectStates.Load().Projects.Where(project => project.Enabled && project.ArchiveRequested))
         {
             token.ThrowIfCancellationRequested();
-            try { await CompleteArchiveAsync(project.Id, token); }
+            try { await ReconcileProjectArchiveAsync(project.Id, token); }
             catch (RelayException error) when (error.Code is "busy" or "state_conflict") { /* Another admission/configuration won; inspect the next fresh snapshot. */ }
         }
     }
 
-    private async Task CompleteArchiveAsync(Guid projectId, CancellationToken stopping)
+    public async Task ReconcileProjectArchiveAsync(Guid projectId, CancellationToken stopping)
     {
+        if (projectStates is null) return;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(stopping);
         timeout.CancelAfter(TimeSpan.FromSeconds(10));
         var token = timeout.Token;
@@ -72,7 +73,7 @@ public sealed partial class RelayApplication
                 foreach (var retained in page.Items)
                 {
                     if (retained.WorkActive || work.IsSessionActive(retained.Id)) throw new RelayException("archive_waiting", "Waiting for existing session work to finish.");
-                    var observed = await sessions.InspectAsync(retained.Id, token);
+                    var observed = await sessions.InspectForArchiveAsync(retained.Id, token);
                     if (observed.Scope.ProjectId != projectId) throw new RelayException("archive_unverified", "Session scope could not be confirmed.");
                     if (observed.WorkActive) throw new RelayException("archive_waiting", "Waiting for existing native session work to finish.");
                     if (observed.State is not ("closed" or "not_started" or "ready"))

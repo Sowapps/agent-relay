@@ -153,6 +153,20 @@ def historical_approval(install, request):
 def maintain(request):
     install = owned_install(request)
     action = request['action']
+    if action == 'verify-dormant':
+        client = request['client']
+        if client not in ('codex', 'claude'):
+            raise ValueError('Unsupported session client')
+        binding_path = install.parent / client / 'context.json'
+        if binding_path.resolve(strict=True) != binding_path or binding_path.stat().st_uid != os.getuid():
+            raise PermissionError('The native binding is not owned by the selected account')
+        binding = json.loads(binding_path.read_text(encoding='utf-8'))
+        scope = request['scope']
+        if binding.get('sessionId') != request['session']['id'] or any(
+                binding.get(key) != scope.get(key) for key in ('projectId', 'senderId', 'recipientId')):
+            raise PermissionError('The retained native session binding differs')
+        demand_stopped(install)
+        return {'sessionId': request['session']['id'], 'dormant': True}
     if action == 'approval-history':
         return historical_approval(install, request)
     names = request['names']

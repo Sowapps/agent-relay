@@ -20,10 +20,47 @@ public sealed class SessionService
     private readonly SemaphoreSlim creation = new(1, 1);
 
     public SessionService(string dataDirectory, SettingsStore settings, ISessionRuntime agents, WslBridge bridge)
+        : this(new RelayDatabase(dataDirectory), settings, agents, bridge) { }
+
+    internal SessionService(RelayDatabase database, SettingsStore settings, ISessionRuntime agents, WslBridge bridge)
     {
-        this.dataDirectory = dataDirectory; this.settings = settings; this.agents = agents; this.bridge = bridge;
-        store = new(new RelayDatabase(dataDirectory), "sessions");
-        observations = new(new RelayDatabase(dataDirectory), "session_runtime");
+        dataDirectory = database.DataDirectory; this.settings = settings; this.agents = agents; this.bridge = bridge;
+        store = new(database, "sessions");
+        observations = new(database, "session_runtime");
+    }
+
+    internal async Task<bool> VerifyDormantRetainedRootForArchiveAsync(RelaySession session, CancellationToken token)
+    {
+        var previous = session.Template;
+        var current = settings.Load().Profiles.SingleOrDefault(profile => profile.Id == session.ProfileId);
+        if (current is null || current.Root == previous.Root || current.Client != previous.Client ||
+            current.Distribution != previous.Distribution || current.User != previous.User ||
+            session.Definition is null || !NativeLayout.IsSession(session.Root, session.Id))
+            return false;
+
+        string ReadHelper(string name)
+        {
+            using var resource = typeof(SessionService).Assembly.GetManifestResourceStream("AgentRelay.Infrastructure." + name)
+                ?? throw new InvalidDataException("Missing packaged verification helper.");
+            using var reader = new StreamReader(resource);
+            return reader.ReadToEnd();
+        }
+        var request = RelayJson.Serialize(new
+        {
+            action = "verify-dormant",
+            session = new { session.Id, session.Root, template = new { previous.User } },
+            previous.Client, session.Definition.Scope,
+            layoutSource = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(ReadHelper("native_layout.py"))),
+            layoutDefinition = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(ReadHelper("native-layout.json")))
+        });
+        var proof = await WslMaintenance.RunAsync(new(previous.Distribution, previous.User,
+            ReadHelper("session_adapter_files.py"), request, 5), token);
+        if (proof.ExitCode != 0)
+            throw new RelayException("archive_unverified", "The retained native terminal could not be proven stopped: " + proof.Error, false);
+        var response = RelayJson.Deserialize<System.Text.Json.JsonElement>(proof.Output);
+        if (response.GetProperty("sessionId").GetGuid() != session.Id || !response.GetProperty("dormant").GetBoolean())
+            throw new RelayException("archive_unverified", "The retained native terminal returned a mismatched proof.", false);
+        return true;
     }
 
     public Task<IReadOnlyList<RelaySession>> ListAsync(CancellationToken token) => store.ListAsync(token);
