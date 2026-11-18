@@ -10,7 +10,8 @@ public sealed record WorkRecord(WorkRequest Request, string State, DateTimeOffse
     WorkResult? Result = null, string? Error = null, string? ErrorCode = null, WorkMetadata? Metadata = null, WorkProgress? Progress = null,
     DateTimeOffset? CancellationRequestedAt = null, bool DispatchBoundaryTracked = false,
     DateTimeOffset? CancellationConfirmedAt = null, DateTimeOffset? ApprovalStopRequestedAt = null,
-    DateTimeOffset? ApprovalWaitingSince = null, DateTimeOffset? ApprovalExpiredAt = null);
+    DateTimeOffset? ApprovalWaitingSince = null, DateTimeOffset? ApprovalExpiredAt = null,
+    DateTimeOffset? SessionClosedAt = null);
 
 public static class ApprovalExpiry
 {
@@ -48,8 +49,8 @@ public interface IWorkStore
         throw new RelayException("cancellation_unavailable", "This work store cannot retain a pending approval stop.", false);
     Task ClearApprovalStopAsync(Guid id, CancellationToken token) =>
         throw new RelayException("cancellation_unavailable", "This work store cannot clear a pending approval stop.", false);
-    Task ConfirmApprovalCancellationAsync(Guid id, CancellationToken token) =>
-        throw new RelayException("cancellation_unavailable", "This work store cannot retain a cancellation confirmation.", false);
+    Task RecordApprovalSessionClosureAsync(Guid id, bool stopped, CancellationToken token) =>
+        throw new RelayException("cancellation_unavailable", "This work store cannot retain the session closure.", false);
 }
 
 public interface IWorkExecutor
@@ -228,7 +229,8 @@ public sealed class WorkService : IAsyncDisposable
 
     public Task<bool> BeginApprovalStopAsync(Guid id, CancellationToken token) => store.BeginApprovalStopAsync(id, token);
     public Task ClearApprovalStopAsync(Guid id, CancellationToken token) => store.ClearApprovalStopAsync(id, token);
-    public Task ConfirmApprovalCancellationAsync(Guid id, CancellationToken token) => store.ConfirmApprovalCancellationAsync(id, token);
+    public Task RecordApprovalSessionClosureAsync(Guid id, bool stopped, CancellationToken token) =>
+        store.RecordApprovalSessionClosureAsync(id, stopped, token);
 
     private async Task ExecuteAsync(WorkRecord record, CancellationToken token, IPreparedWork? prepared)
     {

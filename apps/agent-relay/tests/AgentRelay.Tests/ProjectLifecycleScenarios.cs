@@ -50,7 +50,7 @@ internal static class ProjectLifecycleScenarios
         var stopped = uncertain with {Request=uncertain.Request with {Kind="message"}, State="awaiting_approval", CancellationRequestedAt=now};
         await store.SaveAsync(stopped,token);
         if(!await store.BeginApprovalStopAsync(stopped.Request.Id,token))throw new Exception("Approval stop could not be recorded.");
-        await store.ConfirmApprovalCancellationAsync(stopped.Request.Id,token);
+        await store.RecordApprovalSessionClosureAsync(stopped.Request.Id, true,token);
         fake.State="ready";fake.Failure=true;
         await app.ReconcileArchivesAsync(token);
         if(settings.Load().Projects.Single(p=>p.Id==a).ArchiveDiagnostic?.StartsWith("adapter_unavailable:")!=true)throw new Exception("Verification failure disappeared.");

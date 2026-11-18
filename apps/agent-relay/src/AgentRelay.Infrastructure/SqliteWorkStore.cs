@@ -98,6 +98,7 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         var record = transition.Record;
         record = record with { CancellationRequestedAt = record.CancellationRequestedAt ?? existing?.CancellationRequestedAt,
             CancellationConfirmedAt = record.CancellationConfirmedAt ?? existing?.CancellationConfirmedAt,
+            SessionClosedAt = record.SessionClosedAt ?? existing?.SessionClosedAt,
             ApprovalWaitingSince = existing?.ApprovalWaitingSince ?? record.ApprovalWaitingSince,
             ApprovalExpiredAt = transition.ClearExpiry ? null : existing?.ApprovalExpiredAt ?? record.ApprovalExpiredAt,
             Progress = record.Progress ?? existing?.Progress };
@@ -186,20 +187,22 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
     public Task ClearApprovalStopAsync(Guid id, CancellationToken token) => WriteAsync(id, record =>
         record is not null && WorkExecution.ApprovalStopPending(record) ? record with { ApprovalStopRequestedAt = null } : null, token);
 
-    public Task ConfirmApprovalCancellationAsync(Guid id, CancellationToken token) => WriteAsync(id, record =>
+    public Task RecordApprovalSessionClosureAsync(Guid id, bool stopped, CancellationToken token) => WriteAsync(id, record =>
     {
-        if (record is null || !WorkExecution.ApprovalStopPending(record)) return null;
+        if (record is null || !WorkExecution.ApprovalStopPending(record) || !stopped && record.SessionClosedAt is not null) return null;
         var now = DateTimeOffset.UtcNow;
+        record = record with { SessionClosedAt = record.SessionClosedAt ?? now, CancellationConfirmedAt = stopped ? now : null };
         if (record.State is "completed" or "failed")
-            return record with { CancellationConfirmedAt = now };
+            return record;
         if (record.State == "approval_expired")
-            return record with { CancellationConfirmedAt = now, UpdatedAt = now };
+            return record with { UpdatedAt = now };
         return record with
         {
             State = "unknown",
-            ErrorCode = "cancelled_effects_unconfirmed",
-            Error = "Native continuation was stopped. Earlier effects were not confirmed.",
-            UpdatedAt = now, CancellationConfirmedAt = now
+            ErrorCode = stopped ? "cancelled_effects_unconfirmed" : "session_closed_stop_unconfirmed",
+            Error = stopped ? "Native continuation was stopped. Earlier effects were not confirmed." :
+                "The session is closed. Process termination and earlier effects remain unconfirmed.",
+            UpdatedAt = now
         };
     }, token);
 

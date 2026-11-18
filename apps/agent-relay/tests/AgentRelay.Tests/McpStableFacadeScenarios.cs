@@ -75,7 +75,7 @@ internal static class McpStableFacadeScenarios
         var stopping = (await Call("get_result", new { request_id = awaiting })).GetProperty("cancellation");
         Check(stopping.GetProperty("state").GetString() == "stop_unconfirmed" && stopping.GetProperty("sessionRequiresResolution").GetBoolean(),
             "MCP must distinguish a closure attempt from the initial cancellation");
-        await store.ConfirmApprovalCancellationAsync(awaiting, CancellationToken.None);
+        await store.RecordApprovalSessionClosureAsync(awaiting, true, CancellationToken.None);
         var confirmed = await Call("get_result", new { request_id = awaiting });
         progress = confirmed.GetProperty("cancellation");
         Check(confirmed.GetProperty("operation").GetProperty("state").GetString() == "unknown" &&

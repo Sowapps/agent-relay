@@ -67,7 +67,7 @@ internal static class SelectedUpdateScenarios
         Check(store.BeginApprovalStopAsync(approval.Request.Id, CancellationToken.None).GetAwaiter().GetResult(), "Approval stop did not persist");
         store.SaveAsync(approval with { State = "completed", Result = new("fixture", "late reply") }, CancellationToken.None).GetAwaiter().GetResult();
         Check(update.Run("resume").ErrorCode == "update_approval_pending", "A late result bypassed maintenance approval during an unverified stop");
-        store.ConfirmApprovalCancellationAsync(approval.Request.Id, CancellationToken.None).GetAwaiter().GetResult();
+        store.RecordApprovalSessionClosureAsync(approval.Request.Id, true, CancellationToken.None).GetAwaiter().GetResult();
         Check(update.Run("resume").ErrorCode == "update_legacy_connection_pending" && McpConnections.CloseRequested(fixture.Data, legacy.InstanceId) &&
             runtime.Load().Stops == 0 && File.Exists(Path.Combine(fixture.Data, "promotion.lock")), "Legacy closure bypassed admission or stopped the host early");
         McpConnections.Write(fixture.Data, legacy with { State = "closed", LastSeen = DateTimeOffset.UtcNow });

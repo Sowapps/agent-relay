@@ -88,7 +88,7 @@ def exercise(base, adapter):
         assert recover(root, 'codex', request, False) == {'requestId': identifier, 'prepared': True}
         assert pane(root, 'codex')[1] == generation
 
-        refuses(recover, root, request, True, effects_possible=True)
+        assert recover(root, 'codex', request, True) == {'requestId': identifier, 'terminalClosed': True, 'stopped': False}
         assert pane(root, 'codex') is None
         assert process_stamp(child) == child_stamp
         os.kill(child, signal.SIGTERM)
@@ -106,7 +106,9 @@ def exercise(base, adapter):
         missing = dispatch_for(data, scope, original, distribution)
         tmux(root, 'kill-session', '-t', 'codex')
         assert pane(root, 'codex') is None and process_stamp(child) == child_stamp
-        refuses(recover, root, missing, False)
+        assert recover(root, 'codex', missing, False)['prepared']
+        assert recover(root, 'codex', missing, True)['terminalClosed']
+        assert not recover(root, 'codex', missing, True)['stopped']
         os.kill(child, signal.SIGTERM)
 
         # An already detached child is invisible to a later ancestry/SID census.
@@ -126,7 +128,8 @@ def exercise(base, adapter):
         assert str(child) not in tracked(owned_processes(), leader)
         writable = dispatch_for(data, scope, original, distribution)
         assert recover(root, 'codex', writable, False)['prepared']
-        refuses(recover, root, writable, True, effects_possible=True)
+        assert recover(root, 'codex', writable, True) == {
+            'requestId': writable['requestId'], 'terminalClosed': True, 'stopped': False}
         assert pane(root, 'codex') is None and process_stamp(child) == child_stamp
         os.kill(child, signal.SIGTERM)
 

@@ -64,11 +64,11 @@ public sealed class ScopedSessions(SessionService sessions, AgentControl agents,
     }
 
     private SessionSnapshot Snapshot(RelaySession record) => new(record.Id, record.Name, record.Definition!.Scope, record.State, Diagnostic: record.Diagnostic, WorkActive: active(record.Id));
-    public async Task ConfirmApprovalStopAsync(WorkRequest request, CancellationToken token)
+    public async Task<bool> CloseApprovalSessionAsync(WorkRequest request, CancellationToken token)
     {
         var record = await context.RecordAsync(request.SessionId!.Value, token);
         context.ValidateDefinition(record.Definition!);
-        await sessions.ConfirmApprovalStopAsync(record, request, token);
+        return await sessions.CloseApprovalSessionAsync(record, request, token);
     }
     public Task<IReadOnlyList<string>> RefreshMessagesAsync(Guid projectId, Guid recipientId, Guid? sessionId, CancellationToken token)
         => inbox.RefreshAsync(projectId, recipientId, sessionId, token);

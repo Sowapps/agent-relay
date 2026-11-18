@@ -13,8 +13,8 @@ internal static class ApApprovalCancellationScenarios
         var settings = new ProjectSettingsStore(data);
         settings.Save(new(1, [new(project, "Fixture project")], [new(owner, "Owner", "fixture", "owner"), new(peer, "Peer", "fixture", "peer")],
             [new(workspace, peer, "Fixture workspace", data)],
-            [new(project, owner, "main", [RelayCapabilities.ManageSession, RelayCapabilities.ReadHistory, RelayCapabilities.RunCommand, RelayCapabilities.ReadFile], [new(workspace, true)], ["list"]),
-             new(project, peer, "secondary", [], [])]));
+            [new(project, owner, "main", [RelayCapabilities.ManageSession, RelayCapabilities.ReadHistory, RelayCapabilities.RunCommand, RelayCapabilities.ReadFile, RelayCapabilities.SendMessage], [new(workspace, true)], ["list"]),
+             new(project, peer, "secondary", [RelayCapabilities.ReceiveMessage], [])]));
         var backend = new Fixture(session);
         await using var work = new WorkService(store, backend, () => [new(peer.ToString("D"), true, true)]);
         var app = new RelayApplication(new(settings), work, backend, new ProjectJournal(database));
@@ -27,8 +27,25 @@ internal static class ApApprovalCancellationScenarios
         await RefusesAsync("operation_already_finished", () => app.CancelAsync(caller, finished.Request.Id, token));
         Check(await store.FindAsync(finished.Request.Id, token) == finished, "Cancellation changed a finished result.");
 
+        using (var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+        {
+            var active = Guid.NewGuid();
+            await app.MessageAsync(caller, session.Id, active, "Active fixture", null, deadline.Token);
+            await backend.ActiveMessage.Task.WaitAsync(deadline.Token);
+            await RefusesAsync("busy", () => app.ControlSessionAsync(caller, session.Id, "close", deadline.Token));
+            while (work.IsSessionActive(session.Id))
+                await Task.Delay(10, deadline.Token);
+            var cancelledByClose = await work.ReadAsync(active, token);
+            Check(cancelledByClose is { State: "unknown", CancellationRequestedAt: not null, CancellationConfirmedAt: null },
+                "Closure did not request cancellation and retain in-flight uncertainty.");
+            await store.AttachNativeReplyAsync(active, scope, session.Id, new("fixture", "completed before interruption"),
+                DateTimeOffset.UtcNow, token);
+        }
+
         await store.SaveAsync(new(request, "awaiting_approval", now, now, ErrorCode: "approval_required"), token);
-        await RefusesAsync("operation_cancellation_required", () => app.ControlSessionAsync(caller, session.Id, "close", token));
+        await RefusesAsync("cancellation_unconfirmed", () => app.ControlSessionAsync(caller, session.Id, "close", token));
+        Check((await work.ReadAsync(request.Id, token)).CancellationRequestedAt is not null,
+            "Closing a session with a retained approval did not request cancellation.");
         var cancelled = await app.CancelAsync(caller, request.Id, token);
         Check(cancelled is { State: "awaiting_approval", CancellationRequestedAt: not null, CancellationConfirmedAt: null } && backend.Stops == 0,
             "Cancellation intent was lost or stopped the terminal without an explicit close.");
@@ -70,9 +87,18 @@ internal static class ApApprovalCancellationScenarios
         // The worker has stopped reporting and the native stop is interrupted before proof arrives.
         var race = request with { Id = Guid.NewGuid() };
         await store.SaveAsync(new(race, "awaiting_approval", now, now), token);
-        await app.CancelAsync(caller, race.Id, token);
         backend.OwnedStopVerified = false;
-        await RefusesAsync("cancellation_unconfirmed", () => app.ControlSessionAsync(caller, session.Id, "close", token));
+        backend.TerminalClosed = true;
+        Check((await app.ControlSessionAsync(caller, session.Id, "close", token)).State == "closed",
+            "Terminal closure was blocked by an unverified process stop.");
+        var uncertain = await app.ResultAsync(caller, race.Id, token);
+        Check(uncertain is { State: "unknown", ErrorCode: "session_closed_stop_unconfirmed", SessionClosedAt: not null,
+            CancellationRequestedAt: not null, CancellationConfirmedAt: null },
+            "Closing the terminal must end the approval wait and keep the request unresolved.");
+        Check(ProjectReply.WithCancellation(uncertain).Cancellation is { State: "stop_unconfirmed", NextAction: null, SessionRequiresResolution: false },
+            "The MCP result still treated the terminal as requiring resolution.");
+        await app.ControlSessionAsync(caller, session.Id, "close", token);
+        Check(backend.CloseAttempts == 4, "Repeating a terminal close attempted native confirmation again.");
         var late = new WorkResult("fixture", "original late result");
         await store.AttachNativeReplyAsync(race.Id, scope, session.Id, late, now, token);
         var restarted = new RelayDatabase(data);
@@ -114,7 +140,7 @@ internal static class ApApprovalCancellationScenarios
         Check(resolvedExpiry.State == "completed" && resolvedExpiry.Result == late && resolvedExpiry.ApprovalExpiredAt == now,
             "A correlated late reply lost the expiry or its result.");
 
-        await store.ConfirmApprovalCancellationAsync(finished.Request.Id, token);
+        await store.RecordApprovalSessionClosureAsync(finished.Request.Id, true, token);
         Check(await store.FindAsync(finished.Request.Id, token) == finished, "Stop confirmation overwrote a final result.");
         var native = new SessionService(data, null!, null!, null!);
         var profile = new WslProfile("fixture", "Fixture", "fixture", "fixture", "/fixture", "codex", []);
@@ -129,7 +155,7 @@ internal static class ApApprovalCancellationScenarios
         Check(adopted is not null && WorkExecution.ApprovalStopPending(adopted), "An older retained session fence was discarded during upgrade.");
         await VerifyReceiptTimingAsync(database, store, request, token);
         await VerifyRetainedApprovalIndexAsync(database, store, request, token);
-        Console.WriteLine("AP_APPROVAL_CANCELLATION=PASS (guarded session, receipt ordering, durable expiry, retained approval index)");
+        Console.WriteLine("AP_APPROVAL_CANCELLATION=PASS (active cancellation, terminal closure without stop proof, late reply, expiry, retained index)");
     }
 
     private static async Task VerifyReceiptTimingAsync(RelayDatabase database, SqliteWorkStore store, WorkRequest template, CancellationToken token)
@@ -210,10 +236,13 @@ internal static class ApApprovalCancellationScenarios
     {
         private SessionSnapshot retained = session;
         public bool OwnedStopVerified { get; set; }
+        public bool TerminalClosed { get; set; }
+        public int CloseAttempts { get; private set; }
         public int Stops { get; private set; }
         private int commands;
         public TaskCompletionSource ParallelCommands { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ReleaseCommands { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ActiveMessage { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Task<SessionSnapshot> OpenAsync(SessionDefinition definition, CancellationToken token) => Task.FromResult(retained);
         public Task<SessionSnapshot> GetAsync(Guid id, CancellationToken token) => Task.FromResult(retained);
         public Task<SessionSnapshot> InspectAsync(Guid id, CancellationToken token) => GetAsync(id, token);
@@ -222,17 +251,25 @@ internal static class ApApprovalCancellationScenarios
         public Task<IReadOnlyList<string>> RefreshMessagesAsync(Guid projectId, Guid recipientId, Guid? sessionId, CancellationToken token) => Task.FromResult<IReadOnlyList<string>>([]);
         public async Task<WorkResult> ExecuteAsync(WorkRequest request, CancellationToken token)
         {
-            if (request.Kind != "command" || request.Scope != retained.Scope) throw new InvalidOperationException("Unexpected fixture dispatch.");
+            if (request.Scope != retained.Scope) throw new InvalidOperationException("Unexpected fixture scope.");
+            if (request.Kind == "message")
+            {
+                ActiveMessage.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                throw new InvalidOperationException("Fixture message was not cancelled.");
+            }
+            if (request.Kind != "command") throw new InvalidOperationException("Unexpected fixture dispatch.");
             if (Interlocked.Increment(ref commands) == 2) ParallelCommands.TrySetResult();
             await ReleaseCommands.Task.WaitAsync(token);
             return new("fixture", "done");
         }
-        public Task ConfirmApprovalStopAsync(WorkRequest request, CancellationToken token)
+        public Task<bool> CloseApprovalSessionAsync(WorkRequest request, CancellationToken token)
         {
-            if (!OwnedStopVerified) throw new RelayException("cancellation_unconfirmed", "Fixture writer remains.", false);
-            Stops++;
+            CloseAttempts++;
+            if (!OwnedStopVerified && !TerminalClosed) throw new RelayException("cancellation_unconfirmed", "Fixture terminal remains.", false);
+            if (OwnedStopVerified) Stops++;
             retained = retained with { State = "closed" };
-            return Task.CompletedTask;
+            return Task.FromResult(OwnedStopVerified);
         }
     }
 }

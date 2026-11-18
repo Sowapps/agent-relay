@@ -118,8 +118,8 @@ def recover(root, client, request, stop):
         if stop:
             raise refuse('The native stop has no prepared proof.')
         leader = original[1]
-        if current is None and kernel_changed:
-            # No Linux process from the recorded kernel can survive a kernel reboot, including detached writers.
+        if current is None and (kernel_changed or dispatched_distro == distro):
+            # The dispatch still identifies the session. An absent terminal supplies no prior process inventory.
             terminal, processes = None, {}
         elif current is not None and current[1] == generation and dispatched_distro == distro:
             active = owned_processes()
@@ -127,7 +127,7 @@ def recover(root, client, request, stop):
                 raise refuse('The original process does not own an isolated terminal session.')
             terminal, processes = current[2], tracked(active, leader)
         else:
-            raise refuse('The original runtime cannot be verified. Missing terminal alone cannot rule out detached writers.')
+            raise refuse('The original runtime cannot be verified.')
         proof = {'requestId': identifier, 'dispatchHash': dispatch_hash, 'generation': generation,
                  'distribution': dispatched_distro, 'leader': leader, 'terminal': terminal, 'processes': processes}
         commit(saved, proof)
@@ -154,14 +154,15 @@ def recover(root, client, request, stop):
     deadline = time.monotonic() + 4
     while True:
         remaining = {} if kernel_changed else tracked(owned_processes(), leader, proof['processes'])
-        if pane(root, client) is None and not remaining:
-            if not kernel_changed and submitted.get('allowLocalWork') is not False:
+        terminal_closed = pane(root, client) is None
+        if terminal_closed and not remaining:
+            if not kernel_changed and (proof['terminal'] is None or submitted.get('allowLocalWork') is not False):
                 # A detached writer can disappear from both the SID and ancestry before the first census.
-                raise refuse('The terminal stopped, but this writable launch has no verified process containment. '
-                             'The session stop remains unconfirmed until the original WSL kernel is gone.',
-                             bool(proof.get('stopStarted')))
+                return {'requestId': identifier, 'terminalClosed': True, 'stopped': False}
             return {'requestId': identifier, 'stopped': True}
         if time.monotonic() >= deadline:
+            if terminal_closed:
+                return {'requestId': identifier, 'terminalClosed': True, 'stopped': False}
             raise refuse('Processes of the owned native session remain. The session stays unavailable.',
                          bool(proof.get('stopStarted')))
         time.sleep(.05)

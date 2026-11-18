@@ -196,13 +196,14 @@ public sealed class SessionService
             throw new RelayException("session_retired_for_cancellation", "This native conversation was retired to prevent an abandoned approval from resuming. Use a new session for new work.", false);
     }
 
-    internal async Task ConfirmApprovalStopAsync(RelaySession session, WorkRequest request, CancellationToken token)
+    internal async Task<bool> CloseApprovalSessionAsync(RelaySession session, WorkRequest request, CancellationToken token)
     {
         if (request.Kind != "message" || request.Scope != session.Definition?.Scope || request.SessionId != session.Id ||
             session.RetiredForCancellationId is { } other && other != request.Id)
             throw new RelayException("cancellation_unconfirmed", "The retained request does not identify this native approval.", false);
         var profile = await ResolveAsync(session.Id, session.ProfileId, token, allowClosed: true);
         var proofRequest = new { requestId = request.Id, request.Scope };
+        bool stopped;
         try
         {
             var prepared = await bridge.CallAsync(profile, "prepare_approval_stop", proofRequest, token);
@@ -214,7 +215,8 @@ public sealed class SessionService
                 await store.SaveAsync(session.Id, session, token);
             }
             var proof = await bridge.CallAsync(profile, "confirm_approval_stop", proofRequest, token);
-            DemandApprovalProof(proof, request.Id, "stopped");
+            stopped = proof.TryGetProperty("stopped", out var stopResult) && stopResult.ValueKind == System.Text.Json.JsonValueKind.True;
+            DemandApprovalProof(proof, request.Id, stopped ? "stopped" : "terminalClosed");
         }
         catch (RelayException error) when (error.Code == "approval_already_resolved" && session.RetiredForCancellationId == request.Id)
         {
@@ -222,7 +224,9 @@ public sealed class SessionService
             await store.SaveAsync(session.Id, session with { RetiredForCancellationId = null, UpdatedAt = DateTimeOffset.UtcNow }, token);
             throw;
         }
-        await store.SaveAsync(session.Id, session with { State = "closed", UpdatedAt = DateTimeOffset.UtcNow }, token);
+        if (session.State != "closed")
+            await store.SaveAsync(session.Id, session with { State = "closed", UpdatedAt = DateTimeOffset.UtcNow }, CancellationToken.None);
+        return stopped;
     }
 
     private static void DemandApprovalProof(System.Text.Json.JsonElement proof, Guid requestId, string stage)

@@ -27,8 +27,9 @@ public interface IRelaySessions
     Task<SessionSnapshot> InspectForArchiveAsync(Guid id, CancellationToken token) => InspectAsync(id, token);
     Task<ReadPage<SessionSnapshot>> ListAsync(ReadQuery query, Guid ownerId, CancellationToken token);
     Task<SessionSnapshot> ControlAsync(Guid id, string action, CancellationToken token);
-    Task ConfirmApprovalStopAsync(WorkRequest request, CancellationToken token) =>
-        throw new RelayException("cancellation_unconfirmed", "The native adapter cannot confirm a safe stop for this approval.", false);
+    // Returning false confirms the terminal is closed while process termination remains uncertain.
+    Task<bool> CloseApprovalSessionAsync(WorkRequest request, CancellationToken token) =>
+        throw new RelayException("cancellation_unconfirmed", "The native adapter cannot verify this terminal's closure.", false);
     Task<IReadOnlyList<string>> RefreshMessagesAsync(Guid projectId, Guid recipientId, Guid? sessionId, CancellationToken token);
 }
 
@@ -134,7 +135,11 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
             throw new RelayException("invalid_request", "An approval request can only guard a session close.", false);
         if (action is "start" or "reopen") await work.DemandSessionResolvedAsync(id, token);
         if (action.StartsWith("rename:", StringComparison.Ordinal)) action = "rename:" + SessionNames.Normalize(action[7..]);
-        if (action == "close" && work.IsSessionActive(id)) throw new RelayException("busy", "Inspect or interrupt the active operation before closing the session.");
+        if (action == "close" && work.IsSessionActive(id))
+        {
+            await work.InterruptSessionAsync(id, token);
+            throw new RelayException("busy", "Cancellation requested. Retry closing after the running operation settles.", false);
+        }
         if (action == "close")
         {
             var approvals = await work.RetainedApprovalsAsync(id, token);
@@ -149,17 +154,20 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
             }
             if (approval is not null)
             {
-                if (approval.CancellationRequestedAt is null && approval.ApprovalExpiredAt is null && !WorkExecution.ApprovalStopPending(approval))
-                    throw new RelayException("operation_cancellation_required", "Request cancellation of the retained approval before closing this session.", false);
+                if (approval.SessionClosedAt is not null && approvalRequestId is null)
+                    return await sessions.InspectAsync(id, token);
+                if (approval.CancellationRequestedAt is null && approval.State == "awaiting_approval" && !WorkExecution.ApprovalStopPending(approval))
+                    await work.RequestCancellationAsync(approval.Request.Id, token);
                 if (!await work.BeginApprovalStopAsync(approval.Request.Id, token))
                     throw new RelayException("approval_already_resolved", "The approval reached a result before the stop began. Read its result.", false);
-                try { await sessions.ConfirmApprovalStopAsync(approval.Request, token); }
+                bool stopped;
+                try { stopped = await sessions.CloseApprovalSessionAsync(approval.Request, token); }
                 catch (RelayException error) when (error.Code == "approval_already_resolved")
                 {
                     await work.ClearApprovalStopAsync(approval.Request.Id, CancellationToken.None);
                     throw;
                 }
-                await work.ConfirmApprovalCancellationAsync(approval.Request.Id, token);
+                await work.RecordApprovalSessionClosureAsync(approval.Request.Id, stopped, CancellationToken.None);
                 return await sessions.InspectAsync(id, token);
             }
         }
