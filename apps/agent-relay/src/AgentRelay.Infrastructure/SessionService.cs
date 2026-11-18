@@ -4,7 +4,7 @@ namespace AgentRelay.Infrastructure;
 
 public sealed record RelaySession(Guid Id, string Name, string ProfileId, WslProfile Template, string Root,
     string State, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, string? Diagnostic = null, string? WindowsWorkspace = null,
-    SessionDefinition? Definition = null);
+    SessionDefinition? Definition = null, Guid? RetiredForCancellationId = null);
 public sealed record SessionDetail(RelaySession Session, AgentStatus? Agent = null, bool WorkActive = false);
 
 public sealed class SessionService
@@ -68,6 +68,7 @@ public sealed class SessionService
     {
         var session = await FindAsync(id, token);
         if (session.ProfileId != profileId) throw new RelayException("capability_denied", "Session does not belong to this profile.");
+        if (!allowClosed) DemandResumable(session);
         if ((!allowClosed && session.State == "closed") || session.State is "preparing" or "setup_failed") throw new RelayException("unavailable", "Session is closed or not prepared.");
         var template = settings.Load().Profiles.SingleOrDefault(profile => profile.Id == profileId)
             ?? throw new RelayException("capability_denied", "Session profile was removed.");
@@ -83,7 +84,7 @@ public sealed class SessionService
     {
         var session = await FindAsync(id, token);
         if (session.State is "closed" or "preparing" or "setup_failed") return new(session, WorkActive: active);
-        return new(session, await agents.StatusAsync(await ResolveAsync(id, session.ProfileId, token), token), active);
+        return new(session, await agents.StatusAsync(await ResolveAsync(id, session.ProfileId, token, allowClosed: true), token), active);
     }
 
     public async Task<SessionRuntimeObservation> ObserveAsync(Guid id, AgentStatus status, CancellationToken token)
@@ -145,10 +146,53 @@ public sealed class SessionService
     public async Task<SessionDetail> ReopenAsync(Guid id, CancellationToken token)
     {
         var session = await FindAsync(id, token);
+        DemandResumable(session);
         var profile = await ResolveAsync(id, session.ProfileId, token, allowClosed: true);
         session = session with { State = "created", UpdatedAt = DateTimeOffset.UtcNow };
         await store.SaveAsync(id, session, token);
         return new(session, await agents.StartAsync(profile, token, resume: true));
+    }
+
+    private static void DemandResumable(RelaySession session)
+    {
+        if (session.RetiredForCancellationId is not null)
+            throw new RelayException("session_retired_for_cancellation", "This native conversation was retired to prevent an abandoned approval from resuming. Use a new session for new work.", false);
+    }
+
+    internal async Task ConfirmApprovalStopAsync(RelaySession session, WorkRequest request, CancellationToken token)
+    {
+        if (request.Kind != "message" || request.Scope != session.Definition?.Scope || request.SessionId != session.Id ||
+            session.RetiredForCancellationId is { } other && other != request.Id)
+            throw new RelayException("cancellation_unconfirmed", "The retained request does not identify this native approval.", false);
+        var profile = await ResolveAsync(session.Id, session.ProfileId, token, allowClosed: true);
+        var proofRequest = new { requestId = request.Id, request.Scope };
+        try
+        {
+            var prepared = await bridge.CallAsync(profile, "prepare_approval_stop", proofRequest, token);
+            DemandApprovalProof(prepared, request.Id, "prepared");
+            // Persist the fence before sending any signal. After interruption, closing the same request can resume the proof.
+            if (session.RetiredForCancellationId is null)
+            {
+                session = session with { RetiredForCancellationId = request.Id, UpdatedAt = DateTimeOffset.UtcNow };
+                await store.SaveAsync(session.Id, session, token);
+            }
+            var proof = await bridge.CallAsync(profile, "confirm_approval_stop", proofRequest, token);
+            DemandApprovalProof(proof, request.Id, "stopped");
+        }
+        catch (RelayException error) when (error.Code == "approval_already_resolved" && session.RetiredForCancellationId == request.Id)
+        {
+            // The native adapter only returns this before a stop could have been sent.
+            await store.SaveAsync(session.Id, session with { RetiredForCancellationId = null, UpdatedAt = DateTimeOffset.UtcNow }, token);
+            throw;
+        }
+        await store.SaveAsync(session.Id, session with { State = "closed", UpdatedAt = DateTimeOffset.UtcNow }, token);
+    }
+
+    private static void DemandApprovalProof(System.Text.Json.JsonElement proof, Guid requestId, string stage)
+    {
+        if (!proof.TryGetProperty("requestId", out var id) || !id.TryGetGuid(out var confirmed) || confirmed != requestId ||
+            !proof.TryGetProperty(stage, out var observed) || observed.ValueKind != System.Text.Json.JsonValueKind.True)
+            throw new RelayException("cancellation_unconfirmed", "The native runtime did not confirm the requested cancellation phase.", false);
     }
 
     public async Task<RelaySession> RenameAsync(Guid id, string name, CancellationToken token)

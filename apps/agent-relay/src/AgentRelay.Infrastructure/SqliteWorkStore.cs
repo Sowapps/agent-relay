@@ -56,14 +56,20 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         return await command.ExecuteScalarAsync(token) is string json ? RelayJson.Deserialize<WorkRecord>(json) : null;
     }
 
-    public async Task SaveAsync(WorkRecord record, CancellationToken token)
+    public Task SaveAsync(WorkRecord record, CancellationToken token) =>
+        WriteAsync(record.Request.Id, _ => record, token);
+
+    private async Task WriteAsync(Guid id, Func<WorkRecord?, WorkRecord?> change, CancellationToken token)
     {
         using var connection = database.Open();
         using var transaction = connection.BeginTransaction();
         using var lookup = connection.CreateCommand(); lookup.Transaction = transaction;
-        lookup.CommandText = "SELECT payload FROM work WHERE id=$id"; lookup.Parameters.AddWithValue("$id", record.Request.Id.ToString("D"));
+        lookup.CommandText = "SELECT payload FROM work WHERE id=$id"; lookup.Parameters.AddWithValue("$id", id.ToString("D"));
         var existing = await lookup.ExecuteScalarAsync(token) is string previous ? RelayJson.Deserialize<WorkRecord>(previous) : null;
+        var record = change(existing);
+        if (record is null) return;
         record = record with { CancellationRequestedAt = record.CancellationRequestedAt ?? existing?.CancellationRequestedAt,
+            CancellationConfirmedAt = record.CancellationConfirmedAt ?? existing?.CancellationConfirmedAt,
             Progress = record.Progress ?? existing?.Progress };
         if (record.State == "completed" && record.Progress is { } progress) record = record with { Progress = progress with { Phase = "completed", Bytes = progress.TotalBytes } };
         using var command = connection.CreateCommand();
@@ -87,9 +93,34 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
     public async Task RequestCancellationAsync(Guid id, CancellationToken token)
     {
         using var connection = database.Open(); using var command = connection.CreateCommand();
-        command.CommandText = $"UPDATE work SET payload=json_set(payload,'$.cancellationRequestedAt',$at) WHERE id=$id AND {ActiveState} AND json_extract(payload,'$.cancellationRequestedAt') IS NULL";
+        command.CommandText = $"UPDATE work SET payload=json_set(payload,'$.cancellationRequestedAt',$at) WHERE id=$id AND ({ActiveState} OR json_extract(payload,'$.state')='awaiting_approval') AND json_extract(payload,'$.cancellationRequestedAt') IS NULL";
         command.Parameters.AddWithValue("$id", id.ToString("D")); command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O")); await command.ExecuteNonQueryAsync(token);
     }
+
+    public async Task<IReadOnlyList<WorkRecord>> AwaitingApprovalAsync(Guid sessionId, CancellationToken token)
+    {
+        using var connection = database.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = "SELECT payload FROM work WHERE json_extract(payload,'$.request.sessionId')=$id AND json_extract(payload,'$.state')='awaiting_approval' LIMIT 2";
+        command.Parameters.AddWithValue("$id", sessionId.ToString("D"));
+        using var reader = await command.ExecuteReaderAsync(token);
+        var records = new List<WorkRecord>();
+        while (await reader.ReadAsync(token)) records.Add(RelayJson.Deserialize<WorkRecord>(reader.GetString(0)));
+        return records;
+    }
+
+    public Task ConfirmApprovalCancellationAsync(Guid id, CancellationToken token) => WriteAsync(id, record =>
+    {
+        if (record is not { State: "awaiting_approval", CancellationRequestedAt: not null }) return null;
+        var now = DateTimeOffset.UtcNow;
+        return record with
+        {
+            State = "unknown",
+            ErrorCode = "cancelled_effects_unconfirmed",
+            Error = "Native continuation was stopped. Earlier effects were not confirmed.",
+            UpdatedAt = now, CancellationConfirmedAt = now
+        };
+    }, token);
 
     public async Task<IReadOnlyList<WorkRecord>> ListAsync(CancellationToken token)
     {

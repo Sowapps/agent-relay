@@ -39,6 +39,8 @@ public sealed class RelayDatabase
             CREATE TABLE IF NOT EXISTS dispatches(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
             CREATE INDEX IF NOT EXISTS event_project_task ON work_events(json_extract(payload,'$.projectId'),json_extract(payload,'$.taskId'));
             CREATE INDEX IF NOT EXISTS work_project ON work(json_extract(payload,'$.request.scope.projectId'));
+            CREATE INDEX IF NOT EXISTS work_session_approval ON work(json_extract(payload,'$.request.sessionId'))
+                WHERE json_extract(payload,'$.state')='awaiting_approval';
             CREATE INDEX IF NOT EXISTS inbox_project_recipient ON inbox(json_extract(payload,'$.projectId'),json_extract(payload,'$.recipientEndpointId'));
             PRAGMA user_version=4;
             """;

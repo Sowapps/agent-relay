@@ -147,8 +147,7 @@ def start(root, client, allow_work=False, resume=False, require_pinned=False):
     return {'available': True, 'modelPromptSent': False}
 
 
-def control(root, client, stop=False):
-    """Close/interrupt only an owned session; @see start and provision-wsl.py for identity creation."""
+def owned_session_root(root):
     import pwd
     root = root_path(root)
     marker = root / 'provision-owner.json'
@@ -158,6 +157,12 @@ def control(root, client, stop=False):
     identifier = uuid.UUID(owner.get('sessionId') or '')
     if not load_layout().is_session(root, identifier) or owner != {'sessionId': str(identifier), 'user': pwd.getpwuid(os.getuid()).pw_name}:
         raise NativeFailure('capability_denied', 'Lifecycle control is restricted to relay-created session roots', False)
+    return root, str(identifier)
+
+
+def control(root, client, stop=False):
+    """Close/interrupt only an owned session; @see start and provision-wsl.py for identity creation."""
+    root, _ = owned_session_root(root)
     if tmux(root, 'has-session', '-t', client, check=False).returncode:
         return {'available': False, 'alreadyStopped': True}
     tmux(root, 'kill-session' if stop else 'send-keys', '-t', client, *([] if stop else ['C-c']))
@@ -165,8 +170,12 @@ def control(root, client, stop=False):
 
 
 def _process_stat(pid):
-    fields = Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()
+    fields = _process_fields(pid)
     return int(fields[1]), int(fields[19])
+
+
+def _process_fields(pid):
+    return Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()
 
 
 def process_stamp(pid):
@@ -251,7 +260,8 @@ def send(root, client, request):
         raise NativeFailure('capability_denied', 'Permissions changed; restart the dedicated session before sending.', False)
     current = status(root, client)
     if current.get('authenticated') is False:raise NativeFailure('agent_authentication_required', 'Native account is not connected.', False)
-    if current.get('awaitingApproval'):raise RuntimeError('approval_required: native terminal is waiting for human approval; no new prompt was sent')
+    if current.get('awaitingApproval'):
+        raise NativeFailure('session_awaiting_approval', 'The terminal is waiting for an earlier approval. No new prompt was sent.', False)
     if any(value in current['pane'].lower() for value in AUTH_ATTENTION):
         raise NativeFailure('agent_authentication_required', 'Native client login must be renewed by the operator.', False)
     if not current['available'] or not current['mcpInitialized']:

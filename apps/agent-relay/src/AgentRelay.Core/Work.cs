@@ -8,7 +8,8 @@ public sealed record WorkResult(string Origin, string Output, string ErrorOutput
     IReadOnlyDictionary<string, string>? Details = null);
 public sealed record WorkRecord(WorkRequest Request, string State, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,
     WorkResult? Result = null, string? Error = null, string? ErrorCode = null, WorkMetadata? Metadata = null, WorkProgress? Progress = null,
-    DateTimeOffset? CancellationRequestedAt = null, bool DispatchBoundaryTracked = false);
+    DateTimeOffset? CancellationRequestedAt = null, bool DispatchBoundaryTracked = false,
+    DateTimeOffset? CancellationConfirmedAt = null);
 public sealed record WorkProgress(long Bytes, long TotalBytes, string Phase, DateTimeOffset UpdatedAt);
 public sealed record WorkEvent(Guid Id, Guid RequestId, Guid? ProjectId, Guid? TaskId, Guid? AttemptId, Guid? SessionId,
     Guid? EndpointId, string State, DateTimeOffset OccurredAt, string? ErrorCode = null);
@@ -24,6 +25,10 @@ public interface IWorkStore
     Task<IReadOnlyList<WorkRecord>> ListAsync(CancellationToken token);
     Task RecoverAsync(CancellationToken token);
     Task RequestCancellationAsync(Guid id, CancellationToken token) => Task.CompletedTask;
+    Task<IReadOnlyList<WorkRecord>> AwaitingApprovalAsync(Guid sessionId, CancellationToken token) =>
+        Task.FromResult<IReadOnlyList<WorkRecord>>([]);
+    Task ConfirmApprovalCancellationAsync(Guid id, CancellationToken token) =>
+        throw new RelayException("cancellation_unavailable", "This work store cannot retain a cancellation confirmation.", false);
 }
 
 public interface IWorkExecutor
@@ -99,6 +104,8 @@ public sealed class WorkService : IAsyncDisposable
             }
             else
             {
+                if (request.SessionId is { } targetSession && (await store.AwaitingApprovalAsync(targetSession, token)).Count != 0)
+                    throw new RelayException("session_awaiting_approval", "A retained approval still belongs to this session. Resolve it before submitting new work.", false);
                 if (preparing.Values.Any(item => item.Key == key) || running.TryGetValue(key, out var active) && !active.IsCompleted)
                     throw new RelayException("busy", "This session already has an active operation.", false);
                 if (preparing.Count + running.Values.Count(task => !task.IsCompleted) >= maximumConcurrency)
@@ -177,6 +184,22 @@ public sealed class WorkService : IAsyncDisposable
         try { return operationKeys.TryGetValue(id, out var key) && running.TryGetValue(key, out var task) && !task.IsCompleted; }
         finally { admission.Release(); }
     }
+
+    public Task<IReadOnlyList<WorkRecord>> AwaitingApprovalAsync(Guid sessionId, CancellationToken token) =>
+        store.AwaitingApprovalAsync(sessionId, token);
+
+    public async Task<WorkRecord> RequestCancellationAsync(Guid id, CancellationToken token)
+    {
+        await store.RequestCancellationAsync(id, token);
+        var record = await ReadAsync(id, token);
+        if (record.State is "completed" or "failed" || record.CancellationConfirmedAt is not null)
+            throw new RelayException("operation_already_finished", "The operation is already finished and cannot be cancelled.", false);
+        if (record.State is not ("pending" or "running" or "awaiting_approval") || record.CancellationRequestedAt is null)
+            throw new RelayException("cancellation_unavailable", "This operation has no confirmed cancellable activity. Inspect the retained result.", false);
+        return record;
+    }
+
+    public Task ConfirmApprovalCancellationAsync(Guid id, CancellationToken token) => store.ConfirmApprovalCancellationAsync(id, token);
 
     private async Task ExecuteAsync(WorkRecord record, CancellationToken token, IPreparedWork? prepared)
     {

@@ -18,7 +18,7 @@ Start each authorized workstream with a functioning tracked objective matching i
 
 The handoff checkpoint contains authorization/limits, objective, branch and last delivered commit, decisions and their owners, completed checks with retained output locations, unresolved risks and the exact next action. Before resuming, read AGENTS, the design guide and the relevant application decision/workstream, then inspect repository and objective state. An old GO or old test is not new authorization or fresh evidence.
 
-Before coding, identify the nominal scenario, important failure, ownership boundaries and structural prerequisites.
+Every implementation, fix or improvement starts with proportionate analysis and design, even when the request only asks for code. Before coding, identify the nominal scenario, important failure, ownership boundaries and structural prerequisites.
 Compare meaningful alternatives, make routine technical choices and record their reasons. Ask the operator about product choices or authorization, not unfamiliar technical details.
 
 For a significant workstream, define the target first: required behavior, responsibility boundaries, contracts, invariants, failure/recovery guarantees and explicit limitations. Do not constrain it to preserving a flawed existing decomposition. Compare meaningful alternatives and challenge the target against requirements, existing rules, security, compatibility, concurrency, interruption, deployment and maintenance. Revise until another focused review finds no new concrete contradiction; record review passes and unresolved items rather than claiming exhaustive certainty. Only then derive the gap map and intermediate lots (evidence `2026-11-13-target-first-point-planning`).

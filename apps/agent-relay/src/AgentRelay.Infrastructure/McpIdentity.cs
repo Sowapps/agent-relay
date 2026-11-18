@@ -74,6 +74,10 @@ public static class McpErrors
             "relay_start_failed" => "start_relay_or_contact_maintainer",
             "maintenance" => "wait_for_relay_maintenance",
             "workspace_busy" => "inspect_workspace_holder",
+            "operation_cancellation_required" => "cancel_operation_then_close_session",
+            "approval_already_resolved" => "read_inbox",
+            "cancellation_unconfirmed" => "inspect_native_cancellation",
+            "session_retired_for_cancellation" => "open_new_session",
             "workspace_unavailable" or "workspace_identity_changed" => "verify_workspace_assignment",
             "session_not_ready" or "session_generation_changed" or "session_awaiting_approval" or "context_lost" => "inspect_session",
             _ => "inspect_before_retry"

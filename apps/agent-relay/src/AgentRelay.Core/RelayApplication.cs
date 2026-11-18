@@ -26,6 +26,8 @@ public interface IRelaySessions
     Task<SessionSnapshot> InspectAsync(Guid id, CancellationToken token);
     Task<ReadPage<SessionSnapshot>> ListAsync(ReadQuery query, Guid ownerId, CancellationToken token);
     Task<SessionSnapshot> ControlAsync(Guid id, string action, CancellationToken token);
+    Task ConfirmApprovalStopAsync(WorkRequest request, CancellationToken token) =>
+        throw new RelayException("cancellation_unconfirmed", "The native adapter cannot confirm a safe stop for this approval.", false);
     Task<IReadOnlyList<string>> RefreshMessagesAsync(Guid projectId, Guid recipientId, Guid? sessionId, CancellationToken token);
 }
 
@@ -128,6 +130,19 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
             throw new RelayException("invalid_operation", "Unknown session action.");
         if (action.StartsWith("rename:", StringComparison.Ordinal)) action = "rename:" + SessionNames.Normalize(action[7..]);
         if (action == "close" && work.IsSessionActive(id)) throw new RelayException("busy", "Inspect or interrupt the active operation before closing the session.");
+        if (action == "close")
+        {
+            var approvals = await work.AwaitingApprovalAsync(id, token);
+            if (approvals.Count > 1) throw new RelayException("cancellation_unconfirmed", "More than one retained approval belongs to this session. The native owner cannot be selected safely.", false);
+            if (approvals.SingleOrDefault() is { } approval)
+            {
+                if (approval.CancellationRequestedAt is null)
+                    throw new RelayException("operation_cancellation_required", "Request cancellation of the retained approval before closing this session.", false);
+                await sessions.ConfirmApprovalStopAsync(approval.Request, token);
+                await work.ConfirmApprovalCancellationAsync(approval.Request.Id, token);
+                return await sessions.InspectAsync(id, token);
+            }
+        }
         var result = await sessions.ControlAsync(session.Id, action, token);
         if (action == "interrupt") await work.InterruptSessionAsync(id, token);
         return result;
@@ -196,7 +211,8 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
         if (record.Request.SessionId is not { } id) throw new RelayException("capability_denied", "Only session operations support targeted cancellation.");
         using var lease = await Gate(id, token);
         await OwnedAsync(caller, id, RelayCapabilities.ManageSession, token);
-        if (await work.IsOperationActiveAsync(requestId, token))
+        record = await work.RequestCancellationAsync(requestId, token);
+        if (record.State != "awaiting_approval" && await work.IsOperationActiveAsync(requestId, token))
         {
             if (record.Request.Kind == "message") await sessions.ControlAsync(id, "interrupt", token);
             await work.InterruptSessionAsync(id, token);

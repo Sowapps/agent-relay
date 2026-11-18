@@ -23,7 +23,7 @@ public sealed class ScopedSessions(SessionService sessions, AgentControl agents,
         var record = await context.RecordAsync(id, token);
         context.ValidateDefinition(record.Definition!);
         if (record.State is "closed" or "preparing" or "setup_failed") return Snapshot(record);
-        var agent = await agents.StatusAsync(await sessions.ResolveAsync(id, record.ProfileId, token), token);
+        var agent = await agents.StatusAsync(await sessions.ResolveAsync(id, record.ProfileId, token, allowClosed: true), token);
         var observation = await sessions.ObserveAsync(id, agent, token);
         return Snapshot(record) with { State = agent.State, Diagnostic = agent.Message, NativeConversationId = agent.NativeConversationId, Runtime = observation };
     }
@@ -51,6 +51,12 @@ public sealed class ScopedSessions(SessionService sessions, AgentControl agents,
     }
 
     private SessionSnapshot Snapshot(RelaySession record) => new(record.Id, record.Name, record.Definition!.Scope, record.State, Diagnostic: record.Diagnostic, WorkActive: active(record.Id));
+    public async Task ConfirmApprovalStopAsync(WorkRequest request, CancellationToken token)
+    {
+        var record = await context.RecordAsync(request.SessionId!.Value, token);
+        context.ValidateDefinition(record.Definition!);
+        await sessions.ConfirmApprovalStopAsync(record, request, token);
+    }
     public Task<IReadOnlyList<string>> RefreshMessagesAsync(Guid projectId, Guid recipientId, Guid? sessionId, CancellationToken token)
         => inbox.RefreshAsync(projectId, recipientId, sessionId, token);
 }

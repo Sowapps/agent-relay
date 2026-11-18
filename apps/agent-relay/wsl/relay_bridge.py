@@ -6,6 +6,7 @@ import sys
 import uuid
 from relay_files import commit, messages, root_path, context, message_page, workspace
 import native_clients
+import approval_stop
 from transfer_files import transfer
 from native_errors import envelope
 
@@ -25,6 +26,8 @@ def main():
                                     request.get('requirePinnedConversation', False))
     if action in ['stop', 'interrupt'] and profile != 'command':
         return native_clients.control(root, profile, action == 'stop')
+    if action in ['prepare_approval_stop', 'confirm_approval_stop'] and profile != 'command':
+        return approval_stop.recover(root, profile, request, action == 'confirm_approval_stop')
     if action == 'inbox':
         if profile=='command':return {'messages':[]}
         return message_page(root,profile,request.get('after',0),request.get('limit',50)) if context(root,profile) else {'messages':messages(root,profile)}

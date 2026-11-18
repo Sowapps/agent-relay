@@ -44,9 +44,9 @@ Parameters ending in `_id` are UUIDs, except `command_id` which is a configured 
 | send_session_message | session_id, text | request_id, task_id; starts an authorized model turn |
 | send_agent_message | session_id, text | request_id, task_id; compatibility alias |
 | interrupt_session | session_id | Request interruption, not rollback |
-| close_session | session_id | Close idle terminal, retain identity/history |
+| close_session | session_id | Close an idle terminal or verify the stop of a retained approval after explicit cancellation |
 | get_result | request_id | Retained result; uncertain receipt recovery never replays execution |
-| cancel_operation | request_id | Targeted cancellation request, not rollback |
+| cancel_operation | request_id | Record targeted cancellation; refuse finished work |
 | inspect_transfer | request_id | Inspect owned partial of an idle transfer |
 | cleanup_transfer | request_id | Explicitly remove only owned temporary partial, preserve final file |
 | list_results | project_id | Query fields below; newest-first previews |
@@ -65,6 +65,14 @@ Tool results include MCP content plus structuredContent. The project reply holds
 Before accepting a new message, the relay verifies that the assigned session is ready. A caller with both message and session management grants can trigger a model-free restart of a stopped session only when the original native conversation can be verified. `session_not_ready`, `session_awaiting_approval` or `context_lost` call for session inspection. A generation change before injection can fail an already accepted request without dispatch. An unconfirmed injection remains uncertain; retain its ID and inspect the result or correlated inbox reply. Never replay it.
 
 `workspace_busy` with `execution: not_started` means the requested surface overlaps a reservation. Holder identifiers are shown only to the same authorized project principal. Inspect the holder result or refresh its inbox when accessible. Other workspaces remain independently available. `workspace_unavailable` and `workspace_identity_changed` require checking the assigned path. A directory replacement needs an explicit reviewed workspace assignment. Git branch changes and local edits do not affect the assignment.
+
+### Cancel a retained approval
+
+1. Call `cancel_operation` with the original request ID. A finished request returns `operation_already_finished`. For `awaiting_approval`, the relay records `cancellationRequestedAt` and leaves the reservation in place. Repeating cancellation while pending preserves the original timestamp.
+2. If the approval remains pending and you intend to retire that conversation, call `close_session` on its session. The relay checks the original dispatch and native generation, then verifies that the managed terminal and the processes attributed to it have stopped. `cancellation_unconfirmed` keeps the reservation in place if the relay cannot prove the stop. If a final reply arrived before the stop, `approval_already_resolved` directs you to `read_inbox`.
+3. After a verified stop, `get_result` includes `cancellationConfirmedAt` and may report `unknown` with `cancelled_effects_unconfirmed`. This timestamp confirms the stop and permits reuse of the workspace. Past effects still require inspection. The retired conversation remains available in history. Use a new session ID for new work.
+
+This verification applies to the relay-owned WSL terminal and processes attributable to it. It cannot establish what ran independently outside that scope or undo changes already written.
 
 ## Active and archived projects
 
