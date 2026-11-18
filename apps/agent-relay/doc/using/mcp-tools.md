@@ -64,7 +64,7 @@ Tool results include MCP content plus structuredContent. The project reply holds
 
 Before accepting a new message, the relay verifies that the assigned session is ready. A caller with both message and session management grants can trigger a model-free restart of a stopped session only when the original native conversation can be verified. `session_not_ready`, `session_awaiting_approval` or `context_lost` call for session inspection. A generation change before injection can fail an already accepted request without dispatch. An unconfirmed injection remains uncertain; retain its ID and inspect the result or correlated inbox reply. Never replay it.
 
-Authorized commands and distinct sessions can use the same workspace concurrently, within the host capacity. The project owns coordination of its files and Git operations. A scoped transfer can return `transfer_destination_busy` if another transfer is writing to the same destination file. `workspace_unavailable` and `workspace_identity_changed` require checking the assigned path. A directory replacement needs an explicit reviewed workspace assignment.
+Authorized commands and distinct sessions can use the same workspace concurrently, within the host capacity. When you use this MCP, coordinate concurrent access to files and Git operations according to your project's rules. A scoped transfer can return `transfer_destination_busy` if another transfer is writing to the same destination file. `workspace_unavailable` and `workspace_identity_changed` require checking the assigned path. A directory replacement needs an explicit reviewed workspace assignment.
 
 ### Cancel a retained approval
 
