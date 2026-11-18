@@ -34,7 +34,8 @@ public sealed partial class InstallationUpdate
             var request = RelayJson.Serialize(new
             {
                 action = "approval-history", session = new { session.Id, session.Root, template = new { session.Template.User } },
-                session.Template.Client, requestId = work.Request.Id, scope, updated = work.UpdatedAt.ToUnixTimeSeconds(),
+                session.Template.Client, requestId = work.Request.Id, scope,
+                updated = ApprovalExpiry.StartedAt(work).ToUnixTimeSeconds(),
                 layoutSource = Convert.ToBase64String(ReadHelper("native_layout.py")), layoutDefinition = Convert.ToBase64String(ReadHelper("native-layout.json"))
             });
             var script = System.Text.Encoding.UTF8.GetString(ReadHelper("session_adapter_files.py"));

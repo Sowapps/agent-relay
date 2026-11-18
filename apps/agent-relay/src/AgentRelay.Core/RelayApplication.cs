@@ -148,7 +148,7 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
             }
             if (approval is not null)
             {
-                if (approval.CancellationRequestedAt is null)
+                if (approval.CancellationRequestedAt is null && approval.ApprovalExpiredAt is null)
                     throw new RelayException("operation_cancellation_required", "Request cancellation of the retained approval before closing this session.", false);
                 if (!await work.BeginApprovalStopAsync(approval.Request.Id, token))
                     throw new RelayException("approval_already_resolved", "The approval reached a result before the stop began. Read its result.", false);

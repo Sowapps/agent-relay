@@ -13,11 +13,11 @@ public sealed record EndpointDescriptor(Guid EndpointId, string Connector, strin
 
 public static class MonitorProjection
 {
-    public static bool NeedsAttention(string state) => state is "unknown" or "failed" or "awaiting_approval" or "blocked";
+    public static bool NeedsAttention(string state) => state is "unknown" or "failed" or "awaiting_approval" or "approval_expired" or "blocked";
     public static string AggregateState(IEnumerable<string> states)
     {
         var values = states.ToHashSet(StringComparer.Ordinal);
-        foreach (var state in new[] { "unknown", "blocked", "awaiting_approval", "failed", "running", "pending" })
+        foreach (var state in new[] { "unknown", "blocked", "awaiting_approval", "approval_expired", "failed", "running", "pending" })
             if (values.Contains(state)) return state;
         return values.Count == 0 ? "idle" : "completed";
     }

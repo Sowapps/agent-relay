@@ -43,6 +43,8 @@ Closing a retained approval records a stop intent before contacting the adapter.
 
 An isolated WSL test showed that a detached process cannot outlive PID 1 in a private PID namespace. This qualifies the operating-system primitive only. Integrating it requires terminal, provider sandbox, identity and shutdown checks for managed native launches. Existing sessions keep the conservative recovery rule.
 
+The host expires an outstanding approval two hours after its recorded wait began. It checks at startup and every 30 seconds under the maintenance admission boundary, in bounded batches. The work row and expiry event are committed together. Older rows use their recorded approval update time. Expiry alone cannot confirm native stop; session reuse, archival and live maintenance still require their existing proofs. The updater tests historical WSL approvals against their original wait timestamp, even after an expiry event.
+
 ## Project lifecycle and admission
 
 Configuration version1 retains enabled as the compatible state source: true is active, false archived; state is derived. Project IDs, memberships, grants, credentials and journals survive transitions. Scoped discovery includes archived projects. ProjectPolicy permits their retained history and inbox reads but refuses new work/session mutations/host inspection/file access; archived session/result/inbox reads skip native inspection, recovery and import. Lifecycle authority is the explicit project.manage capability, independent of role; local authenticated administration invokes the same use case without impersonating an endpoint.

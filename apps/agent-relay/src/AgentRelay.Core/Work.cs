@@ -9,7 +9,14 @@ public sealed record WorkResult(string Origin, string Output, string ErrorOutput
 public sealed record WorkRecord(WorkRequest Request, string State, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,
     WorkResult? Result = null, string? Error = null, string? ErrorCode = null, WorkMetadata? Metadata = null, WorkProgress? Progress = null,
     DateTimeOffset? CancellationRequestedAt = null, bool DispatchBoundaryTracked = false,
-    DateTimeOffset? CancellationConfirmedAt = null, DateTimeOffset? ApprovalStopRequestedAt = null);
+    DateTimeOffset? CancellationConfirmedAt = null, DateTimeOffset? ApprovalStopRequestedAt = null,
+    DateTimeOffset? ApprovalWaitingSince = null, DateTimeOffset? ApprovalExpiredAt = null);
+
+public static class ApprovalExpiry
+{
+    public static TimeSpan WaitingLimit { get; } = TimeSpan.FromHours(2);
+    public static DateTimeOffset StartedAt(WorkRecord record) => record.ApprovalWaitingSince ?? record.UpdatedAt;
+}
 
 /// <summary>Execution evidence is independent of a result received during an explicit stop.</summary>
 public static class WorkExecution
@@ -212,7 +219,7 @@ public sealed class WorkService : IAsyncDisposable
     {
         await store.RequestCancellationAsync(id, token);
         var record = await ReadAsync(id, token);
-        if (record.State is "completed" or "failed" || record.CancellationConfirmedAt is not null)
+        if (record.State is "completed" or "failed" or "approval_expired" || record.CancellationConfirmedAt is not null)
             throw new RelayException("operation_already_finished", "The operation is already finished and cannot be cancelled.", false);
         if (record.State is not ("pending" or "running" or "awaiting_approval") || record.CancellationRequestedAt is null)
             throw new RelayException("cancellation_unavailable", "This operation has no confirmed cancellable activity. Inspect the retained result.", false);
@@ -241,9 +248,10 @@ public sealed class WorkService : IAsyncDisposable
             var state = error is RelayException { EffectsPossible: true } ? "unknown" : error is RelayException { Code: "approval_required" } ? "awaiting_approval" :
                 error is RelayException { EffectsPossible: false } ? "failed" :
                 error is RelayException { Code: "unavailable" or "command_denied" or "authentication_required" or "agent_authentication_required" or "credential_reference_unavailable" or "capability_denied" or "invalid_path" or "destination_exists" or "busy" } ? "failed" : "unknown";
+            var observedAt = DateTimeOffset.UtcNow;
             await store.SaveAsync(record with { State = state, Error = error.Message,
                 ErrorCode = error is RelayException relay ? relay.Code : error is TimeoutException ? "timeout" : "execution_unknown",
-                UpdatedAt = DateTimeOffset.UtcNow }, CancellationToken.None).ConfigureAwait(false);
+                UpdatedAt = observedAt, ApprovalWaitingSince = state == "awaiting_approval" ? observedAt : null }, CancellationToken.None).ConfigureAwait(false);
         }
     }
 

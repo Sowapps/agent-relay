@@ -18,12 +18,13 @@ public sealed record CancellationProgress(Guid SessionId, string State, string? 
 {
     internal static CancellationProgress? From(WorkRecord operation)
     {
-        if (operation.CancellationRequestedAt is null || operation.Request.SessionId is not { } sessionId) return null;
+        if (operation is { CancellationRequestedAt: null, ApprovalExpiredAt: null } || operation.Request.SessionId is not { } sessionId) return null;
         if (operation.CancellationConfirmedAt is not null) return new(sessionId, "stop_confirmed", null, false);
         if (WorkExecution.ApprovalStopPending(operation)) return new(sessionId, "stop_unconfirmed", "close_session", true);
         return operation.State switch
         {
             "awaiting_approval" => new(sessionId, "close_required", "close_session", true),
+            "approval_expired" => new(sessionId, "approval_expired", "close_session", true),
             "completed" or "failed" => new(sessionId, "finished", null, false),
             _ => new(sessionId, "requested", "get_result", false)
         };
@@ -60,6 +61,7 @@ public sealed class ProjectCoordinator : IAsyncDisposable
         archiveLoop = Task.Run(async () =>
         {
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+            var nextApprovalSweep = DateTimeOffset.MinValue;
             try
             {
                 while (await timer.WaitForNextTickAsync(archiveStop.Token))
@@ -67,7 +69,14 @@ public sealed class ProjectCoordinator : IAsyncDisposable
                     try
                     {
                         using var admission = promotion.TryEnter();
-                        if (admission is not null) await Application.ReconcileArchivesAsync(archiveStop.Token);
+                        if (admission is null) continue;
+                        var now = DateTimeOffset.UtcNow;
+                        if (now >= nextApprovalSweep)
+                        {
+                            nextApprovalSweep = now.AddSeconds(30);
+                            await store.ExpireDueApprovalsAsync(now, archiveStop.Token);
+                        }
+                        await Application.ReconcileArchivesAsync(archiveStop.Token);
                     }
                     catch (Exception error) when (!archiveStop.IsCancellationRequested) { reportError?.Invoke(error); }
                 }

@@ -32,6 +32,9 @@ internal static class McpStableFacadeScenarios
         var submitted = new WorkRequest(request, peer.Id.ToString("D"), "message", "retained fixture", SessionId: session, Scope: scope);
         await store.SaveAsync(new(submitted, "completed", now, now), CancellationToken.None);
         await store.SaveAsync(new(submitted with { Id = awaiting }, "awaiting_approval", now, now, ErrorCode: "approval_required"), CancellationToken.None);
+        var due = Guid.NewGuid();
+        var oldWait = now.AddHours(-3);
+        await store.SaveAsync(new(submitted with { Id = due }, "awaiting_approval", oldWait, oldWait), CancellationToken.None);
         var errors = new List<Exception>();
         await using var host = RelayRuntime.Start(data, errors.Add);
         var client = new RelayPipeClient(data, binding);
@@ -78,6 +81,14 @@ internal static class McpStableFacadeScenarios
         Check(confirmed.GetProperty("operation").GetProperty("state").GetString() == "unknown" &&
             progress.GetProperty("state").GetString() == "stop_confirmed" && progress.GetProperty("nextAction").ValueKind == JsonValueKind.Null &&
             !progress.GetProperty("sessionRequiresResolution").GetBoolean(), "MCP distinguishes confirmed stop from historical effects");
+        using (var expiryDeadline = new CancellationTokenSource(TimeSpan.FromSeconds(8)))
+            while ((await store.FindAsync(due, expiryDeadline.Token))?.State == "awaiting_approval")
+                await Task.Delay(100, expiryDeadline.Token);
+        var expiry = await Call("get_result", new { request_id = due });
+        Check(expiry.GetProperty("operation").GetProperty("approvalExpiredAt").GetDateTimeOffset() == oldWait + ApprovalExpiry.WaitingLimit &&
+              expiry.GetProperty("cancellation").GetProperty("nextAction").GetString() == "close_session" &&
+              expiry.GetProperty("cancellation").GetProperty("state").GetString() == "approval_expired",
+            "Host startup did not expire a retained approval, or MCP omitted its recovery");
         Check(Error(await Call("invoke_operation", new { call_id = Guid.NewGuid(), operation_id = "list_projects", revision = 1, arguments = new { } }, "wrong")) == "transport_incompatible", "Incompatible wire admission");
         await connections.RevokeAsync(binding, CancellationToken.None);
         Check(Error(await Call("get_connection_status", new { })) == "authentication_required", "Revoked credential access");

@@ -4,7 +4,7 @@ namespace AgentRelay.Windows;
 
 internal static class UserMessages
 {
-    public static string WorkState(string state) => state switch { "pending" => "En attente", "running" => "En cours", "completed" => "Terminé", "failed" => "Échec", "awaiting_approval" => "Autorisation attendue", _ => "À confirmer" };
+    public static string WorkState(string state) => state switch { "pending" => "En attente", "running" => "En cours", "completed" => "Terminé", "failed" => "Échec", "awaiting_approval" => "Autorisation attendue", "approval_expired" => "Approbation expirée", _ => "À confirmer" };
     public static string Error(string? code) => code switch
     {
         "project_draining" => "Archivage en cours : les nouveaux travaux sont suspendus. Le travail engagé peut se terminer.",
@@ -30,6 +30,7 @@ internal static class UserMessages
         "approval_already_resolved" => "Une réponse finale est arrivée. Consultez le résultat ou les messages.",
         "approval_stop_mismatch" => "Cette opération n’attend plus de fermeture dans cette session. Consultez son résultat.",
         "cancellation_unconfirmed" => "L’arrêt reste à vérifier avant de réutiliser cette session.",
+        "approval_expired" => "Le délai d’approbation est écoulé. Vérifiez la session avant de la réutiliser.",
         "transfer_destination_busy" => "Un transfert écrit déjà vers ce fichier.",
         "cancelled_effects_unconfirmed" => "L’arrêt est confirmé. Les effets déjà produits restent à vérifier.",
         "not_found" => "Cette opération ou cette destination n’est plus disponible.",
@@ -45,6 +46,7 @@ internal static class UserMessages
     public static string Cancellation(string state) => state switch
     {
         "close_required" => "Annulation enregistrée. Vous pouvez fermer la session liée pour vérifier l’arrêt.",
+        "approval_expired" => "Approbation expirée. Vous pouvez fermer la session liée pour vérifier l’arrêt.",
         "stop_unconfirmed" => "Fermeture en attente de preuve. La session reste indisponible.",
         "stop_confirmed" => "Arrêt confirmé. Ouvrez une nouvelle session pour poursuivre.",
         "finished" => "L’opération a atteint un résultat final.",

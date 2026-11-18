@@ -1,6 +1,6 @@
 // Pure presentation helpers: identities, capabilities, task aggregates and shared filters.
 window.RelayModel = (() => {
- const attentionStates=['unknown','blocked','attention','failed'];
+ const attentionStates=['unknown','blocked','attention','approval_expired','failed'];
  const needsAttention=item=>attentionStates.includes(item.state)&&!item.reviewed;
  const participant=(data,id)=>data.participants.find(p=>p.id===id);
  const session=(data,id)=>data.sessions.find(s=>s.id===id);

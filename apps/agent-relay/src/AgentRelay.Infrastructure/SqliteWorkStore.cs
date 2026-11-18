@@ -6,7 +6,9 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
 {
     private const string ActiveState = "json_extract(payload,'$.state') IN ('pending','running')";
     internal const string PendingApprovalStop = "json_extract(payload,'$.approvalStopRequestedAt') IS NOT NULL AND json_extract(payload,'$.cancellationConfirmedAt') IS NULL";
-    internal const string RetainedApproval = "json_extract(payload,'$.state')='awaiting_approval' OR (" + PendingApprovalStop + ")";
+    internal const string RetainedApproval = "json_extract(payload,'$.state')='awaiting_approval' OR (" +
+        "json_extract(payload,'$.state')='approval_expired' AND json_extract(payload,'$.cancellationConfirmedAt') IS NULL) OR (" + PendingApprovalStop + ")";
+    private const string WaitingSince = "coalesce(json_extract(payload,'$.approvalWaitingSince'),json_extract(payload,'$.updatedAt'))";
     private const string LegacyApprovalStop = "json_extract(payload,'$.cancellationConfirmedAt') IS NULL AND id IN " +
         "(SELECT json_extract(payload,'$.retiredForCancellationId') FROM sessions WHERE json_extract(payload,'$.retiredForCancellationId') IS NOT NULL)";
 
@@ -45,10 +47,10 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         using var reader = await command.ExecuteReaderAsync(token);
         while (await reader.ReadAsync(token))
         {
-            if (reader.GetString(1) == "awaiting_approval" && historicalApproval is not null && historyBefore is { } started &&
+            if (reader.GetString(1) is "awaiting_approval" or "approval_expired" && historicalApproval is not null && historyBefore is { } started &&
                 RelayJson.Deserialize<WorkRecord>(reader.GetString(3)) is { ApprovalStopRequestedAt: null } retained &&
-                retained.CreatedAt != default && retained.UpdatedAt != default && retained.CreatedAt <= retained.UpdatedAt &&
-                retained.UpdatedAt < started && historicalApproval(retained)) continue;
+                ApprovalExpiry.StartedAt(retained) is var waited && retained.CreatedAt != default &&
+                waited != default && retained.CreatedAt <= waited && waited < started && historicalApproval(retained)) continue;
             if (reader.GetBoolean(2))
                 throw new RelayException("update_approval_pending", "Operation " + reader.GetString(0) +
                     " may still continue. Resolve its approval or verify its cancellation before resuming maintenance.", false);
@@ -88,6 +90,8 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         if (record is null) return false;
         record = record with { CancellationRequestedAt = record.CancellationRequestedAt ?? existing?.CancellationRequestedAt,
             CancellationConfirmedAt = record.CancellationConfirmedAt ?? existing?.CancellationConfirmedAt,
+            ApprovalWaitingSince = existing?.ApprovalWaitingSince ?? record.ApprovalWaitingSince,
+            ApprovalExpiredAt = existing?.ApprovalExpiredAt ?? record.ApprovalExpiredAt,
             Progress = record.Progress ?? existing?.Progress };
         if (record.State == "completed" && record.Progress is { } progress) record = record with { Progress = progress with { Phase = "completed", Bytes = progress.TotalBytes } };
         using var command = connection.CreateCommand();
@@ -128,9 +132,39 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         return records;
     }
 
+    internal async Task ExpireDueApprovalsAsync(DateTimeOffset now, CancellationToken token)
+    {
+        var cutoff = now - ApprovalExpiry.WaitingLimit;
+        var candidates = new List<Guid>();
+        using (var connection = database.Open())
+        using (var command = connection.CreateCommand())
+        {
+            command.CommandText = $"SELECT id FROM work WHERE json_extract(payload,'$.state')='awaiting_approval' " +
+                $"AND julianday(json_extract(payload,'$.createdAt')) <= julianday({WaitingSince}) " +
+                $"AND julianday({WaitingSince}) <= julianday($cutoff) ORDER BY julianday({WaitingSince}) LIMIT 64";
+            command.Parameters.AddWithValue("$cutoff", cutoff.ToString("O"));
+            using var reader = await command.ExecuteReaderAsync(token);
+            while (await reader.ReadAsync(token)) candidates.Add(Guid.Parse(reader.GetString(0)));
+        }
+        foreach (var id in candidates)
+            await WriteAsync(id, record =>
+            {
+                if (record is not { State: "awaiting_approval" }) return null;
+                var since = ApprovalExpiry.StartedAt(record);
+                if (since == default || since < record.CreatedAt || since > cutoff) return null;
+                return record with
+                {
+                    State = "approval_expired", ErrorCode = "approval_expired",
+                    Error = "The approval deadline passed. Prior effects may remain. Inspect or explicitly close the session.",
+                    ApprovalWaitingSince = since, ApprovalExpiredAt = since + ApprovalExpiry.WaitingLimit, UpdatedAt = now
+                };
+            }, token);
+    }
+
     public Task<bool> BeginApprovalStopAsync(Guid id, CancellationToken token) => WriteAsync(id, record =>
     {
         if (record is null || record is not { State: "awaiting_approval", CancellationRequestedAt: not null } &&
+            record is not { State: "approval_expired", CancellationConfirmedAt: null, ApprovalExpiredAt: not null } &&
             !WorkExecution.ApprovalStopPending(record)) return null;
         return record with { ApprovalStopRequestedAt = record.ApprovalStopRequestedAt ?? DateTimeOffset.UtcNow };
     }, token);
@@ -144,6 +178,8 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         var now = DateTimeOffset.UtcNow;
         if (record.State is "completed" or "failed")
             return record with { CancellationConfirmedAt = now };
+        if (record.State == "approval_expired")
+            return record with { CancellationConfirmedAt = now, UpdatedAt = now };
         return record with
         {
             State = "unknown",
@@ -158,7 +194,7 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         {
             if (record is null || record.Request.Scope != scope || record.Request.SessionId != sessionId)
                 throw new InvalidDataException("Native reply does not belong to the selected task/project.");
-            return record.State is "unknown" or "awaiting_approval"
+            return record.State is "unknown" or "awaiting_approval" or "approval_expired"
                 ? record with { State = "completed", Result = result, Error = null, ErrorCode = null, UpdatedAt = DateTimeOffset.UtcNow }
                 : null;
         }, token);

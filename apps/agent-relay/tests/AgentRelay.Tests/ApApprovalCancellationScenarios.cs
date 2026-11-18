@@ -81,6 +81,31 @@ internal static class ApApprovalCancellationScenarios
         await app.ControlSessionAsync(caller, session.Id, "close", token, race.Id);
         Check(backend.Stops == 2, "Retry repeated a verified stop.");
 
+        var expiring = request with { Id = Guid.NewGuid() };
+        var waited = now - ApprovalExpiry.WaitingLimit;
+        await store.SaveAsync(new(expiring, "awaiting_approval", waited, waited), token);
+        await store.ExpireDueApprovalsAsync(now.AddTicks(-1), token);
+        Check((await store.FindAsync(expiring.Id, token))?.State == "awaiting_approval", "Approval expired before its deadline.");
+        await store.ExpireDueApprovalsAsync(now, token);
+        await store.ExpireDueApprovalsAsync(now.AddSeconds(30), token);
+        var expired = await app.ResultAsync(caller, expiring.Id, token);
+        Check(expired is { State: "approval_expired", CancellationConfirmedAt: null } &&
+            expired.ApprovalExpiredAt == now && expired.ApprovalWaitingSince == waited && backend.Stops == 2,
+            "Expiry must retain the original wait and leave the native session alone.");
+        var events = await new ProjectJournal(database).EventsAsync(new(project, SessionId: session.Id), token);
+        Check(events.Items.Count(item => item.RequestId == expiring.Id && item.State == "approval_expired") == 1,
+            "Expiry was not journalled exactly once.");
+        await RefusesAsync("session_awaiting_approval", () => app.ControlSessionAsync(caller, session.Id, "start", token));
+        await RefusesAsync("update_approval_pending", async () => { await SqliteWorkStore.DemandUpdateIdleAsync(data, token, now); return true; });
+        await SqliteWorkStore.DemandUpdateIdleAsync(data, token, now.AddMinutes(-1), item => item.Request.Id == expiring.Id);
+        await app.ControlSessionAsync(caller, session.Id, "close", token, expiring.Id);
+        Check((await app.ResultAsync(caller, expiring.Id, token)) is { State: "approval_expired", CancellationConfirmedAt: not null },
+            "Explicitly verified stop erased expiry history.");
+        await store.AttachNativeReplyAsync(expiring.Id, scope, session.Id, late, token);
+        var resolvedExpiry = await app.ResultAsync(caller, expiring.Id, token);
+        Check(resolvedExpiry.State == "completed" && resolvedExpiry.Result == late && resolvedExpiry.ApprovalExpiredAt == now,
+            "A correlated late reply lost the expiry or its result.");
+
         await store.ConfirmApprovalCancellationAsync(finished.Request.Id, token);
         Check(await store.FindAsync(finished.Request.Id, token) == finished, "Stop confirmation overwrote a final result.");
         var native = new SessionService(data, null!, null!, null!);
@@ -94,7 +119,7 @@ internal static class ApApprovalCancellationScenarios
             new(session.Id, session.Name, profile.Id, profile, profile.Root, "created", now, now, RetiredForCancellationId: legacy.Request.Id), token);
         var adopted = await new SqliteWorkStore(new RelayDatabase(data)).FindAsync(legacy.Request.Id, token);
         Check(adopted is not null && WorkExecution.ApprovalStopPending(adopted), "An older retained session fence was discarded during upgrade.");
-        Console.WriteLine("AP_APPROVAL_CANCELLATION=PASS (parallel commands on the same workspace during uncertain stop, guarded session and late reply)");
+        Console.WriteLine("AP_APPROVAL_CANCELLATION=PASS (parallel commands, guarded session, deadline, durable expiry and late reply)");
     }
 
     private static void Check(bool condition, string message)
