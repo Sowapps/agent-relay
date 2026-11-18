@@ -46,6 +46,14 @@ internal static class MonitorScenarios
         var detail = System.Text.Json.JsonSerializer.SerializeToElement(AgentRelay.Windows.Presentation.PresentationSnapshot.Operation(historical, config), RelayJson.Options);
         if (detail.GetProperty("workspace").GetString() != "/actual/submission-folder" || detail.GetProperty("arguments")[0].GetString() != "two words")
             throw new Exception("Presentation replaced historical execution context or split a command argument.");
+        var expired = second with { State = "approval_expired", ApprovalExpiredAt = now };
+        foreach (var stopped in new[] { false, true })
+        {
+            var projected = System.Text.Json.JsonSerializer.SerializeToElement(AgentRelay.Windows.Presentation.PresentationSnapshot.Operation(
+                expired with { CancellationConfirmedAt = stopped ? now : null }, config), RelayJson.Options);
+            if (projected.GetProperty("state").GetString() != "approval_expired" || projected.GetProperty("stopConfirmed").GetBoolean() != stopped)
+                throw new Exception("Presentation confused expiry with native stop confirmation.");
+        }
         Console.WriteLine("PASS: monitoring projection preserves project/session linkage, independent reports, timeline ordering and uncertainty");
     }
 

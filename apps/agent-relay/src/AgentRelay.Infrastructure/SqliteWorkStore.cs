@@ -8,6 +8,8 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
     internal const string PendingApprovalStop = "json_extract(payload,'$.approvalStopRequestedAt') IS NOT NULL AND json_extract(payload,'$.cancellationConfirmedAt') IS NULL";
     internal const string RetainedApproval = "json_extract(payload,'$.state')='awaiting_approval' OR (" +
         "json_extract(payload,'$.state')='approval_expired' AND json_extract(payload,'$.cancellationConfirmedAt') IS NULL) OR (" + PendingApprovalStop + ")";
+    internal const string RetainedApprovalsQuery =
+        "SELECT payload FROM work WHERE json_extract(payload,'$.request.sessionId')=$id AND (" + RetainedApproval + ") LIMIT 2";
     private const string WaitingSince = "coalesce(json_extract(payload,'$.approvalWaitingSince'),json_extract(payload,'$.updatedAt'))";
     private const string LegacyApprovalStop = "json_extract(payload,'$.cancellationConfirmedAt') IS NULL AND id IN " +
         "(SELECT json_extract(payload,'$.retiredForCancellationId') FROM sessions WHERE json_extract(payload,'$.retiredForCancellationId') IS NOT NULL)";
@@ -79,19 +81,25 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         WriteAsync(record.Request.Id, existing => existing is null ? record :
             record with { ApprovalStopRequestedAt = existing.ApprovalStopRequestedAt }, token);
 
-    private async Task<bool> WriteAsync(Guid id, Func<WorkRecord?, WorkRecord?> change, CancellationToken token)
+    private sealed record Transition(WorkRecord Record, DateTimeOffset? JournalExpiry = null, bool ClearExpiry = false, string? Diagnostic = null);
+
+    private Task<bool> WriteAsync(Guid id, Func<WorkRecord?, WorkRecord?> change, CancellationToken token) =>
+        WriteTransitionAsync(id, existing => change(existing) is { } record ? new(record) : null, token);
+
+    private async Task<bool> WriteTransitionAsync(Guid id, Func<WorkRecord?, Transition?> change, CancellationToken token)
     {
         using var connection = database.Open();
         using var transaction = connection.BeginTransaction();
         using var lookup = connection.CreateCommand(); lookup.Transaction = transaction;
         lookup.CommandText = "SELECT payload FROM work WHERE id=$id"; lookup.Parameters.AddWithValue("$id", id.ToString("D"));
         var existing = await lookup.ExecuteScalarAsync(token) is string previous ? RelayJson.Deserialize<WorkRecord>(previous) : null;
-        var record = change(existing);
-        if (record is null) return false;
+        var transition = change(existing);
+        if (transition is null) return false;
+        var record = transition.Record;
         record = record with { CancellationRequestedAt = record.CancellationRequestedAt ?? existing?.CancellationRequestedAt,
             CancellationConfirmedAt = record.CancellationConfirmedAt ?? existing?.CancellationConfirmedAt,
             ApprovalWaitingSince = existing?.ApprovalWaitingSince ?? record.ApprovalWaitingSince,
-            ApprovalExpiredAt = existing?.ApprovalExpiredAt ?? record.ApprovalExpiredAt,
+            ApprovalExpiredAt = transition.ClearExpiry ? null : existing?.ApprovalExpiredAt ?? record.ApprovalExpiredAt,
             Progress = record.Progress ?? existing?.Progress };
         if (record.State == "completed" && record.Progress is { } progress) record = record with { Progress = progress with { Phase = "completed", Bytes = progress.TotalBytes } };
         using var command = connection.CreateCommand();
@@ -100,17 +108,23 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         command.Parameters.AddWithValue("$id", record.Request.Id.ToString("D"));
         command.Parameters.AddWithValue("$payload", RelayJson.Serialize(record));
         await command.ExecuteNonQueryAsync(token);
+        if (transition.JournalExpiry is { } expired)
+            await AppendEventAsync("approval_expired", expired, "approval_expired");
         if (existing?.State != record.State)
+            await AppendEventAsync(record.State, record.State == "approval_expired" ? record.ApprovalExpiredAt ?? record.UpdatedAt : record.UpdatedAt,
+                transition.Diagnostic ?? record.ErrorCode);
+        transaction.Commit();
+        return true;
+
+        async Task AppendEventAsync(string state, DateTimeOffset at, string? diagnostic)
         {
             var scope = record.Request.Scope;
             var item = new WorkEvent(Guid.NewGuid(), record.Request.Id, scope?.ProjectId, record.Request.TaskId, record.Request.AttemptId,
-                record.Request.SessionId, scope?.RecipientId, record.State, record.UpdatedAt, record.ErrorCode);
+                record.Request.SessionId, scope?.RecipientId, state, at, diagnostic);
             using var append = connection.CreateCommand(); append.Transaction = transaction;
             append.CommandText = "INSERT INTO work_events(id,payload) VALUES($id,$payload)"; append.Parameters.AddWithValue("$id", item.Id.ToString("D")); append.Parameters.AddWithValue("$payload", RelayJson.Serialize(item));
             await append.ExecuteNonQueryAsync(token);
         }
-        transaction.Commit();
-        return true;
     }
 
     public async Task RequestCancellationAsync(Guid id, CancellationToken token)
@@ -124,7 +138,7 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
     {
         using var connection = database.Open();
         using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT payload FROM work WHERE json_extract(payload,'$.request.sessionId')=$id AND ({RetainedApproval}) LIMIT 2";
+        command.CommandText = RetainedApprovalsQuery;
         command.Parameters.AddWithValue("$id", sessionId.ToString("D"));
         using var reader = await command.ExecuteReaderAsync(token);
         var records = new List<WorkRecord>();
@@ -189,14 +203,27 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         };
     }, token);
 
-    public Task AttachNativeReplyAsync(Guid id, OperationScope scope, Guid sessionId, WorkResult result, CancellationToken token) =>
-        WriteAsync(id, record =>
+    public Task AttachNativeReplyAsync(Guid id, OperationScope scope, Guid sessionId, WorkResult result, DateTimeOffset receivedAt, CancellationToken token) =>
+        WriteTransitionAsync(id, record =>
         {
             if (record is null || record.Request.Scope != scope || record.Request.SessionId != sessionId)
                 throw new InvalidDataException("Native reply does not belong to the selected task/project.");
-            return record.State is "unknown" or "awaiting_approval" or "approval_expired"
-                ? record with { State = "completed", Result = result, Error = null, ErrorCode = null, UpdatedAt = DateTimeOffset.UtcNow }
-                : null;
+            if (record.State is not ("unknown" or "awaiting_approval" or "approval_expired")) return null;
+            var observedAt = DateTimeOffset.UtcNow;
+            var completed = record with { State = "completed", Result = result, Error = null, ErrorCode = null, UpdatedAt = observedAt };
+            if (record.State == "unknown") return new(completed);
+            var started = ApprovalExpiry.StartedAt(record);
+            if (record.CreatedAt == default || started < record.CreatedAt || started > observedAt ||
+                started > DateTimeOffset.MaxValue - ApprovalExpiry.WaitingLimit ||
+                receivedAt < record.CreatedAt || receivedAt > observedAt)
+                return new(completed, Diagnostic: "approval_receipt_time_unverified");
+            completed = completed with { ApprovalWaitingSince = started };
+            var deadline = record.ApprovalExpiredAt ?? started + ApprovalExpiry.WaitingLimit;
+            if (receivedAt < deadline)
+                return record.ApprovalExpiredAt is null ? new(completed) :
+                    new(completed, ClearExpiry: true, Diagnostic: "approval_receipt_before_deadline");
+            return new(completed with { ApprovalExpiredAt = deadline },
+                JournalExpiry: record.ApprovalExpiredAt is null ? deadline : null);
         }, token);
 
     public async Task<IReadOnlyList<WorkRecord>> ListAsync(CancellationToken token)

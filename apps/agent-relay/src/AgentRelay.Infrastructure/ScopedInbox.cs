@@ -48,7 +48,7 @@ public sealed class ScopedInbox(SessionService sessions, WslBridge bridge, Sqlit
                 throw new InvalidDataException("Native message project/session/origin binding was not confirmed.");
             message = message with { ProfileId = scope.RecipientId.ToString("D") };
             if (message.InReplyTo is { } replyId)
-                await store.AttachNativeReplyAsync(replyId, scope, record.Id, new(message.Sender, message.Text), token);
+                await store.AttachNativeReplyAsync(replyId, scope, record.Id, new(message.Sender, message.Text), message.ReceivedAt, token);
             await store.AddInboxAsync(message, token);
         }
     }

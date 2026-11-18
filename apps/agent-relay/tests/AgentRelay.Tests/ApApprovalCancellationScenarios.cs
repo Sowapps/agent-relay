@@ -38,16 +38,24 @@ internal static class ApApprovalCancellationScenarios
         await RefusesAsync("cancellation_unconfirmed", () => app.ControlSessionAsync(caller, session.Id, "close", token));
         using (var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
         {
+            var commands = new[] { Guid.NewGuid(), Guid.NewGuid() };
             try
             {
-                await app.CommandAsync(caller, project, peer, workspace, "list", Guid.NewGuid(), deadline.Token);
-                await app.CommandAsync(caller, project, peer, workspace, "list", Guid.NewGuid(), deadline.Token);
+                foreach (var id in commands)
+                    await app.CommandAsync(caller, project, peer, workspace, "list", id, deadline.Token);
                 await backend.ParallelCommands.Task.WaitAsync(deadline.Token);
                 await RefusesAsync("session_awaiting_approval", () => work.SubmitAsync(request with { Id = Guid.NewGuid() }, token));
                 await RefusesAsync("session_awaiting_approval", () => app.ControlSessionAsync(caller, session.Id, "start", token));
                 await RefusesAsync("session_awaiting_approval", () => app.ControlSessionAsync(caller, session.Id, "reopen", token));
             }
             finally { backend.ReleaseCommands.TrySetResult(); }
+            foreach (var id in commands)
+            {
+                WorkRecord commandOutcome;
+                while ((commandOutcome = await work.ReadAsync(id, deadline.Token)).State is "pending" or "running")
+                    await Task.Delay(10, deadline.Token);
+                Check(commandOutcome.State == "completed", "Concurrent fixture command did not finish.");
+            }
         }
 
         backend.OwnedStopVerified = true;
@@ -66,7 +74,7 @@ internal static class ApApprovalCancellationScenarios
         backend.OwnedStopVerified = false;
         await RefusesAsync("cancellation_unconfirmed", () => app.ControlSessionAsync(caller, session.Id, "close", token));
         var late = new WorkResult("fixture", "original late result");
-        await store.AttachNativeReplyAsync(race.Id, scope, session.Id, late, token);
+        await store.AttachNativeReplyAsync(race.Id, scope, session.Id, late, now, token);
         var restarted = new RelayDatabase(data);
         var lateOutcome = (await new SqliteWorkStore(restarted).FindAsync(race.Id, token))!;
         Check(lateOutcome.Result == late && lateOutcome.State == "completed" && WorkExecution.ApprovalStopPending(lateOutcome),
@@ -101,7 +109,7 @@ internal static class ApApprovalCancellationScenarios
         await app.ControlSessionAsync(caller, session.Id, "close", token, expiring.Id);
         Check((await app.ResultAsync(caller, expiring.Id, token)) is { State: "approval_expired", CancellationConfirmedAt: not null },
             "Explicitly verified stop erased expiry history.");
-        await store.AttachNativeReplyAsync(expiring.Id, scope, session.Id, late, token);
+        await store.AttachNativeReplyAsync(expiring.Id, scope, session.Id, late, now, token);
         var resolvedExpiry = await app.ResultAsync(caller, expiring.Id, token);
         Check(resolvedExpiry.State == "completed" && resolvedExpiry.Result == late && resolvedExpiry.ApprovalExpiredAt == now,
             "A correlated late reply lost the expiry or its result.");
@@ -119,7 +127,73 @@ internal static class ApApprovalCancellationScenarios
             new(session.Id, session.Name, profile.Id, profile, profile.Root, "created", now, now, RetiredForCancellationId: legacy.Request.Id), token);
         var adopted = await new SqliteWorkStore(new RelayDatabase(data)).FindAsync(legacy.Request.Id, token);
         Check(adopted is not null && WorkExecution.ApprovalStopPending(adopted), "An older retained session fence was discarded during upgrade.");
-        Console.WriteLine("AP_APPROVAL_CANCELLATION=PASS (parallel commands, guarded session, deadline, durable expiry and late reply)");
+        await VerifyReceiptTimingAsync(database, store, request, token);
+        await VerifyRetainedApprovalIndexAsync(database, store, request, token);
+        Console.WriteLine("AP_APPROVAL_CANCELLATION=PASS (guarded session, receipt ordering, durable expiry, retained approval index)");
+    }
+
+    private static async Task VerifyReceiptTimingAsync(RelayDatabase database, SqliteWorkStore store, WorkRequest template, CancellationToken token)
+    {
+        var deadline = DateTimeOffset.UtcNow.AddHours(-2);
+        var started = deadline - ApprovalExpiry.WaitingLimit;
+        var scope = template.Scope!;
+        var session = template.SessionId!.Value;
+        var result = new WorkResult("fixture", "authentic");
+        var journal = new ProjectJournal(database);
+        foreach (var offset in new[] { -1L, 0L, 1L, long.MinValue })
+        foreach (var sweepFirst in new[] { false, true })
+        {
+            var request = template with { Id = Guid.NewGuid(), TaskId = Guid.NewGuid() };
+            var receipt = offset == long.MinValue ? started.AddTicks(-1) : deadline.AddTicks(offset);
+            await store.SaveAsync(new(request, "awaiting_approval", started, started), token);
+            if (sweepFirst) await store.ExpireDueApprovalsAsync(deadline, token);
+            var armedStop = sweepFirst && offset == -1;
+            if (armedStop) Check(await store.BeginApprovalStopAsync(request.Id, token), "Could not arm the expired approval stop.");
+            await store.AttachNativeReplyAsync(request.Id, scope, session, result, receipt, token);
+            await store.ExpireDueApprovalsAsync(deadline, token);
+            await store.AttachNativeReplyAsync(request.Id, scope, session, result, receipt, token);
+            var saved = (await store.FindAsync(request.Id, token))!;
+            var expectExpiry = offset >= 0 || offset == long.MinValue && sweepFirst;
+            Check(saved.State == "completed" && saved.Result == result && saved.ApprovalExpiredAt == (expectExpiry ? deadline : (DateTimeOffset?)null),
+                "Receipt timing changed when import and expiry competed.");
+            if (offset != long.MinValue) Check(saved.ApprovalWaitingSince == started, "Receipt ordering changed the approval start.");
+            Check(WorkExecution.ApprovalStopPending(saved) == armedStop, "A timely reply erased an armed native stop.");
+            var events = (await journal.EventsAsync(new(scope.ProjectId, TaskId: request.TaskId), token)).Items;
+            Check(events.Count(item => item.State == "approval_expired" && item.OccurredAt == deadline) == (sweepFirst || offset >= 0 ? 1 : 0),
+                "Expiry history was duplicated or lost.");
+            var diagnostic = offset == long.MinValue ? "approval_receipt_time_unverified" :
+                offset == -1 && sweepFirst ? "approval_receipt_before_deadline" : null;
+            Check(events.Single(item => item.State == "completed").ErrorCode == diagnostic, "Receipt diagnostic lost.");
+        }
+    }
+
+    private static async Task VerifyRetainedApprovalIndexAsync(RelayDatabase database, SqliteWorkStore store, WorkRequest template, CancellationToken token)
+    {
+        var request = template with { Id = Guid.NewGuid(), SessionId = Guid.NewGuid() };
+        var now = DateTimeOffset.UtcNow;
+        await store.SaveAsync(new(request, "approval_expired", now, now, ApprovalExpiredAt: now), token);
+        using (var connection = database.Open())
+        using (var seed = connection.CreateCommand())
+        {
+            seed.CommandText = """
+                DROP INDEX work_session_retained_approval;
+                WITH RECURSIVE rows(id) AS (VALUES(1) UNION ALL SELECT id+1 FROM rows WHERE id < 10000)
+                INSERT INTO work SELECT 'history-' || id, json_object('state','completed') FROM rows;
+                """;
+            await seed.ExecuteNonQueryAsync(token);
+        }
+        var migrated = new RelayDatabase(database.DataDirectory);
+        using (var connection = migrated.Open())
+        using (var explain = connection.CreateCommand())
+        {
+            explain.CommandText = "EXPLAIN QUERY PLAN " + SqliteWorkStore.RetainedApprovalsQuery;
+            explain.Parameters.AddWithValue("$id", request.SessionId!.Value.ToString("D"));
+            using var plan = await explain.ExecuteReaderAsync(token);
+            Check(await plan.ReadAsync(token) && plan.GetString(3).Contains("SEARCH work USING INDEX work_session_retained_approval", StringComparison.Ordinal),
+                "The retained approval lookup scans the work history.");
+        }
+        var approvals = await new SqliteWorkStore(migrated).RetainedApprovalsAsync(request.SessionId!.Value, token);
+        Check(approvals.Single().Request.Id == request.Id, "The index changed the retained approval result.");
     }
 
     private static void Check(bool condition, string message)

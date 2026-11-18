@@ -18,7 +18,8 @@ public sealed record CancellationProgress(Guid SessionId, string State, string? 
 {
     internal static CancellationProgress? From(WorkRecord operation)
     {
-        if (operation is { CancellationRequestedAt: null, ApprovalExpiredAt: null } || operation.Request.SessionId is not { } sessionId) return null;
+        if (operation.Request.SessionId is not { } sessionId || operation is
+            { CancellationRequestedAt: null, ApprovalExpiredAt: null, ApprovalStopRequestedAt: null, CancellationConfirmedAt: null }) return null;
         if (operation.CancellationConfirmedAt is not null) return new(sessionId, "stop_confirmed", null, false);
         if (WorkExecution.ApprovalStopPending(operation)) return new(sessionId, "stop_unconfirmed", "close_session", true);
         return operation.State switch

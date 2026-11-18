@@ -158,6 +158,7 @@ internal static class PresentationSnapshot
             program = operation.Result?.Details?.GetValueOrDefault("program"), arguments = CommandArguments(operation),
             progress = operation.Progress is { TotalBytes: > 0 } progress ? (int?)Math.Clamp(progress.Bytes * 100 / progress.TotalBytes, 0, 100) : null,
             progressPhase = operation.Progress?.Phase, errorCode = operation.ErrorCode, transfer = operation.Request.Artifact,
+            stopConfirmed = operation.CancellationConfirmedAt is not null,
             reviewToken = AttentionReviews.Token(operation), reviewed = reviews?.IsReviewed(operation) == true, reviewable = MonitorProjection.NeedsAttention(operation.State),
             hasResult = operation.Result is not null, previewOnly = previewOnly || operation.Result?.Details?.ContainsKey("previewOnly") == true, technical = operation
         };

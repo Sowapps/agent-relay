@@ -30,7 +30,7 @@ internal static class UserMessages
         "approval_already_resolved" => "Une réponse finale est arrivée. Consultez le résultat ou les messages.",
         "approval_stop_mismatch" => "Cette opération n’attend plus de fermeture dans cette session. Consultez son résultat.",
         "cancellation_unconfirmed" => "L’arrêt reste à vérifier avant de réutiliser cette session.",
-        "approval_expired" => "Le délai d’approbation est écoulé. Vérifiez la session avant de la réutiliser.",
+        "approval_expired" => "Le délai d’approbation est écoulé.",
         "transfer_destination_busy" => "Un transfert écrit déjà vers ce fichier.",
         "cancelled_effects_unconfirmed" => "L’arrêt est confirmé. Les effets déjà produits restent à vérifier.",
         "not_found" => "Cette opération ou cette destination n’est plus disponible.",
