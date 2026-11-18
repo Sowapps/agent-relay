@@ -23,8 +23,7 @@ public sealed class ScopedWorkExecutor(RelayDatabase database, ProjectSettingsSt
         if (record.Definition!.Scope != scope) throw new RelayException("capability_denied", "Session and operation scopes differ.");
         context.ValidateDefinition(record.Definition);
         var profile = await sessions.ResolveAsync(record.Id, record.ProfileId, token);
-        var identity = await WorkspaceLease.VerifyNativeAsync(database, profile, record.Definition.Workspace, token);
-        var native = record.Definition.Workspace.ConcurrentWrites ? [] : identity.Resources;
+        var identity = await WorkspaceIdentity.VerifyNativeAsync(database, profile, record.Definition.Workspace, token);
         if (request.Kind == "transfer")
         {
             var artifact = request.Artifact ?? throw new RelayException("invalid_work", "A scoped artifact transfer is required.");
@@ -41,38 +40,29 @@ public sealed class ScopedWorkExecutor(RelayDatabase database, ProjectSettingsSt
             var remote = fromRemote ? source : destination;
             if (remote.Id != record.Definition.Workspace.Id || configuration.Endpoints.Single(item => item.Id == local.EndpointId).AdapterId != "local-files")
                 throw new RelayException("adapter_unavailable", "This adapter supports its assigned native workspace and a configured local-files endpoint.");
+            FileTransferService.DemandLocalWorkspace(local.Location, scoped: true);
             var transfer = new TransferRequest(fromRemote ? "download" : "upload", artifact.Source.RelativePath, artifact.Destination.RelativePath, artifact.Replace);
-            var localIdentity = WorkspaceLease.Local(local.Location);
-            var resources = local.ConcurrentWrites ? native : [.. native, .. localIdentity];
-            var lease = resources.Length == 0 ? null : WorkspaceLease.Acquire(database, request.Id, scope, record.Id, resources);
-            return new ScopedPreparedWork(lease, async dispatchToken =>
+            return new ScopedPreparedWork(async dispatchToken =>
             {
-                await WorkspaceLease.VerifyNativeAsync(database, profile, record.Definition.Workspace, dispatchToken);
-                if (!localIdentity.SequenceEqual(WorkspaceLease.Local(local.Location)))
-                    throw new RelayException("workspace_identity_changed", "The local transfer workspace changed before dispatch.", false);
+                await WorkspaceIdentity.VerifyNativeAsync(database, profile, record.Definition.Workspace, dispatchToken);
                 return await files.ExecuteAsync(request with { Transfer = transfer }, dispatchToken, profile, local.Location, uploadAuthorized: true);
             });
         }
         policy.Message(caller, scope.ProjectId, scope.RecipientId, scope.WorkspaceId);
         var membership = policy.Demand(caller, scope.ProjectId, RelayCapabilities.SendMessage);
-        var reservation = native.Length == 0 ? null : WorkspaceLease.Acquire(database, request.Id, scope, record.Id, native);
-        try
+        var ready = await sessions.EnsureReadyAsync(record, profile, membership.Capabilities.Contains(RelayCapabilities.ManageSession), token);
+        context.ValidateDefinition(record.Definition);
+        return new ScopedPreparedWork(async dispatchToken =>
         {
-            var ready = await sessions.EnsureReadyAsync(record, profile, membership.Capabilities.Contains(RelayCapabilities.ManageSession), token);
             context.ValidateDefinition(record.Definition);
-            return new ScopedPreparedWork(reservation, async dispatchToken =>
-            {
-                context.ValidateDefinition(record.Definition);
-                var result = await bridge.CallAsync(profile, "message", new { request.Id, request.Text, profile.AllowLocalWork, request.Scope,
-                    ExpectedNativeGeneration = ready.NativeRuntime?.Generation, ExpectedDistributionGeneration = ready.DistributionRuntime?.Generation,
-                    ExpectedWorkspaceIdentity = identity.DeviceAndInode }, dispatchToken);
-                await inbox.ImportAsync(record, result, dispatchToken);
-                var reply = result.GetProperty("reply");
-                if (reply.GetProperty("inReplyTo").GetGuid() != request.Id) throw new InvalidDataException("Reply correlation failed.");
-                return new(scope.RecipientId.ToString("D"), reply.GetProperty("text").GetString()!);
-            });
-        }
-        catch { reservation?.Dispose(); throw; }
+            var result = await bridge.CallAsync(profile, "message", new { request.Id, request.Text, profile.AllowLocalWork, request.Scope,
+                ExpectedNativeGeneration = ready.NativeRuntime?.Generation, ExpectedDistributionGeneration = ready.DistributionRuntime?.Generation,
+                ExpectedWorkspaceIdentity = identity }, dispatchToken);
+            await inbox.ImportAsync(record, result, dispatchToken);
+            var reply = result.GetProperty("reply");
+            if (reply.GetProperty("inReplyTo").GetGuid() != request.Id) throw new InvalidDataException("Reply correlation failed.");
+            return new(scope.RecipientId.ToString("D"), reply.GetProperty("text").GetString()!);
+        });
     }
     public async Task<WorkRecord> ReconcileAsync(WorkRecord record, CancellationToken token)
     {
@@ -97,14 +87,13 @@ public sealed class ScopedWorkExecutor(RelayDatabase database, ProjectSettingsSt
         var remote = fromRemote ? artifact.Source : artifact.Destination;
         if (remote.WorkspaceId != record.Definition!.Workspace.Id || configuration.Endpoints.Single(item => item.Id == local.EndpointId).AdapterId != "local-files")
             throw new RelayException("capability_denied", "The transfer adapter context is no longer available.");
-        var native = await WorkspaceLease.VerifyNativeAsync(database, profile, record.Definition.Workspace, token);
-        using var lease = WorkspaceLease.Acquire(database, Guid.NewGuid(), request.Scope, record.Id, [.. native.Resources, .. WorkspaceLease.Local(local.Location)]);
+        await WorkspaceIdentity.VerifyNativeAsync(database, profile, record.Definition.Workspace, token);
         return await files.PartialAsync(request, fromRemote ? "download" : "upload", artifact.Destination.RelativePath, local.Location, profile, remove, token);
     }
 }
 
-internal sealed class ScopedPreparedWork(IDisposable? lease, Func<CancellationToken, Task<WorkResult>> execute) : IPreparedWork
+internal sealed class ScopedPreparedWork(Func<CancellationToken, Task<WorkResult>> execute) : IPreparedWork
 {
     public Task<WorkResult> ExecuteAsync(CancellationToken token) => execute(token);
-    public void Dispose() => lease?.Dispose();
+    public void Dispose() { }
 }

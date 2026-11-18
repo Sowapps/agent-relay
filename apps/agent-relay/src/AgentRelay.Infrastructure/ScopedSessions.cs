@@ -12,7 +12,8 @@ public sealed class ScopedSessions(SessionService sessions, AgentControl agents,
         var record = await sessions.CreateAsync(definition.Id, definition.Name, definition.Endpoint.BindingId, token, definition);
         context.ValidateDefinition(definition);
         new ProjectPolicy(projects).Demand(new(definition.Scope.SenderId, [definition.Scope.ProjectId]), definition.Scope.ProjectId, RelayCapabilities.ManageSession);
-        if (record.Definition is null || record.Definition.Scope != definition.Scope || record.Definition.Workspace != definition.Workspace)
+        if (record.Definition is null || record.Definition.Scope != definition.Scope ||
+            !ScopedSessionContext.SameWorkspace(record.Definition.Workspace, definition.Workspace))
             throw new RelayException("id_conflict", "The session belongs to a different project, participant or workspace.");
         if (record.State == "created") await sessions.StartAsync(record.Id, token);
         return await InspectAsync(record.Id, token);

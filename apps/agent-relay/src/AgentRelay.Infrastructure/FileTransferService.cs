@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using AgentRelay.Core;
 
@@ -10,6 +11,25 @@ public sealed class FileTransferService(SessionService sessions, WslBridge bridg
     public const long MaximumBytes = 256L * 1024 * 1024;
     private readonly SqliteDocuments<TransferReceipt> receipts = new(database, "transfers");
     private readonly TransferLimits limits = configuredLimits ?? new();
+    private static readonly ConcurrentDictionary<string, byte> ActiveDestinations = new(StringComparer.Ordinal);
+
+    internal static IDisposable ProtectDestination(string path, string? distribution = null)
+    {
+        var key = distribution is null ? "windows:" + Path.GetFullPath(path).ToUpperInvariant() :
+            "wsl:" + distribution.ToUpperInvariant() + ":" + path;
+        if (!ActiveDestinations.TryAdd(key, 0))
+            throw new RelayException("transfer_destination_busy", "Another transfer is writing to the same destination file.", false);
+        return new DestinationWrite(key);
+    }
+
+    private sealed class DestinationWrite(string key) : IDisposable
+    {
+        private string? ownedKey = key;
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref ownedKey, null) is { } current) ActiveDestinations.TryRemove(current, out _);
+        }
+    }
 
     private void ValidateProtectedPath(string path)
     {
@@ -19,6 +39,13 @@ public sealed class FileTransferService(SessionService sessions, WslBridge bridg
             if (path.Equals(root, StringComparison.OrdinalIgnoreCase) || path.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                 throw new RelayException("capability_denied", "Application installation/data files cannot be exposed through a project file transfer.", effectsPossible: false);
         }
+    }
+
+    internal static void DemandLocalWorkspace(string path, bool scoped)
+    {
+        if (!Directory.Exists(path))
+            throw new RelayException(scoped ? "workspace_unavailable" : "unavailable",
+                "The declared local workspace must already exist; it is not created implicitly.", false);
     }
 
     public static string WorkspacePath(string workspace, string relative)
@@ -79,7 +106,7 @@ public sealed class FileTransferService(SessionService sessions, WslBridge bridg
         if (transfer.Direction == "upload" && !profile.AllowLocalWork && !uploadAuthorized) throw new RelayException("capability_denied", "Uploading requires explicit file-write authorization.");
         var windowsWorkspace = localWorkspace ?? session.WindowsWorkspace;
         if (windowsWorkspace is null) throw new RelayException("unavailable", "This session has no assigned Windows workspace.");
-        if (!Directory.Exists(windowsWorkspace)) throw new RelayException("unavailable", "The declared local workspace must already exist; it is not created implicitly.", effectsPossible: false);
+        DemandLocalWorkspace(windowsWorkspace, request.Scope is not null);
         if (request.Scope is not null)
         {
             var identity = await LocalProcess.RunAsync("wsl.exe", ["-d", profile.Distribution, "--exec", "id", "-un"], null, TimeSpan.FromSeconds(20), token);
@@ -102,6 +129,7 @@ public sealed class FileTransferService(SessionService sessions, WslBridge bridg
             throw new InvalidDataException("Transfer workspace identity was not confirmed.");
         string Unc(string linux) => @"\\wsl.localhost\" + profile.Distribution + linux.Replace('/', '\\');
         var upload = transfer.Direction == "upload";
+        using var destinationWrite = upload ? ProtectDestination(linuxPath, profile.Distribution) : ProtectDestination(windowsPath);
         var source = upload ? windowsPath : Unc(linuxPath);
         var destination = upload ? Unc(native.GetProperty("temporary").GetString()!) :
             RuntimePaths.TransferPartial(database.DataDirectory, request.Id);
@@ -151,7 +179,9 @@ public sealed class FileTransferService(SessionService sessions, WslBridge bridg
                 throw new InvalidDataException("The downloaded file changed or failed its SHA-256 check.");
             WorkspacePath(windowsWorkspace, localRelative);
             RuntimePaths.DemandPrivatePath(destination);
-            File.Move(destination, windowsPath, transfer.Overwrite);
+            try { File.Move(destination, windowsPath, transfer.Overwrite); }
+            catch (IOException error) when (!transfer.Overwrite && (error.HResult & 0xffff) is 80 or 183)
+            { throw new RelayException("destination_exists", "Destination exists; overwrite must be explicit.", false); }
         }
         var result = new WorkResult("file-transfer", transfer.Direction + " completed", Details: new Dictionary<string, string>
         { ["windowsPath"] = windowsPath, ["linuxPath"] = linuxPath, ["bytes"] = bytes.ToString(System.Globalization.CultureInfo.InvariantCulture), ["sha256"] = sha256 });

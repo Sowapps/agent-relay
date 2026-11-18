@@ -73,6 +73,9 @@ internal static class ProjectScenarios
         context.ValidateDefinition(definition);
         store.Save(current with { Workspaces = current.Workspaces.Select(item => item.Id == workspace
             ? item with { ConcurrentWrites = !item.ConcurrentWrites } : item).ToArray() });
+        context.ValidateDefinition(definition);
+        store.Save(current with { Workspaces = current.Workspaces.Select(item => item.Id == workspace
+            ? item with { Location = item.Location + "-changed" } : item).ToArray() });
         Refused(() => context.ValidateDefinition(definition));
         store.Save(current);
         var fileAdapter = new FileTransferService(sessions, bridge, database);
@@ -81,7 +84,14 @@ internal static class ProjectScenarios
         if (!inspected.Exists || inspected.Bytes != 7 || inspected.Removed) throw new Exception("Partial inspection modified the file.");
         var cleaned = await fileAdapter.PartialAsync(operation, "download", "target.bin", localFiles, placeholder, true, CancellationToken.None);
         if (!cleaned.Removed || File.Exists(partial) || await File.ReadAllTextAsync(final) != "keep") throw new Exception("Partial cleanup affected the final destination.");
-        Console.WriteLine("PASS: explicit owned-partial inspection and cleanup preserve the final destination");
+        using (FileTransferService.ProtectDestination(final))
+        {
+            try { using var conflict = FileTransferService.ProtectDestination(Path.Combine(localFiles, "TARGET.BIN")); throw new Exception("Transfers raced the same destination."); }
+            catch (RelayException error) when (error.Code == "transfer_destination_busy" && error.EffectsPossible == false) { }
+            using var independent = FileTransferService.ProtectDestination(Path.Combine(localFiles, "other.bin"));
+        }
+        using var next = FileTransferService.ProtectDestination(final);
+        Console.WriteLine("PASS: owned-partial cleanup preserves final files and only identical transfer destinations conflict");
     }
 
     private static void Refused(Action action, string code = "capability_denied")

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using AgentRelay.Core;
 
@@ -10,6 +11,7 @@ public sealed class ScopedCommands(string data, SettingsStore technical, Project
     SqliteDocuments<CommandDispatch> dispatches)
 {
     private readonly RelayDatabase database = new(data);
+    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> provisioning = new();
     /// <seealso cref="RecoverAsync"/>
     internal async Task<IPreparedWork> PrepareAsync(CallerIdentity caller, WorkRequest request, CancellationToken token)
     {
@@ -30,23 +32,22 @@ public sealed class ScopedCommands(string data, SettingsStore technical, Project
         var command = binding.Commands.SingleOrDefault(item => item.Id == request.CommandId) ?? throw new RelayException("command_denied", "Command is not configured.");
         var key = new Guid(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("command-runtime:" + endpoint.Id + ":" + scope.ProjectId + ":" + workspace.Id + ":" + scope.SenderId)).AsSpan(0, 16));
         var definition = new SessionDefinition(key, endpoint.Name, scope, endpoint, workspace, false);
-        var identity = await WorkspaceLease.VerifyNativeAsync(database, binding, workspace, token);
-        var resources = workspace.ConcurrentWrites ? [] : identity.Resources;
-        var lease = resources.Length == 0 ? null : WorkspaceLease.Acquire(database, request.Id, scope, null, resources);
-        try
+        await WorkspaceIdentity.VerifyNativeAsync(database, binding, workspace, token);
+        // Only bootstrap of the shared private command runtime is serialized. Commands run independently.
+        var gate = provisioning.GetOrAdd(key, _ => new(1, 1));
+        WslProfile prepared;
+        await gate.WaitAsync(token);
+        try { prepared = await WslProvisioner.PrepareSessionAsync(data, key, binding, token, definition); }
+        finally { gate.Release(); }
+        var profile = binding with { Root = prepared.Root, Workspace = workspace.Location };
+        var dispatch = new CommandDispatch(scope, profile, workspace.Location, command, Guid.NewGuid().ToString("D"));
+        return new ScopedPreparedWork(async dispatchToken =>
         {
-            var prepared = await WslProvisioner.PrepareSessionAsync(data, key, binding, token, definition);
-            var profile = binding with { Root = prepared.Root, Workspace = workspace.Location };
-            var dispatch = new CommandDispatch(scope, profile, workspace.Location, command, Guid.NewGuid().ToString("D"));
-            return new ScopedPreparedWork(lease, async dispatchToken =>
-            {
-                await WorkspaceLease.VerifyNativeAsync(database, profile, workspace, dispatchToken);
-                await dispatches.SaveAsync(request.Id, dispatch, dispatchToken);
-                var result = await bridge.CallAsync(profile, "command", new { request.Id, request.CommandId, nonce = dispatch.Nonce, command, Workspace = workspace.Location }, dispatchToken);
-                return CommandResult(request, dispatch, result);
-            });
-        }
-        catch { lease?.Dispose(); throw; }
+            await WorkspaceIdentity.VerifyNativeAsync(database, profile, workspace, dispatchToken);
+            await dispatches.SaveAsync(request.Id, dispatch, dispatchToken);
+            var result = await bridge.CallAsync(profile, "command", new { request.Id, request.CommandId, nonce = dispatch.Nonce, command, Workspace = workspace.Location }, dispatchToken);
+            return CommandResult(request, dispatch, result);
+        });
     }
     private static WorkResult CommandResult(WorkRequest request, CommandDispatch dispatch, System.Text.Json.JsonElement result)
     {

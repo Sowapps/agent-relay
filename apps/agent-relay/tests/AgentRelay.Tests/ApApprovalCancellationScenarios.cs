@@ -13,10 +13,10 @@ internal static class ApApprovalCancellationScenarios
         var settings = new ProjectSettingsStore(data);
         settings.Save(new(1, [new(project, "Fixture project")], [new(owner, "Owner", "fixture", "owner"), new(peer, "Peer", "fixture", "peer")],
             [new(workspace, peer, "Fixture workspace", data)],
-            [new(project, owner, "main", [RelayCapabilities.ManageSession, RelayCapabilities.ReadHistory], []),
+            [new(project, owner, "main", [RelayCapabilities.ManageSession, RelayCapabilities.ReadHistory, RelayCapabilities.RunCommand, RelayCapabilities.ReadFile], [new(workspace, true)], ["list"]),
              new(project, peer, "secondary", [], [])]));
         var backend = new Fixture(session);
-        await using var work = new WorkService(store, backend, () => [new(peer.ToString("D"), false, true)]);
+        await using var work = new WorkService(store, backend, () => [new(peer.ToString("D"), true, true)]);
         var app = new RelayApplication(new(settings), work, backend, new ProjectJournal(database));
         var caller = new CallerIdentity(owner, [project]);
         var token = CancellationToken.None;
@@ -27,8 +27,7 @@ internal static class ApApprovalCancellationScenarios
         await RefusesAsync("operation_already_finished", () => app.CancelAsync(caller, finished.Request.Id, token));
         Check(await store.FindAsync(finished.Request.Id, token) == finished, "Cancellation changed a finished result.");
 
-        using (WorkspaceLease.Acquire(database, request.Id, scope, session.Id, "owned-surface"))
-            await store.SaveAsync(new(request, "awaiting_approval", now, now, ErrorCode: "approval_required"), token);
+        await store.SaveAsync(new(request, "awaiting_approval", now, now, ErrorCode: "approval_required"), token);
         await RefusesAsync("operation_cancellation_required", () => app.ControlSessionAsync(caller, session.Id, "close", token));
         var cancelled = await app.CancelAsync(caller, request.Id, token);
         Check(cancelled is { State: "awaiting_approval", CancellationRequestedAt: not null, CancellationConfirmedAt: null } && backend.Stops == 0,
@@ -36,25 +35,33 @@ internal static class ApApprovalCancellationScenarios
         Check((await app.CancelAsync(caller, request.Id, token)).CancellationRequestedAt == cancelled.CancellationRequestedAt,
             "Repeated cancellation rewrote its original timestamp.");
         await RefusesAsync("session_awaiting_approval", () => work.SubmitAsync(request with { Id = Guid.NewGuid() }, token));
-        var writer = Guid.NewGuid();
         await RefusesAsync("cancellation_unconfirmed", () => app.ControlSessionAsync(caller, session.Id, "close", token));
-        await RefusesAsync("workspace_busy", () => Task.FromResult(WorkspaceLease.Acquire(database, writer, scope, Guid.NewGuid(), "owned-surface")));
-        using (WorkspaceLease.Acquire(database, writer, scope, Guid.NewGuid(), "independent-surface")) { }
+        using (var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
+        {
+            try
+            {
+                await app.CommandAsync(caller, project, peer, workspace, "list", Guid.NewGuid(), deadline.Token);
+                await app.CommandAsync(caller, project, peer, workspace, "list", Guid.NewGuid(), deadline.Token);
+                await backend.ParallelCommands.Task.WaitAsync(deadline.Token);
+                await RefusesAsync("session_awaiting_approval", () => work.SubmitAsync(request with { Id = Guid.NewGuid() }, token));
+                await RefusesAsync("session_awaiting_approval", () => app.ControlSessionAsync(caller, session.Id, "start", token));
+                await RefusesAsync("session_awaiting_approval", () => app.ControlSessionAsync(caller, session.Id, "reopen", token));
+            }
+            finally { backend.ReleaseCommands.TrySetResult(); }
+        }
 
         backend.OwnedStopVerified = true;
         Check((await app.ControlSessionAsync(caller, session.Id, "close", token)).State == "closed", "Verified native stop did not finish the session.");
         var outcome = await app.ResultAsync(caller, request.Id, token);
         Check(outcome is { State: "unknown", ErrorCode: "cancelled_effects_unconfirmed", CancellationConfirmedAt: not null },
             "The stop must keep historical effects uncertain and record confirmation.");
-        using (WorkspaceLease.Acquire(new RelayDatabase(data), writer, scope, Guid.NewGuid(), "owned-surface")) { }
         await RefusesAsync("operation_already_finished", () => app.CancelAsync(caller, request.Id, token));
         await app.ControlSessionAsync(caller, session.Id, "close", token);
         Check(backend.Stops == 1, "Repeating an acknowledged close stopped the terminal again.");
 
         // The worker has stopped reporting and the native stop is interrupted before proof arrives.
         var race = request with { Id = Guid.NewGuid() };
-        using (WorkspaceLease.Acquire(database, race.Id, scope, session.Id, "race-surface"))
-            await store.SaveAsync(new(race, "awaiting_approval", now, now), token);
+        await store.SaveAsync(new(race, "awaiting_approval", now, now), token);
         await app.CancelAsync(caller, race.Id, token);
         backend.OwnedStopVerified = false;
         await RefusesAsync("cancellation_unconfirmed", () => app.ControlSessionAsync(caller, session.Id, "close", token));
@@ -64,14 +71,13 @@ internal static class ApApprovalCancellationScenarios
         var lateOutcome = (await new SqliteWorkStore(restarted).FindAsync(race.Id, token))!;
         Check(lateOutcome.Result == late && lateOutcome.State == "completed" && WorkExecution.ApprovalStopPending(lateOutcome),
             "The late result erased a durable unverified stop.");
-        await RefusesAsync("workspace_busy", () => Task.FromResult(WorkspaceLease.Acquire(restarted, writer, scope, Guid.NewGuid(), "race-surface")));
+        await RefusesAsync("session_awaiting_approval", () => work.SubmitAsync(request with { Id = Guid.NewGuid() }, token));
         backend.OwnedStopVerified = true;
         await RefusesAsync("approval_stop_mismatch", () => app.ControlSessionAsync(caller, session.Id, "close", token, finished.Request.Id));
         await app.ControlSessionAsync(caller, session.Id, "close", token, race.Id);
         var final = await app.ResultAsync(caller, race.Id, token);
         Check(final.Result == late && final.State == "completed" && final.CancellationConfirmedAt is not null && !WorkExecution.MayContinue(final),
-            "Verified continuation must preserve the genuine result and release the reservation.");
-        using (WorkspaceLease.Acquire(restarted, writer, scope, Guid.NewGuid(), "race-surface")) { }
+            "Verified stop must preserve the genuine result.");
         await app.ControlSessionAsync(caller, session.Id, "close", token, race.Id);
         Check(backend.Stops == 2, "Retry repeated a verified stop.");
 
@@ -88,7 +94,7 @@ internal static class ApApprovalCancellationScenarios
             new(session.Id, session.Name, profile.Id, profile, profile.Root, "created", now, now, RetiredForCancellationId: legacy.Request.Id), token);
         var adopted = await new SqliteWorkStore(new RelayDatabase(data)).FindAsync(legacy.Request.Id, token);
         Check(adopted is not null && WorkExecution.ApprovalStopPending(adopted), "An older retained session fence was discarded during upgrade.");
-        Console.WriteLine("AP_APPROVAL_CANCELLATION=PASS (late reply preserves lease until verified close, guarded retry, legacy fence)");
+        Console.WriteLine("AP_APPROVAL_CANCELLATION=PASS (parallel commands on the same workspace during uncertain stop, guarded session and late reply)");
     }
 
     private static void Check(bool condition, string message)
@@ -106,13 +112,22 @@ internal static class ApApprovalCancellationScenarios
         private SessionSnapshot retained = session;
         public bool OwnedStopVerified { get; set; }
         public int Stops { get; private set; }
+        private int commands;
+        public TaskCompletionSource ParallelCommands { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseCommands { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Task<SessionSnapshot> OpenAsync(SessionDefinition definition, CancellationToken token) => Task.FromResult(retained);
         public Task<SessionSnapshot> GetAsync(Guid id, CancellationToken token) => Task.FromResult(retained);
         public Task<SessionSnapshot> InspectAsync(Guid id, CancellationToken token) => GetAsync(id, token);
         public Task<SessionSnapshot> ControlAsync(Guid id, string action, CancellationToken token) => GetAsync(id, token);
         public Task<ReadPage<SessionSnapshot>> ListAsync(ReadQuery query, Guid ownerId, CancellationToken token) => Task.FromResult(new ReadPage<SessionSnapshot>([retained], null, false));
         public Task<IReadOnlyList<string>> RefreshMessagesAsync(Guid projectId, Guid recipientId, Guid? sessionId, CancellationToken token) => Task.FromResult<IReadOnlyList<string>>([]);
-        public Task<WorkResult> ExecuteAsync(WorkRequest request, CancellationToken token) => throw new InvalidOperationException("The test must not dispatch work.");
+        public async Task<WorkResult> ExecuteAsync(WorkRequest request, CancellationToken token)
+        {
+            if (request.Kind != "command" || request.Scope != retained.Scope) throw new InvalidOperationException("Unexpected fixture dispatch.");
+            if (Interlocked.Increment(ref commands) == 2) ParallelCommands.TrySetResult();
+            await ReleaseCommands.Task.WaitAsync(token);
+            return new("fixture", "done");
+        }
         public Task ConfirmApprovalStopAsync(WorkRequest request, CancellationToken token)
         {
             if (!OwnedStopVerified) throw new RelayException("cancellation_unconfirmed", "Fixture writer remains.", false);

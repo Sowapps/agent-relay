@@ -158,10 +158,10 @@ def recover(root, client, request, stop):
             if not kernel_changed and submitted.get('allowLocalWork') is not False:
                 # A detached writer can disappear from both the SID and ancestry before the first census.
                 raise refuse('The terminal stopped, but this writable launch has no verified process containment. '
-                             'The reservation remains until the original WSL kernel is gone.',
+                             'The session stop remains unconfirmed until the original WSL kernel is gone.',
                              bool(proof.get('stopStarted')))
             return {'requestId': identifier, 'stopped': True}
         if time.monotonic() >= deadline:
-            raise refuse('Processes of the owned native session remain. Its workspace reservation is retained.',
+            raise refuse('Processes of the owned native session remain. The session stays unavailable.',
                          bool(proof.get('stopStarted')))
         time.sleep(.05)

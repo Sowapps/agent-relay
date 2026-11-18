@@ -29,7 +29,8 @@ internal static class UserMessages
         "operation_cancellation_required" => "Demandez d’abord l’annulation de l’opération en attente.",
         "approval_already_resolved" => "Une réponse finale est arrivée. Consultez le résultat ou les messages.",
         "approval_stop_mismatch" => "Cette opération n’attend plus de fermeture dans cette session. Consultez son résultat.",
-        "cancellation_unconfirmed" => "L’arrêt reste à vérifier. Cette opération peut encore bloquer le worktree.",
+        "cancellation_unconfirmed" => "L’arrêt reste à vérifier avant de réutiliser cette session.",
+        "transfer_destination_busy" => "Un transfert écrit déjà vers ce fichier.",
         "cancelled_effects_unconfirmed" => "L’arrêt est confirmé. Les effets déjà produits restent à vérifier.",
         "not_found" => "Cette opération ou cette destination n’est plus disponible.",
         "result_too_large" => "Le détail dépasse la taille autorisée. Utilisez les aperçus filtrés ou la référence du fichier produit.",
@@ -44,8 +45,8 @@ internal static class UserMessages
     public static string Cancellation(string state) => state switch
     {
         "close_required" => "Annulation enregistrée. Vous pouvez fermer la session liée pour vérifier l’arrêt.",
-        "stop_unconfirmed" => "Fermeture en attente de preuve. Le worktree peut encore être bloqué par cette opération.",
-        "stop_confirmed" => "Arrêt confirmé. Cette opération ne retient plus le worktree.",
+        "stop_unconfirmed" => "Fermeture en attente de preuve. La session reste indisponible.",
+        "stop_confirmed" => "Arrêt confirmé. Ouvrez une nouvelle session pour poursuivre.",
         "finished" => "L’opération a atteint un résultat final.",
         _ => "Annulation demandée. Consultez le résultat pour suivre sa confirmation."
     };

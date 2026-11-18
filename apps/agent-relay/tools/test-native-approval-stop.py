@@ -145,7 +145,7 @@ def exercise(base, adapter):
         assert recover(root, 'codex', previous, True)['stopped']
         assert recover(root, 'codex', previous, True)['stopped']
         assert pane(root, 'independent') is not None
-        print('NATIVE_APPROVAL_STOP=PASS (detached writer missing from census retains writable lease; prior boot recovered; independent terminal preserved)')
+        print('NATIVE_APPROVAL_STOP=PASS (detached writer keeps stop unconfirmed; prior boot recovered; independent terminal preserved)')
     finally:
         if child_stamp is not None and process_stamp(child) == child_stamp:
             os.kill(child, signal.SIGTERM)

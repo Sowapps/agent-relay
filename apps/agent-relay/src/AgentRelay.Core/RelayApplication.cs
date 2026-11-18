@@ -96,6 +96,7 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
         }
         if (sessionId == Guid.Empty)
             throw new RelayException("invalid_session", "A stable session identifier and readable name are required.");
+        await work.DemandSessionResolvedAsync(sessionId, token, scope);
         return await sessions.OpenAsync(new(sessionId, SessionNames.Normalize(name), scope, endpoint, workspace, localWork), token);
     }
 
@@ -130,6 +131,7 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
             throw new RelayException("invalid_operation", "Unknown session action.");
         if (approvalRequestId is not null && action != "close")
             throw new RelayException("invalid_request", "An approval request can only guard a session close.", false);
+        if (action is "start" or "reopen") await work.DemandSessionResolvedAsync(id, token);
         if (action.StartsWith("rename:", StringComparison.Ordinal)) action = "rename:" + SessionNames.Normalize(action[7..]);
         if (action == "close" && work.IsSessionActive(id)) throw new RelayException("busy", "Inspect or interrupt the active operation before closing the session.");
         if (action == "close")

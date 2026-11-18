@@ -3,6 +3,7 @@ using AgentRelay.Infrastructure;
 using System.IO.Pipes;
 
 if (args.Length == 2 && args[0] == "ap-session-resilience") { await ApSessionResilienceScenarios.RunAsync(Path.GetFullPath(args[1])); return; }
+if (args.Length == 2 && args[0] == "project-transfer-scope") { await ProjectScenarios.Run(Path.GetFullPath(args[1])); return; }
 if (args.Length == 2 && args[0] == "ap-approval-cancellation") { await ApApprovalCancellationScenarios.RunAsync(Path.GetFullPath(args[1])); return; }
 if (args.Length == 2 && args[0] == "project-lifecycle") { await ProjectLifecycleScenarios.Run(Path.GetFullPath(args[1])); return; }
 if (args.Length == 2 && args[0] == "mcp-connection-inspection") { McpConnectionInspectionScenarios.Run(Path.GetFullPath(args[1])); return; }

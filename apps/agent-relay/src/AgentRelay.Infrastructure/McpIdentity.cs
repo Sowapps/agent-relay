@@ -73,7 +73,7 @@ public static class McpErrors
             "runtime_contract_mismatch" => "inspect_relay_runtime",
             "relay_start_failed" => "start_relay_or_contact_maintainer",
             "maintenance" => "wait_for_relay_maintenance",
-            "workspace_busy" => "inspect_workspace_holder",
+            "transfer_destination_busy" => "wait_for_transfer",
             "operation_cancellation_required" => "cancel_operation_then_close_session",
             "approval_already_resolved" => "read_inbox",
             "approval_stop_mismatch" => "inspect_result",

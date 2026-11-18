@@ -14,7 +14,7 @@ public sealed record ProjectReply(ProjectConfiguration? Configuration = null, Se
 }
 
 /// <summary>Participant-facing projection of cancellation for this one request.</summary>
-public sealed record CancellationProgress(Guid SessionId, string State, string? NextAction, bool ReservationMayRemain)
+public sealed record CancellationProgress(Guid SessionId, string State, string? NextAction, bool SessionRequiresResolution)
 {
     internal static CancellationProgress? From(WorkRecord operation)
     {
@@ -25,7 +25,7 @@ public sealed record CancellationProgress(Guid SessionId, string State, string? 
         {
             "awaiting_approval" => new(sessionId, "close_required", "close_session", true),
             "completed" or "failed" => new(sessionId, "finished", null, false),
-            _ => new(sessionId, "requested", "get_result", true)
+            _ => new(sessionId, "requested", "get_result", false)
         };
     }
 }

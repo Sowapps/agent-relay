@@ -18,10 +18,7 @@ public static class WorkExecution
         record.ApprovalStopRequestedAt is not null && record.CancellationConfirmedAt is null;
 
     public static bool MayContinue(WorkRecord record) =>
-        MayContinue(record.State, ApprovalStopPending(record), record.CancellationConfirmedAt is not null);
-
-    public static bool MayContinue(string state, bool approvalStopPending, bool stopConfirmed) =>
-        approvalStopPending || !stopConfirmed && state is not ("completed" or "failed");
+        ApprovalStopPending(record) || record.CancellationConfirmedAt is null && record.State is not ("completed" or "failed");
 }
 public sealed record WorkProgress(long Bytes, long TotalBytes, string Phase, DateTimeOffset UpdatedAt);
 public sealed record WorkEvent(Guid Id, Guid RequestId, Guid? ProjectId, Guid? TaskId, Guid? AttemptId, Guid? SessionId,
@@ -113,7 +110,7 @@ public sealed class WorkService : IAsyncDisposable
                 return existing;
             }
             var key = request.SessionId is { } sessionId ? "session:" + sessionId :
-                request.Scope?.WorkspaceId is { } workspaceId ? "profile:" + request.ProfileId + ":" + workspaceId : "profile:" + request.ProfileId;
+                request is { Kind: "command", Scope: not null } ? "request:" + request.Id : "profile:" + request.ProfileId;
             if (preparing.TryGetValue(request.Id, out var inProgress))
             {
                 if (inProgress.Request != request) throw new RelayException("id_conflict", "This identifier belongs to another operation.", false);
@@ -121,8 +118,7 @@ public sealed class WorkService : IAsyncDisposable
             }
             else
             {
-                if (request.SessionId is { } targetSession && (await store.RetainedApprovalsAsync(targetSession, token)).Count != 0)
-                    throw new RelayException("session_awaiting_approval", "A retained approval still belongs to this session. Resolve it before submitting new work.", false);
+                if (request.SessionId is { } targetSession) await DemandSessionResolvedAsync(targetSession, token);
                 if (preparing.Values.Any(item => item.Key == key) || running.TryGetValue(key, out var active) && !active.IsCompleted)
                     throw new RelayException("busy", "This session already has an active operation.", false);
                 if (preparing.Count + running.Values.Count(task => !task.IsCompleted) >= maximumConcurrency)
@@ -204,6 +200,13 @@ public sealed class WorkService : IAsyncDisposable
 
     public Task<IReadOnlyList<WorkRecord>> RetainedApprovalsAsync(Guid sessionId, CancellationToken token) =>
         store.RetainedApprovalsAsync(sessionId, token);
+
+    internal async Task DemandSessionResolvedAsync(Guid sessionId, CancellationToken token, OperationScope? expectedScope = null)
+    {
+        var approvals = await RetainedApprovalsAsync(sessionId, token);
+        if (approvals.Any(item => expectedScope is null || item.Request.Scope == expectedScope))
+            throw new RelayException("session_awaiting_approval", "A retained approval or unconfirmed stop belongs to this session. Resolve it before reusing the session.", false);
+    }
 
     public async Task<WorkRecord> RequestCancellationAsync(Guid id, CancellationToken token)
     {

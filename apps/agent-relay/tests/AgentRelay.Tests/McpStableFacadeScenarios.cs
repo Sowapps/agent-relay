@@ -64,20 +64,20 @@ internal static class McpStableFacadeScenarios
         var progress = cancellation.GetProperty("cancellation");
         Check(cancellation.GetProperty("operation").GetProperty("state").GetString() == "awaiting_approval" &&
             progress.GetProperty("sessionId").GetGuid() == session && progress.GetProperty("state").GetString() == "close_required" &&
-            progress.GetProperty("nextAction").GetString() == "close_session" && progress.GetProperty("reservationMayRemain").GetBoolean(), "MCP cancellation identifies the session, action and reservation");
+            progress.GetProperty("nextAction").GetString() == "close_session" && progress.GetProperty("sessionRequiresResolution").GetBoolean(), "MCP cancellation identifies the session and action");
         using (var humanResult = JsonDocument.Parse(observations[^1].GetProperty("content")[0].GetProperty("text").GetString()!))
             Check(humanResult.RootElement.GetProperty("cancellation").GetProperty("nextAction").GetString() == "close_session", "Text content includes the cancellation continuation");
         // The isolated native test supplies stop proof separately; exercise the persisted outcome through the same MCP path.
         Check(await store.BeginApprovalStopAsync(awaiting, CancellationToken.None), "Approval stop intent was not retained");
         var stopping = (await Call("get_result", new { request_id = awaiting })).GetProperty("cancellation");
-        Check(stopping.GetProperty("state").GetString() == "stop_unconfirmed" && stopping.GetProperty("reservationMayRemain").GetBoolean(),
+        Check(stopping.GetProperty("state").GetString() == "stop_unconfirmed" && stopping.GetProperty("sessionRequiresResolution").GetBoolean(),
             "MCP must distinguish a closure attempt from the initial cancellation");
         await store.ConfirmApprovalCancellationAsync(awaiting, CancellationToken.None);
         var confirmed = await Call("get_result", new { request_id = awaiting });
         progress = confirmed.GetProperty("cancellation");
         Check(confirmed.GetProperty("operation").GetProperty("state").GetString() == "unknown" &&
             progress.GetProperty("state").GetString() == "stop_confirmed" && progress.GetProperty("nextAction").ValueKind == JsonValueKind.Null &&
-            !progress.GetProperty("reservationMayRemain").GetBoolean(), "MCP distinguishes confirmed stop from historical effects");
+            !progress.GetProperty("sessionRequiresResolution").GetBoolean(), "MCP distinguishes confirmed stop from historical effects");
         Check(Error(await Call("invoke_operation", new { call_id = Guid.NewGuid(), operation_id = "list_projects", revision = 1, arguments = new { } }, "wrong")) == "transport_incompatible", "Incompatible wire admission");
         await connections.RevokeAsync(binding, CancellationToken.None);
         Check(Error(await Call("get_connection_status", new { })) == "authentication_required", "Revoked credential access");
