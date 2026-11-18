@@ -72,7 +72,9 @@ Before accepting a new message, the relay verifies that the assigned session is 
 2. If the approval remains pending and you intend to retire that conversation, call `close_session` on its session. The relay checks the original dispatch and native generation, then verifies that the managed terminal and the processes attributed to it have stopped. `cancellation_unconfirmed` keeps the reservation in place if the relay cannot prove the stop. If a final reply arrived before the stop, `approval_already_resolved` directs you to `read_inbox`.
 3. After a verified stop, `get_result` includes `cancellationConfirmedAt` and may report `unknown` with `cancelled_effects_unconfirmed`. This timestamp confirms the stop and permits reuse of the workspace. Past effects still require inspection. The retired conversation remains available in history. Use a new session ID for new work.
 
-This verification applies to the relay-owned WSL terminal and processes attributable to it. It cannot establish what ran independently outside that scope or undo changes already written.
+The optional `cancellation` field in `cancel_operation` and `get_result` gives the `sessionId`, `state`, next operation in `nextAction` when applicable, and `reservationMayRemain` for this request. `close_required` points to `close_session`, `requested` points to `get_result`, `stop_confirmed` means the verified stop releases the request's reservation, and `finished` means the operation reached a final result. Other operations can independently reserve the same workspace.
+
+If the original native process disappeared before stop verification, an exact dispatch tied to a previous WSL kernel boot can prove the original processes are gone. The session must have no replacement terminal. Same-kernel disappearance alone, including a change in the distribution generation, leaves the reservation in place. The relay never restarts WSL for this check. Verification covers the relay-owned WSL runtime and does not undo effects already written.
 
 ## Active and archived projects
 

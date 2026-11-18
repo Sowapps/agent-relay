@@ -7,7 +7,27 @@ public sealed record ProjectAction(string Name, Guid? ProjectId = null, Guid? En
     string? Control = null, ReadQuery? Query = null, ArtifactTransfer? Transfer = null, Guid? TaskId = null, Guid? ActorId = null,
     string? State = null, string? ExpectedState = null);
 public sealed record ProjectReply(ProjectConfiguration? Configuration = null, SessionSnapshot? Session = null, WorkRecord? Operation = null,
-    ReadPage<SessionSnapshot>? Sessions = null, ReadPage<WorkRecord>? Operations = null, ReadPage<InboxMessage>? Messages = null, HostReport? Host = null, ReadPage<WorkEvent>? Events = null, TransferPartial? Partial = null, RelayProject? Project = null);
+    ReadPage<SessionSnapshot>? Sessions = null, ReadPage<WorkRecord>? Operations = null, ReadPage<InboxMessage>? Messages = null, HostReport? Host = null, ReadPage<WorkEvent>? Events = null, TransferPartial? Partial = null, RelayProject? Project = null,
+    CancellationProgress? Cancellation = null)
+{
+    internal static ProjectReply WithCancellation(WorkRecord operation) => new(Operation: operation, Cancellation: CancellationProgress.From(operation));
+}
+
+/// <summary>Participant-facing projection of cancellation for this one request.</summary>
+public sealed record CancellationProgress(Guid SessionId, string State, string? NextAction, bool ReservationMayRemain)
+{
+    internal static CancellationProgress? From(WorkRecord operation)
+    {
+        if (operation.CancellationRequestedAt is null || operation.Request.SessionId is not { } sessionId) return null;
+        if (operation.CancellationConfirmedAt is not null) return new(sessionId, "stop_confirmed", null, false);
+        return operation.State switch
+        {
+            "awaiting_approval" => new(sessionId, "close_required", "close_session", true),
+            "completed" or "failed" => new(sessionId, "finished", null, false),
+            _ => new(sessionId, "requested", "get_result", true)
+        };
+    }
+}
 
 public sealed class ProjectCoordinator : IAsyncDisposable
 {
@@ -109,8 +129,8 @@ public sealed class ProjectCoordinator : IAsyncDisposable
             "send_message" => new(Operation: await Application.MessageAsync(caller, Required(action.SessionId, "sessionId"), identifier, action.Text ?? "", action.TaskId, token)),
             "execute_command" => new(Operation: await Application.CommandAsync(caller, Required(action.ProjectId, "projectId"), Required(action.EndpointId, "endpointId"), Required(action.WorkspaceId, "workspaceId"), action.CommandId ?? "", identifier, token)),
             "transfer_file" => new(Operation: await Application.TransferAsync(caller, Required(action.SessionId, "sessionId"), action.Transfer ?? throw new RelayException("invalid_request", "Source and destination artifacts are required."), identifier, token)),
-            "get_result" => new(Operation: await Application.ResultAsync(caller, Required(action.RequestId, "requestId"), token)),
-            "cancel_operation" => new(Operation: await Application.CancelAsync(caller, Required(action.RequestId, "requestId"), token)),
+            "get_result" => ProjectReply.WithCancellation(await Application.ResultAsync(caller, Required(action.RequestId, "requestId"), token)),
+            "cancel_operation" => ProjectReply.WithCancellation(await Application.CancelAsync(caller, Required(action.RequestId, "requestId"), token)),
             "inspect_transfer" or "cleanup_transfer" => new(Partial: await Application.TransferPartialAsync(caller, Required(action.RequestId, "requestId"), action.Name == "cleanup_transfer", token)),
             "list_results" => new(Operations: await Application.ResultsAsync(caller, action.Query ?? new(Required(action.ProjectId, "projectId")), token)),
             "list_events" => new(Events: await Application.EventsAsync(caller, action.Query ?? new(Required(action.ProjectId, "projectId")), token)),

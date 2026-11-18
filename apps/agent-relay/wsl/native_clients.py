@@ -178,6 +178,19 @@ def _process_fields(pid):
     return Path(f'/proc/{pid}/stat').read_text().rsplit(')', 1)[1].split()
 
 
+def generation_identity(value):
+    """Read the kernel boot, PID and start tick written by process_stamp."""
+    if not isinstance(value, str):
+        return None
+    try:
+        boot, pid, ticks = value.split(':')
+        if pid.isascii() and pid.isdecimal() and ticks.isascii() and ticks.isdecimal() and int(pid) > 0:
+            return uuid.UUID(boot), int(pid), int(ticks)
+    except ValueError:
+        pass
+    return None
+
+
 def process_stamp(pid):
     try:
         boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()

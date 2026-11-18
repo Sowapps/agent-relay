@@ -67,7 +67,7 @@ public static class McpToolCatalog
             a => a.Control("close"), Session(), "session_id"),
         Tool("get_result", "Read an authorized durable operation, preserving uncertainty and never replaying work.",
             a => new("get_result", RequestId: a.Id("request_id")), new { request_id = Id() }, "request_id"),
-        Tool("cancel_operation", "Request cancellation only for this owned session operation. Never implies rollback of effects; inspect the retained result.",
+        Tool("cancel_operation", "Request cancellation of this owned session operation. Follow cancellation.nextAction for any confirmation still required. Earlier effects may remain.",
             a => new("cancel_operation", RequestId: a.Id("request_id")), new { request_id = Id() }, "request_id"),
         Tool("inspect_transfer", "Inspect only the owned temporary partial of a retained transfer in an idle session; no final file changes.",
             a => new("inspect_transfer", RequestId: a.Id("request_id")), new { request_id = Id() }, "request_id"),

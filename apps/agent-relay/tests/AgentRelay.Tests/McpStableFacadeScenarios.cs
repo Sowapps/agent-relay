@@ -9,14 +9,29 @@ internal static class McpStableFacadeScenarios
     {
         var project = Guid.NewGuid();
         var endpoint = Guid.NewGuid();
+        var peer = new RelayEndpoint(Guid.NewGuid(), "Isolated peer", "wsl-agent", "fixture-peer");
+        var workspace = new RelayWorkspace(Guid.NewGuid(), peer.Id, "Fixture", "/fixture");
+        var scope = new OperationScope(project, endpoint, peer.Id, workspace.Id);
+        var session = Guid.NewGuid();
         var binding = Guid.NewGuid();
         new ProjectSettingsStore(data).Save(new(1, [new(project, "Visible"), new(Guid.NewGuid(), "Hidden")],
-            [new(endpoint, "Caller", "external", "fixture")], [], [new(project, endpoint, "main", [RelayCapabilities.ReadHistory], [])]));
+            [new(endpoint, "Caller", "external", "fixture"), peer], [workspace],
+            [new(project, endpoint, "main", [RelayCapabilities.ReadHistory, RelayCapabilities.ManageSession], []),
+             new(project, peer.Id, "secondary", [], [])]));
         var connections = new ConnectionStore(data);
         await connections.CreateAsync(binding, endpoint, [project], false, CancellationToken.None);
         var request = Guid.NewGuid();
-        await new SqliteWorkStore(new RelayDatabase(data)).SaveAsync(new(new(request, endpoint.ToString("D"), "message", "retained fixture",
-            Scope: new(project, endpoint, endpoint)), "completed", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow), CancellationToken.None);
+        var awaiting = Guid.NewGuid();
+        var database = new RelayDatabase(data);
+        var store = new SqliteWorkStore(database);
+        var now = DateTimeOffset.UtcNow;
+        var profile = new WslProfile(peer.BindingId, "Fixture", "unused", "unused", "/fixture", "codex", []);
+        await new SqliteDocuments<RelaySession>(database, "sessions").SaveAsync(session,
+            new(session, "Fixture", profile.Id, profile, profile.Root, "created", now, now,
+                Definition: new(session, "Fixture", scope, peer, workspace, false)), CancellationToken.None);
+        var submitted = new WorkRequest(request, peer.Id.ToString("D"), "message", "retained fixture", SessionId: session, Scope: scope);
+        await store.SaveAsync(new(submitted, "completed", now, now), CancellationToken.None);
+        await store.SaveAsync(new(submitted with { Id = awaiting }, "awaiting_approval", now, now, ErrorCode: "approval_required"), CancellationToken.None);
         var errors = new List<Exception>();
         await using var host = RelayRuntime.Start(data, errors.Add);
         var client = new RelayPipeClient(data, binding);
@@ -42,10 +57,27 @@ internal static class McpStableFacadeScenarios
         var invocation = await Call("invoke_operation", new { call_id = Guid.NewGuid(), operation_id = "list_projects", revision = 1, arguments = new { } });
         Check(invocation.GetProperty("configuration").GetProperty("projects").GetArrayLength() == 1, "Scoped generic invocation");
         Check((await Call("get_result", new { request_id = request })).GetProperty("operation").GetProperty("request").GetProperty("id").GetGuid() == request, "Retained result");
+        Task<JsonElement> Cancel(Guid id) => Call("invoke_operation", new { call_id = Guid.NewGuid(),
+            operation_id = "cancel_operation", revision = 1, arguments = new { request_id = id } });
+        Check(Error(await Cancel(request)) == "operation_already_finished", "Finished cancellation refusal survives MCP");
+        var cancellation = await Cancel(awaiting);
+        var progress = cancellation.GetProperty("cancellation");
+        Check(cancellation.GetProperty("operation").GetProperty("state").GetString() == "awaiting_approval" &&
+            progress.GetProperty("sessionId").GetGuid() == session && progress.GetProperty("state").GetString() == "close_required" &&
+            progress.GetProperty("nextAction").GetString() == "close_session" && progress.GetProperty("reservationMayRemain").GetBoolean(), "MCP cancellation identifies the session, action and reservation");
+        using (var humanResult = JsonDocument.Parse(observations[^1].GetProperty("content")[0].GetProperty("text").GetString()!))
+            Check(humanResult.RootElement.GetProperty("cancellation").GetProperty("nextAction").GetString() == "close_session", "Text content includes the cancellation continuation");
+        // The isolated native test supplies stop proof separately; exercise the persisted outcome through the same MCP path.
+        await store.ConfirmApprovalCancellationAsync(awaiting, CancellationToken.None);
+        var confirmed = await Call("get_result", new { request_id = awaiting });
+        progress = confirmed.GetProperty("cancellation");
+        Check(confirmed.GetProperty("operation").GetProperty("state").GetString() == "unknown" &&
+            progress.GetProperty("state").GetString() == "stop_confirmed" && progress.GetProperty("nextAction").ValueKind == JsonValueKind.Null &&
+            !progress.GetProperty("reservationMayRemain").GetBoolean(), "MCP distinguishes confirmed stop from historical effects");
         Check(Error(await Call("invoke_operation", new { call_id = Guid.NewGuid(), operation_id = "list_projects", revision = 1, arguments = new { } }, "wrong")) == "transport_incompatible", "Incompatible wire admission");
         await connections.RevokeAsync(binding, CancellationToken.None);
         Check(Error(await Call("get_connection_status", new { })) == "authentication_required", "Revoked credential access");
         File.WriteAllText(Path.Combine(data, "qualification.json"), RelayJson.Serialize(observations));
-        Console.WriteLine("STABLE_MCP_FACADE=PASS (authenticated host, scoped discovery/paging, generic invocation, retained result, wire mismatch, credential revocation; no native/model calls)");
+        Console.WriteLine("STABLE_MCP_FACADE=PASS (scoped discovery/invocation, cancellation continuation and confirmed stop, wire mismatch, revocation; no native/model calls)");
     }
 }

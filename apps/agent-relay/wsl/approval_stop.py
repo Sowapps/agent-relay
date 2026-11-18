@@ -7,7 +7,7 @@ from pathlib import Path
 import time
 import uuid
 
-from native_clients import _process_fields, owned_session_root, process_stamp, tmux
+from native_clients import _process_fields, generation_identity, owned_session_root, process_stamp, tmux
 from native_errors import NativeFailure
 from relay_files import commit, context, find_reply
 
@@ -99,24 +99,37 @@ def recover(root, client, request, stop):
         raise refuse('The WSL distribution generation could not be verified.')
     distro = distro['generation']
     generation = submitted.get('expectedNativeGeneration')
-    if not generation or not submitted.get('expectedDistributionGeneration'):
+    dispatched_distro = submitted.get('expectedDistributionGeneration')
+    original = generation_identity(generation)
+    initial = generation_identity(dispatched_distro)
+    observed = generation_identity(distro)
+    if not original or not initial or not observed or initial[1] != 1 or original[0] != initial[0] or original[1] <= 1:
         raise refuse('The retained dispatch has no verified native generation.')
+    kernel_changed = initial[0] != observed[0]
 
     if saved.exists():
         proof = json.loads(saved.read_text(encoding='utf-8'))
-        if proof.get('requestId') != identifier or proof.get('dispatchHash') != dispatch_hash or proof.get('generation') != generation:
+        if (proof.get('requestId'), proof.get('dispatchHash'), proof.get('generation'), proof.get('distribution'), proof.get('leader')) != (
+                identifier, dispatch_hash, generation, dispatched_distro, original[1]):
             raise refuse('The retained native stop proof belongs to a different dispatch.')
     else:
         if find_reply(root, client, identifier):
             raise NativeFailure('approval_already_resolved', 'A final native reply exists. Read the inbox before closing.', False)
-        if stop or current is None or current[1] != generation or submitted['expectedDistributionGeneration'] != distro:
-            raise refuse('The original runtime is unavailable or its generation changed before a stop could be verified.')
-        leader = current[0]
-        processes = owned_processes()
-        if leader not in processes or processes[leader][1] != leader:
-            raise refuse('The original process does not own an isolated terminal session.')
+        if stop:
+            raise refuse('The native stop has no prepared proof.')
+        leader = original[1]
+        if current is None and kernel_changed:
+            # No Linux process from the recorded kernel can survive a kernel reboot, including detached writers.
+            terminal, processes = None, {}
+        elif current is not None and current[1] == generation and dispatched_distro == distro:
+            active = owned_processes()
+            if leader not in active or active[leader][1] != leader:
+                raise refuse('The original process does not own an isolated terminal session.')
+            terminal, processes = current[2], tracked(active, leader)
+        else:
+            raise refuse('The original runtime cannot be verified. Missing terminal alone cannot rule out detached writers.')
         proof = {'requestId': identifier, 'dispatchHash': dispatch_hash, 'generation': generation,
-                 'distribution': distro, 'leader': leader, 'terminal': current[2], 'processes': tracked(processes, leader)}
+                 'distribution': dispatched_distro, 'leader': leader, 'terminal': terminal, 'processes': processes}
         commit(saved, proof)
 
     if current is not None and current != (proof['leader'], generation, proof['terminal']):
@@ -125,10 +138,10 @@ def recover(root, client, request, stop):
         raise NativeFailure('approval_already_resolved', 'A final native reply exists. Read the inbox before closing.', False)
     if not stop:
         return {'requestId': identifier, 'prepared': True}
+    if not kernel_changed and distro != dispatched_distro:
+        raise refuse('The original WSL process namespace cannot be verified on the same kernel.', bool(proof.get('stopStarted')))
     leader = proof['leader']
     if current is not None:
-        if distro != proof['distribution']:
-            raise refuse('The terminal and WSL generation disagree.')
         proof['processes'] = tracked(owned_processes(), leader, proof['processes'])
         proof['stopStarted'] = True
         commit(saved, proof)
@@ -140,7 +153,7 @@ def recover(root, client, request, stop):
 
     deadline = time.monotonic() + 4
     while True:
-        remaining = tracked(owned_processes(), leader, proof['processes']) if distro == proof['distribution'] else {}
+        remaining = {} if kernel_changed else tracked(owned_processes(), leader, proof['processes'])
         if pane(root, client) is None and not remaining:
             return {'requestId': identifier, 'stopped': True}
         if time.monotonic() >= deadline:

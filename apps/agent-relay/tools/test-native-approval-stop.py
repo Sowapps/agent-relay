@@ -31,6 +31,16 @@ def refuses(recover, root, request, stop, effects_possible=False):
         raise AssertionError('Expected unconfirmed stop')
 
 
+def dispatch_for(data, scope, native, distribution):
+    from relay_files import commit
+    identifier = str(uuid.uuid4())
+    request = {'requestId': identifier, 'scope': scope}
+    commit(data / f'dispatch-{identifier}.json', {'request': {
+        'id': identifier, 'scope': scope, 'expectedNativeGeneration': native,
+        'expectedDistributionGeneration': distribution}})
+    return request
+
+
 def exercise(base, adapter):
     session = uuid.uuid4()
     root = base / 'sessions' / session.hex
@@ -85,7 +95,36 @@ def exercise(base, adapter):
         assert recover(root, 'codex', request, True) == {'requestId': identifier, 'stopped': True}
         assert recover(root, 'codex', request, True) == {'requestId': identifier, 'stopped': True}
         assert pane(root, 'independent') is not None
-        print('NATIVE_APPROVAL_STOP=PASS (generation guard, detached writer, verified retry, independent terminal)')
+
+        pid_file.unlink()
+        tmux(root, 'new-session', '-d', '-s', 'codex', sys.executable, str(launcher))
+        child = int(wait_for(lambda: pid_file.exists() and pid_file.read_text()))
+        child_stamp = process_stamp(child)
+        assert child_stamp is not None
+        original = pane(root, 'codex')[1]
+        distribution = process_stamp(1)['generation']
+        missing = dispatch_for(data, scope, original, distribution)
+        tmux(root, 'kill-session', '-t', 'codex')
+        assert pane(root, 'codex') is None and process_stamp(child) == child_stamp
+        refuses(recover, root, missing, False)
+        os.kill(child, signal.SIGTERM)
+
+        # Encode a prior boot in an isolated copy. The local WSL kernel never restarts.
+        previous_boot = str(uuid.uuid4())
+        previous_native = previous_boot + ':' + original.split(':', 1)[1]
+        previous_distro = previous_boot + ':' + distribution.split(':', 1)[1]
+        inconsistent = dispatch_for(data, scope, previous_native, distribution)
+        refuses(recover, root, inconsistent, False)
+        previous = dispatch_for(data, scope, previous_native, previous_distro)
+        tmux(root, 'new-session', '-d', '-s', 'codex', 'sleep', '30')
+        refuses(recover, root, previous, False)
+        assert pane(root, 'codex') is not None
+        tmux(root, 'kill-session', '-t', 'codex')
+        assert recover(root, 'codex', previous, False)['prepared']
+        assert recover(root, 'codex', previous, True)['stopped']
+        assert recover(root, 'codex', previous, True)['stopped']
+        assert pane(root, 'independent') is not None
+        print('NATIVE_APPROVAL_STOP=PASS (same-boot absence and detached writer refused, prior boot recovered, replacement and independent terminals preserved)')
     finally:
         if child_stamp is not None and process_stamp(child) == child_stamp:
             os.kill(child, signal.SIGTERM)
