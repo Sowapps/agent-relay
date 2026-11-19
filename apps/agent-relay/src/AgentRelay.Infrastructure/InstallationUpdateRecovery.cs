@@ -22,7 +22,7 @@ public static class InstallationUpdateRecovery
         if (!File.Exists(journal)) return null;
         await ConnectionStore.DemandStartupAsync(data, binding, secret, token);
         var state = new InstallationUpdate(RuntimePaths.PortableInstallationForData(data), data).Run("status");
-        if (state is { Phase: "awaiting_work", ErrorCode: "update_approval_pending" } &&
+        if (state.Phase == "awaiting_work" && InstallationUpdate.IsPreStopDeferral(state.ErrorCode) &&
             !File.Exists(McpDeploymentAdmission.MarkerFor(data))) return null;
         if (start) return Start(data, authorize: false);
         return (state.Phase is "complete" or "rolled_back" || state.Activation?.ResumeAuthorized != true) && !File.Exists(McpDeploymentAdmission.MarkerFor(data)) ? null : state;
@@ -81,7 +81,7 @@ public static class InstallationUpdateRecovery
                     WritePresence(data, new(state.Id, Environment.ProcessId, AgentRelay.Protocol.McpProcessIdentity.StartedAt, "complete", DateTimeOffset.UtcNow));
                     return 0;
                 }
-                if (state.ErrorCode is "update_approval_pending" or "update_uncertain_work" or "update_bootstrap_pending")
+                if (InstallationUpdate.IsPreStopDeferral(state.ErrorCode) || state.ErrorCode is "update_uncertain_work" or "update_bootstrap_pending")
                 {
                     WritePresence(data, new(state.Id, Environment.ProcessId, AgentRelay.Protocol.McpProcessIdentity.StartedAt, "needs_attention", DateTimeOffset.UtcNow));
                     return 2;

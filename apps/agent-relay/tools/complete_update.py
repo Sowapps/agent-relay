@@ -479,7 +479,9 @@ def finish_command(data, result):
     """One CLI invocation follows the existing retained runner, then finishes the paired client adapter."""
     while result.get('state', {}).get('schema') == 2 and result['state']['phase'] not in ('complete', 'rolled_back'):
         state = result['state']
-        if state.get('errorCode') in ('update_approval_pending', 'update_uncertain_work', 'update_bootstrap_pending') or state['phase'] == 'recovery_required':
+        if state.get('errorCode') in (
+                'update_approval_pending', 'update_native_session_open', 'update_adapter_preflight_unverified',
+                'update_adapter_scope_invalid', 'update_uncertain_work', 'update_bootstrap_pending') or state['phase'] == 'recovery_required':
             raise RuntimeError('Update needs attention: ' + str(state.get('errorCode') or state['phase']))
         time.sleep(1)
         result = update(data, action='resume')

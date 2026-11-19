@@ -54,6 +54,10 @@ def exclusive(install):
         os.close(descriptor)
 
 
+class NativeSessionActive(RuntimeError):
+    pass
+
+
 def demand_stopped(install):
     socket = install.parent / 'tmux.sock'
     if not socket.exists() and not socket.is_symlink():
@@ -72,7 +76,7 @@ def demand_stopped(install):
                 return  # The socket survived its server, or was cleaned up while interrogated.
         raise RuntimeError('Owned native runtime is reachable but could not be inspected')
     if any(line != '1' for line in result.stdout.splitlines()):
-        raise RuntimeError('Stop the owned native session or verify its socket before replacing adapters')
+        raise NativeSessionActive('The owned native session is still running')
 
 
 def observe(install, names):
@@ -153,6 +157,12 @@ def historical_approval(install, request):
 def maintain(request):
     install = owned_install(request)
     action = request['action']
+    if action == 'check-idle':
+        try:
+            demand_stopped(install)
+        except NativeSessionActive:
+            return {'sessionId': request['session']['id'], 'idle': False}
+        return {'sessionId': request['session']['id'], 'idle': True}
     if action == 'verify-dormant':
         client = request['client']
         if client not in ('codex', 'claude'):

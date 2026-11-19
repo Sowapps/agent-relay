@@ -12,6 +12,8 @@ public sealed record InstallationActivation(string ReleaseRoot, string PreviousP
 
 public sealed partial class InstallationUpdate
 {
+    internal static bool IsPreStopDeferral(string? code) =>
+        code is "update_approval_pending" or "update_native_session_open" or "update_adapter_preflight_unverified" or "update_adapter_scope_invalid";
     private InstallationUpdateState PrepareSelected(string candidate, string manifestPath, string version, string contractHash, Dictionary<string, string> declared, bool initial = false)
     {
         if (runtime is InstallationRuntime control) control.UseCurrentControl = initial;
@@ -156,11 +158,15 @@ public sealed partial class InstallationUpdate
                 {
                     if (host is not null) runtime.ConfirmDrain();
                     DemandUpdateIdle(state);
+                    if (activation.NativeAdapters) DemandNativeSessionsIdle(state);
                 }
-                catch (RelayException error) when (error.Code == "update_approval_pending")
+                catch (RelayException error) when (IsPreStopDeferral(error.Code))
                 {
-                    // There has been no stop, snapshot or publication. Existing users must be able to resolve the approval.
-                    state = SaveIfChanged(state with { Error = error.Message, ErrorCode = error.Code });
+                    // No host stop or publication occurred. Let users resolve approvals or close their own idle sessions.
+                    // An older live worker only recognizes the approval code. Park automatic continuation for newer deferrals.
+                    if (error.Code != "update_approval_pending")
+                        activation = activation with { ResumeAuthorized = false };
+                    state = SaveIfChanged(state with { Error = error.Message, ErrorCode = error.Code, Activation = activation });
                     ReleaseSelectedBarrier(state);
                     return state;
                 }
@@ -267,7 +273,7 @@ public sealed partial class InstallationUpdate
         var activation = state.Activation!;
         if (activation.AdmissionReleased || state.Phase is "complete" or "reopening") throw Failure("update_recovery_required", "Admission may have reopened. Never restore an old database over new work.");
         if (state.Phase == "rolled_back") { ReleaseSelectedBarrier(state); return state; }
-        if (state is { Phase: "awaiting_work", ErrorCode: "update_approval_pending" } &&
+        if (state.Phase == "awaiting_work" && IsPreStopDeferral(state.ErrorCode) &&
             !Directory.Exists(Path.Combine(directory, state.Id, "data-before")))
             new McpDeploymentAdmission(data).Suspend(state.Id, () => { });
         DemandBarrier(state);
