@@ -1,3 +1,4 @@
+using System.Text.Json;
 using AgentRelay.Core;
 
 namespace AgentRelay.Infrastructure;
@@ -194,6 +195,23 @@ public sealed class SessionService
     {
         if (session.RetiredForCancellationId is not null)
             throw new RelayException("session_retired_for_cancellation", "This native conversation was retired to prevent an abandoned approval from resuming. Use a new session for new work.", false);
+    }
+
+    internal async Task<SessionTerminal> ReadTerminalAsync(RelaySession session, CancellationToken token)
+    {
+        var profile = await ResolveAsync(session.Id, session.ProfileId, token);
+        var result = await bridge.CallAsync(profile, "read_terminal", new { SessionId = session.Id }, token);
+        return result.Deserialize<SessionTerminal>(RelayJson.Options)
+            ?? throw new RelayException("terminal_unavailable", "The session adapter returned no terminal snapshot.", false);
+    }
+
+    internal async Task<TerminalSignalReceipt> SignalTerminalAsync(RelaySession session, string action, string? approvalRevision, CancellationToken token)
+    {
+        var profile = await ResolveAsync(session.Id, session.ProfileId, token);
+        var result = await bridge.CallAsync(profile, "signal_terminal", new { SessionId = session.Id, Action = action, ApprovalRevision = approvalRevision }, token);
+        var receipt = result.Deserialize<TerminalSignalReceipt>(RelayJson.Options);
+        return receipt is { KeySent: true } && receipt.Action == action ? receipt :
+            throw new RelayException("terminal_signal_unconfirmed", "The adapter did not confirm sending the key. Read the current terminal.", true);
     }
 
     internal async Task<bool> CloseApprovalSessionAsync(RelaySession session, WorkRequest request, CancellationToken token)

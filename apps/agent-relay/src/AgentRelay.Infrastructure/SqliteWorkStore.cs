@@ -187,6 +187,20 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
     public Task ClearApprovalStopAsync(Guid id, CancellationToken token) => WriteAsync(id, record =>
         record is not null && WorkExecution.ApprovalStopPending(record) ? record with { ApprovalStopRequestedAt = null } : null, token);
 
+    public Task RecordApprovalInterruptionAsync(Guid id, CancellationToken token) => WriteAsync(id, record =>
+    {
+        if (record is not { State: "awaiting_approval" } || WorkExecution.ApprovalStopPending(record)) return null;
+        var now = DateTimeOffset.UtcNow;
+        return record with
+        {
+            State = "unknown",
+            ErrorCode = "terminal_interruption_unconfirmed",
+            Error = "An interruption or refusal was sent to the terminal. Inspect the request before reusing the session.",
+            CancellationRequestedAt = record.CancellationRequestedAt ?? now,
+            UpdatedAt = now
+        };
+    }, token);
+
     public Task RecordApprovalSessionClosureAsync(Guid id, bool stopped, CancellationToken token) => WriteAsync(id, record =>
     {
         if (record is null || !WorkExecution.ApprovalStopPending(record) || !stopped && record.SessionClosedAt is not null) return null;

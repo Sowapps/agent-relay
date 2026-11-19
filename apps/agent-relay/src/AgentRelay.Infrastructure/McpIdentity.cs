@@ -76,6 +76,8 @@ public static class McpErrors
             "transfer_destination_busy" => "wait_for_transfer",
             "operation_cancellation_required" => "cancel_operation_then_close_session",
             "approval_already_resolved" => "read_inbox",
+            "terminal_approval_changed" or "terminal_decision_recorded" or "terminal_changed" or "terminal_signal_unconfirmed" => "read_session_terminal",
+            "terminal_unavailable" => "get_session",
             "approval_stop_mismatch" => "inspect_result",
             "cancellation_unconfirmed" => "inspect_native_cancellation",
             "session_retired_for_cancellation" => "open_new_session",

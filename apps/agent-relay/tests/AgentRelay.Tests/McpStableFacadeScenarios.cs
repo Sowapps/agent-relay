@@ -59,6 +59,14 @@ internal static class McpStableFacadeScenarios
         Check(Error(await Call("discover_operations", new { cursor = 2, registry_hash = "changed" })) == "operation_registry_changed", "Registry snapshot conflict");
         var invocation = await Call("invoke_operation", new { call_id = Guid.NewGuid(), operation_id = "list_projects", revision = 1, arguments = new { } });
         Check(invocation.GetProperty("configuration").GetProperty("projects").GetArrayLength() == 1, "Scoped generic invocation");
+        Task<JsonElement> Invoke(string operation, object arguments) => Call("invoke_operation",
+            new { call_id = Guid.NewGuid(), operation_id = operation, revision = 1, arguments });
+        Check(Error(await Invoke("decide_session_approval", new { session_id = session, decision = "approve", revision = new string('a', 64) })) ==
+              "capability_denied", "Session management alone approved a native request");
+        Check(Error(await Invoke("send_session_escape", new { session_id = Guid.NewGuid() })) == "not_found",
+            "Escape accepted an unrelated session identifier");
+        Check(Error(await Invoke("send_session_escape", new { session_id = session, key = "Enter" })) == "invalid_request",
+            "Escape accepted an arbitrary key");
         Check((await Call("get_result", new { request_id = request })).GetProperty("operation").GetProperty("request").GetProperty("id").GetGuid() == request, "Retained result");
         Task<JsonElement> Cancel(Guid id) => Call("invoke_operation", new { call_id = Guid.NewGuid(),
             operation_id = "cancel_operation", revision = 1, arguments = new { request_id = id } });
@@ -93,6 +101,6 @@ internal static class McpStableFacadeScenarios
         await connections.RevokeAsync(binding, CancellationToken.None);
         Check(Error(await Call("get_connection_status", new { })) == "authentication_required", "Revoked credential access");
         File.WriteAllText(Path.Combine(data, "qualification.json"), RelayJson.Serialize(observations));
-        Console.WriteLine("STABLE_MCP_FACADE=PASS (scoped discovery/invocation, cancellation continuation and confirmed stop, wire mismatch, revocation; no native/model calls)");
+        Console.WriteLine("STABLE_MCP_FACADE=PASS (scoped discovery, approval grant and fixed-key checks, cancellation, wire mismatch, revocation; no native/model calls)");
     }
 }

@@ -64,6 +64,18 @@ public sealed class ScopedSessions(SessionService sessions, AgentControl agents,
     }
 
     private SessionSnapshot Snapshot(RelaySession record) => new(record.Id, record.Name, record.Definition!.Scope, record.State, Diagnostic: record.Diagnostic, WorkActive: active(record.Id));
+    public async Task<SessionTerminal> ReadTerminalAsync(Guid id, CancellationToken token)
+    {
+        var record = await context.RecordAsync(id, token);
+        context.ValidateDefinition(record.Definition!);
+        return await sessions.ReadTerminalAsync(record, token);
+    }
+    public async Task<TerminalSignalReceipt> SignalTerminalAsync(Guid id, string action, string? approvalRevision, CancellationToken token)
+    {
+        var record = await context.RecordAsync(id, token);
+        context.ValidateDefinition(record.Definition!);
+        return await sessions.SignalTerminalAsync(record, action, approvalRevision, token);
+    }
     public async Task<bool> CloseApprovalSessionAsync(WorkRequest request, CancellationToken token)
     {
         var record = await context.RecordAsync(request.SessionId!.Value, token);

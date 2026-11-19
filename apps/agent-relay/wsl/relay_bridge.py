@@ -7,6 +7,7 @@ import uuid
 from relay_files import commit, messages, root_path, context, message_page, workspace
 import native_clients
 import approval_stop
+import terminal_control
 from transfer_files import transfer
 from native_errors import envelope
 
@@ -26,6 +27,10 @@ def main():
                                     request.get('requirePinnedConversation', False))
     if action in ['stop', 'interrupt'] and profile != 'command':
         return native_clients.control(root, profile, action == 'stop')
+    if profile != 'command' and action == 'read_terminal':
+        return terminal_control.read(root, profile, request['sessionId'])
+    if profile != 'command' and action == 'signal_terminal':
+        return terminal_control.signal(root, profile, request['sessionId'], request['action'], request.get('approvalRevision'))
     if action in ['prepare_approval_stop', 'confirm_approval_stop'] and profile != 'command':
         return approval_stop.recover(root, profile, request, action == 'confirm_approval_stop')
     if action == 'inbox':

@@ -27,6 +27,18 @@ internal static class ApApprovalCancellationScenarios
         await RefusesAsync("operation_already_finished", () => app.CancelAsync(caller, finished.Request.Id, token));
         Check(await store.FindAsync(finished.Request.Id, token) == finished, "Cancellation changed a finished result.");
 
+        var undisplayed = request with { Id = Guid.NewGuid() };
+        await store.SaveAsync(new(undisplayed, "awaiting_approval", now, now), token);
+        Check((await app.ReadSessionTerminalAsync(caller, session.Id, token)).Approval is null,
+            "Unknown prompt was presented as a recognized approval.");
+        Check((await app.SignalSessionTerminalAsync(caller, session.Id, "escape", null, token)).KeySent,
+            "An owned terminal with an unknown prompt did not accept Escape.");
+        Check((await work.ReadAsync(undisplayed.Id, token)) is
+            { State: "unknown", ErrorCode: "terminal_interruption_unconfirmed", CancellationConfirmedAt: null } &&
+            (await work.RetainedApprovalsAsync(session.Id, token)).Count == 0,
+            "Escape left the operation waiting for approval or incorrectly confirmed cancellation.");
+        await store.AttachNativeReplyAsync(undisplayed.Id, scope, session.Id, new("fixture", "reply after Escape"), now, token);
+
         using (var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
         {
             var active = Guid.NewGuid();
@@ -246,6 +258,10 @@ internal static class ApApprovalCancellationScenarios
         public Task<SessionSnapshot> OpenAsync(SessionDefinition definition, CancellationToken token) => Task.FromResult(retained);
         public Task<SessionSnapshot> GetAsync(Guid id, CancellationToken token) => Task.FromResult(retained);
         public Task<SessionSnapshot> InspectAsync(Guid id, CancellationToken token) => GetAsync(id, token);
+        public Task<SessionTerminal> ReadTerminalAsync(Guid id, CancellationToken token) =>
+            Task.FromResult(new SessionTerminal("fixture", "Unrecognized prompt", null));
+        public Task<TerminalSignalReceipt> SignalTerminalAsync(Guid id, string action, string? approvalRevision, CancellationToken token) =>
+            Task.FromResult(new TerminalSignalReceipt(action, action == "escape"));
         public Task<SessionSnapshot> ControlAsync(Guid id, string action, CancellationToken token) => GetAsync(id, token);
         public Task<ReadPage<SessionSnapshot>> ListAsync(ReadQuery query, Guid ownerId, CancellationToken token) => Task.FromResult(new ReadPage<SessionSnapshot>([retained], null, false));
         public Task<IReadOnlyList<string>> RefreshMessagesAsync(Guid projectId, Guid recipientId, Guid? sessionId, CancellationToken token) => Task.FromResult<IReadOnlyList<string>>([]);

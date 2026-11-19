@@ -51,6 +51,7 @@ public interface IWorkStore
         throw new RelayException("cancellation_unavailable", "This work store cannot clear a pending approval stop.", false);
     Task RecordApprovalSessionClosureAsync(Guid id, bool stopped, CancellationToken token) =>
         throw new RelayException("cancellation_unavailable", "This work store cannot retain the session closure.", false);
+    Task RecordApprovalInterruptionAsync(Guid id, CancellationToken token) => Task.CompletedTask;
 }
 
 public interface IWorkExecutor
@@ -231,6 +232,19 @@ public sealed class WorkService : IAsyncDisposable
     public Task ClearApprovalStopAsync(Guid id, CancellationToken token) => store.ClearApprovalStopAsync(id, token);
     public Task RecordApprovalSessionClosureAsync(Guid id, bool stopped, CancellationToken token) =>
         store.RecordApprovalSessionClosureAsync(id, stopped, token);
+
+    internal async Task RecordTerminalInterruptionAsync(Guid sessionId, bool cancelActive, CancellationToken token)
+    {
+        if (cancelActive)
+        {
+            await InterruptSessionAsync(sessionId, token);
+            // The worker may be persisting approval_required at the same time the key is sent.
+            if (running.TryGetValue("session:" + sessionId, out var interrupted))
+                await interrupted.WaitAsync(token);
+        }
+        foreach (var approval in await RetainedApprovalsAsync(sessionId, token))
+            await store.RecordApprovalInterruptionAsync(approval.Request.Id, token);
+    }
 
     private async Task ExecuteAsync(WorkRecord record, CancellationToken token, IPreparedWork? prepared)
     {

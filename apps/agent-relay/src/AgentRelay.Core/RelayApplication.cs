@@ -27,6 +27,10 @@ public interface IRelaySessions
     Task<SessionSnapshot> InspectForArchiveAsync(Guid id, CancellationToken token) => InspectAsync(id, token);
     Task<ReadPage<SessionSnapshot>> ListAsync(ReadQuery query, Guid ownerId, CancellationToken token);
     Task<SessionSnapshot> ControlAsync(Guid id, string action, CancellationToken token);
+    Task<SessionTerminal> ReadTerminalAsync(Guid id, CancellationToken token) =>
+        throw new RelayException("adapter_unavailable", "This session adapter has no interactive terminal.", false);
+    Task<TerminalSignalReceipt> SignalTerminalAsync(Guid id, string action, string? approvalRevision, CancellationToken token) =>
+        throw new RelayException("adapter_unavailable", "This session adapter cannot send terminal signals.", false);
     // Returning false confirms the terminal is closed while process termination remains uncertain.
     Task<bool> CloseApprovalSessionAsync(WorkRequest request, CancellationToken token) =>
         throw new RelayException("cancellation_unconfirmed", "The native adapter cannot verify this terminal's closure.", false);

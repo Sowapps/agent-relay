@@ -5,10 +5,10 @@ namespace AgentRelay.Infrastructure;
 public sealed record ProjectAction(string Name, Guid? ProjectId = null, Guid? EndpointId = null, Guid? WorkspaceId = null,
     Guid? SessionId = null, Guid? RequestId = null, string? Text = null, string? DisplayName = null, string? CommandId = null,
     string? Control = null, ReadQuery? Query = null, ArtifactTransfer? Transfer = null, Guid? TaskId = null, Guid? ActorId = null,
-    string? State = null, string? ExpectedState = null);
+    string? State = null, string? ExpectedState = null, string? ApprovalRevision = null);
 public sealed record ProjectReply(ProjectConfiguration? Configuration = null, SessionSnapshot? Session = null, WorkRecord? Operation = null,
     ReadPage<SessionSnapshot>? Sessions = null, ReadPage<WorkRecord>? Operations = null, ReadPage<InboxMessage>? Messages = null, HostReport? Host = null, ReadPage<WorkEvent>? Events = null, TransferPartial? Partial = null, RelayProject? Project = null,
-    CancellationProgress? Cancellation = null)
+    CancellationProgress? Cancellation = null, SessionTerminal? Terminal = null, TerminalSignalReceipt? TerminalSignal = null)
 {
     internal static ProjectReply WithCancellation(WorkRecord operation) => new(Operation: operation, Cancellation: CancellationProgress.From(operation));
 }
@@ -172,6 +172,9 @@ public sealed class ProjectCoordinator : IAsyncDisposable
             "get_session" => new(Session: await Application.SessionAsync(caller, Required(action.SessionId, "sessionId"), token)),
             "list_sessions" => new(Sessions: await Application.SessionsAsync(caller, action.Query ?? new(Required(action.ProjectId, "projectId")), token)),
             "control_session" => new(Session: await Application.ControlSessionAsync(caller, Required(action.SessionId, "sessionId"), action.Control ?? "", token, action.RequestId)),
+            "read_session_terminal" => new(Terminal: await Application.ReadSessionTerminalAsync(caller, Required(action.SessionId, "sessionId"), token)),
+            "signal_session_terminal" => new(TerminalSignal: await Application.SignalSessionTerminalAsync(caller,
+                Required(action.SessionId, "sessionId"), action.Control ?? "", action.ApprovalRevision, token)),
             "send_message" => new(Operation: await Application.MessageAsync(caller, Required(action.SessionId, "sessionId"), identifier, action.Text ?? "", action.TaskId, token)),
             "execute_command" => new(Operation: await Application.CommandAsync(caller, Required(action.ProjectId, "projectId"), Required(action.EndpointId, "endpointId"), Required(action.WorkspaceId, "workspaceId"), action.CommandId ?? "", identifier, token)),
             "transfer_file" => new(Operation: await Application.TransferAsync(caller, Required(action.SessionId, "sessionId"), action.Transfer ?? throw new RelayException("invalid_request", "Source and destination artifacts are required."), identifier, token)),
