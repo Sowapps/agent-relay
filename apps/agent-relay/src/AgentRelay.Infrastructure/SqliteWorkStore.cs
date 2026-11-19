@@ -49,8 +49,9 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         using var reader = await command.ExecuteReaderAsync(token);
         while (await reader.ReadAsync(token))
         {
-            if (reader.GetString(1) is "awaiting_approval" or "approval_expired" && historicalApproval is not null && historyBefore is { } started &&
-                RelayJson.Deserialize<WorkRecord>(reader.GetString(3)) is { ApprovalStopRequestedAt: null } retained &&
+            if (reader.GetBoolean(2) && historicalApproval is not null && historyBefore is { } started &&
+                RelayJson.Deserialize<WorkRecord>(reader.GetString(3)) is { } retained &&
+                (retained.State is "awaiting_approval" or "approval_expired" || WorkExecution.ApprovalStopPending(retained)) &&
                 ApprovalExpiry.StartedAt(retained) is var waited && retained.CreatedAt != default &&
                 waited != default && retained.CreatedAt <= waited && waited < started && historicalApproval(retained)) continue;
             if (reader.GetBoolean(2))

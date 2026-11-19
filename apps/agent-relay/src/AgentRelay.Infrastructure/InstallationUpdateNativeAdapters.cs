@@ -28,17 +28,20 @@ public sealed partial class InstallationUpdate
 
     private bool IsHistoricalApproval(InstallationUpdateState state, WorkRecord work)
     {
-        if (work.Request is not { Kind: "message", SessionId: { } id, Scope: { } scope }) return false;
+        if (work.Request is not { Kind: "message", SessionId: { } id }) return false;
         var session = new SqliteDocuments<RelaySession>(new RelayDatabase(data, readOnly: true), "sessions")
             .FindAsync(id, CancellationToken.None).GetAwaiter().GetResult();
-        if (session?.Definition is not { } definition || definition.Scope != scope || session.RetiredForCancellationId is not null ||
+        if (session?.Definition is not { } definition || !ProjectPolicy.IsSessionRequest(work.Request, definition) ||
             session.Template.Client is not ("codex" or "claude") || !NativeLayout.IsSession(session.Root, id)) return false;
+        var retiredStop = WorkExecution.ApprovalStopPending(work) && session.RetiredForCancellationId == work.Request.Id &&
+                          (work.CancellationRequestedAt is not null || work.ApprovalExpiredAt is not null);
+        if (!retiredStop && (work.ApprovalStopRequestedAt is not null || session.RetiredForCancellationId is not null)) return false;
         try
         {
             var request = RelayJson.Serialize(new
             {
                 action = "approval-history", session = new { session.Id, session.Root, template = new { session.Template.User } },
-                session.Template.Client, requestId = work.Request.Id, scope,
+                session.Template.Client, requestId = work.Request.Id, scope = definition.Scope, retiredStop,
                 updated = ApprovalExpiry.StartedAt(work).ToUnixTimeSeconds(),
                 layoutSource = Convert.ToBase64String(ReadStagedNativeHelper(state, "native_layout.py")),
                 layoutDefinition = Convert.ToBase64String(ReadStagedNativeHelper(state, "native-layout.json"))

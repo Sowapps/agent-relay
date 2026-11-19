@@ -7,6 +7,7 @@ a replace request. A replace accepts a mix of before/after images after interrup
 import base64
 from contextlib import contextmanager
 import fcntl
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -140,7 +141,8 @@ def historical_approval(install, request):
     marker = folder / 'data' / f'dispatch-{identifier}.json'
     if not marker.is_file() or marker.stat().st_size > 1024 * 1024:
         raise ValueError('Retained dispatch marker is invalid')
-    dispatch = json.loads(marker.read_text(encoding='utf-8'))['request']
+    raw = marker.read_bytes()
+    dispatch = json.loads(raw)['request']
     keys = ('projectId', 'senderId', 'recipientId')
     scoped = binding.get('sessionId') == request['session']['id'] and all(binding.get(k) == scope[k] for k in keys)
     retained_scope = dispatch.get('scope')
@@ -149,9 +151,53 @@ def historical_approval(install, request):
     boot = next(int(line.split()[1]) for line in Path('/proc/stat').read_text().splitlines() if line.startswith('btime '))
     current_boot = Path('/proc/sys/kernel/random/boot_id').read_text().strip()
     generation = dispatch.get('expectedNativeGeneration')
+    matched = scoped and str(uuid.UUID(dispatch['id'])) == identifier
+    if request.get('retiredStop'):
+        return {'requestId': identifier, 'historical': matched and retained_scope is not None and
+                parked_approval_stop(folder / 'data', marker, identifier, raw, dispatch, current_boot)}
     ended = max(marker.stat().st_mtime, request['updated']) < boot and (
         generation is None or str(uuid.UUID(generation.split(':', 1)[0])) != current_boot)
-    return {'requestId': identifier, 'historical': scoped and str(uuid.UUID(dispatch['id'])) == identifier and ended}
+    return {'requestId': identifier, 'historical': matched and ended}
+
+
+def parked_approval_stop(data, marker, identifier, raw, dispatch, current_boot):
+    """A retired terminal cannot take more input. Keep uncertainty about earlier effects on the work record."""
+    proof_path = data / f'approval-stop-{identifier}.json'
+    attributes = proof_path.lstat()
+    if not stat.S_ISREG(attributes.st_mode) or attributes.st_uid != os.getuid() or attributes.st_nlink != 1 or attributes.st_size > 1024 * 1024:
+        return False
+    if any(path != marker and path.stat().st_mtime_ns >= marker.stat().st_mtime_ns for path in data.glob('dispatch-*.json')):
+        return False
+    proof = json.loads(proof_path.read_bytes())
+    generation = dispatch['expectedNativeGeneration']
+    distribution = dispatch['expectedDistributionGeneration']
+    boot_id, leader, started = generation.split(':')
+    distro_boot, distro_pid, distro_started = distribution.split(':')
+    if (proof.get('requestId'), proof.get('dispatchHash'), proof.get('generation'), proof.get('distribution')) != (
+            identifier, hashlib.sha256(raw).hexdigest(), generation, distribution):
+        return False
+    if (proof.get('stopStarted') is not True or str(uuid.UUID(boot_id)) != distro_boot or int(distro_pid) != 1 or
+            int(started) <= 0 or int(distro_started) <= 0 or int(leader) <= 1 or proof.get('leader') != int(leader)):
+        return False
+    processes = proof.get('processes')
+    if not isinstance(processes, dict) or any(not pid.isdecimal() or int(pid) <= 1 or type(tick) is not int or tick <= 0
+                                               for pid, tick in processes.items()):
+        return False
+    if boot_id != current_boot:
+        return True
+    for entry in Path('/proc').iterdir():
+        if not entry.name.isdecimal():
+            continue
+        try:
+            if entry.stat().st_uid != os.getuid():
+                continue
+            fields = (entry / 'stat').read_text().rsplit(')', 1)[1].split()
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        if fields[0] not in ('Z', 'X', 'x') and (fields[3] == leader or
+                processes.get(entry.name) == int(fields[19]) or (entry.name == leader and fields[19] == started)):
+            return False
+    return True
 
 
 def maintain(request):

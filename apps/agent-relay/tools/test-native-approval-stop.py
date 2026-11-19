@@ -54,6 +54,7 @@ def exercise(base, adapter):
     from approval_stop import pane, recover
     from native_clients import process_stamp, tmux
     from relay_files import commit
+    from session_adapter_files import parked_approval_stop
 
     (root / 'tmux.conf').touch()
     commit(root / 'provision-owner.json', {'sessionId': str(session), 'user': pwd.getpwuid(os.getuid()).pw_name})
@@ -91,9 +92,15 @@ def exercise(base, adapter):
         assert recover(root, 'codex', request, True) == {'requestId': identifier, 'terminalClosed': True, 'stopped': False}
         assert pane(root, 'codex') is None
         assert process_stamp(child) == child_stamp
+        marker = data / f'dispatch-{identifier}.json'
+        raw = marker.read_bytes()
+        boot = dispatch['expectedDistributionGeneration'].split(':', 1)[0]
+        assert not parked_approval_stop(data, marker, identifier, raw, dispatch, boot)
         os.kill(child, signal.SIGTERM)
         assert recover(root, 'codex', request, True) == {'requestId': identifier, 'stopped': True}
         assert recover(root, 'codex', request, True) == {'requestId': identifier, 'stopped': True}
+        assert parked_approval_stop(data, marker, identifier, raw, dispatch, boot)
+        assert not parked_approval_stop(data, marker, identifier, raw + b' ', dispatch, boot)
         assert pane(root, 'independent') is not None
 
         pid_file.unlink()
@@ -104,6 +111,7 @@ def exercise(base, adapter):
         original = pane(root, 'codex')[1]
         distribution = process_stamp(1)['generation']
         missing = dispatch_for(data, scope, original, distribution)
+        assert not parked_approval_stop(data, marker, identifier, raw, dispatch, boot)
         tmux(root, 'kill-session', '-t', 'codex')
         assert pane(root, 'codex') is None and process_stamp(child) == child_stamp
         assert recover(root, 'codex', missing, False)['prepared']
@@ -148,7 +156,7 @@ def exercise(base, adapter):
         assert recover(root, 'codex', previous, True)['stopped']
         assert recover(root, 'codex', previous, True)['stopped']
         assert pane(root, 'independent') is not None
-        print('NATIVE_APPROVAL_STOP=PASS (detached writer keeps stop unconfirmed; prior boot recovered; independent terminal preserved)')
+        print('NATIVE_APPROVAL_STOP=PASS (same-kernel maintenance proof, detached writer uncertainty, prior boot recovery)')
     finally:
         if child_stamp is not None and process_stamp(child) == child_stamp:
             os.kill(child, signal.SIGTERM)
