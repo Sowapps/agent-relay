@@ -24,7 +24,7 @@ def main():
         return {'available': True} if profile == 'command' else native_clients.status(root, profile)
     if action == 'start' and profile != 'command':
         return native_clients.start(root, profile, request.get('allowLocalWork', False), request.get('resume', False),
-                                    request.get('requirePinnedConversation', False))
+                                    request.get('requirePinnedConversation', False), request.get('participantMcp'))
     if action in ['stop', 'interrupt'] and profile != 'command':
         return native_clients.control(root, profile, action == 'stop')
     if profile != 'command' and action == 'read_terminal':

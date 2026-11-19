@@ -8,9 +8,8 @@ public sealed class ScopedSessions(SessionService sessions, AgentControl agents,
 {
     public async Task<SessionSnapshot> OpenAsync(SessionDefinition definition, CancellationToken token)
     {
-        if (definition.Endpoint.AdapterId != "wsl-agent") throw new RelayException("adapter_unavailable", "This endpoint has no installed native-session adapter.");
-        var record = await sessions.CreateAsync(definition.Id, definition.Name, definition.Endpoint.BindingId, token, definition);
         context.ValidateDefinition(definition);
+        var record = await sessions.CreateAsync(definition.Id, definition.Name, definition.Endpoint.BindingId, token, definition);
         new ProjectPolicy(projects).Demand(new(definition.Scope.SenderId, [definition.Scope.ProjectId]), definition.Scope.ProjectId, RelayCapabilities.ManageSession);
         if (record.Definition is null || record.Definition.Scope != definition.Scope ||
             !ScopedSessionContext.SameWorkspace(record.Definition.Workspace, definition.Workspace))
@@ -43,7 +42,7 @@ public sealed class ScopedSessions(SessionService sessions, AgentControl agents,
 
     public async Task<ReadPage<SessionSnapshot>> ListAsync(ReadQuery query, Guid ownerId, CancellationToken token)
     {
-        var page = await journal.SessionsAsync(query, ownerId, token);
+        var page = await journal.SessionsAsync(query, ownerId, token, context.Mandates(query.ProjectId, ownerId, RelayCapabilities.ReadHistory));
         return new(page.Items.Select(Snapshot).ToArray(), page.NextCursor, page.HasMore);
     }
     public async Task<ReadPage<SessionSnapshot>> AllAsync(ReadQuery query, CancellationToken token)

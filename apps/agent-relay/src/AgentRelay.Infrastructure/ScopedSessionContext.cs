@@ -5,6 +5,10 @@ namespace AgentRelay.Infrastructure;
 // Owns retained scope and revocation checks shared across native capabilities.
 public sealed class ScopedSessionContext(ProjectSettingsStore projects, SessionService sessions)
 {
+    internal SessionMandate[] Mandates(Guid projectId, Guid participant, string capability) =>
+        projects.Load().Memberships.SingleOrDefault(member => member.ProjectId == projectId && member.EndpointId == participant)
+            ?.SessionMandates?.Where(item => item.Capabilities.Contains(capability, StringComparer.Ordinal)).ToArray() ?? [];
+
     internal static bool SameWorkspace(RelayWorkspace left, RelayWorkspace right) =>
         left.Id == right.Id && left.EndpointId == right.EndpointId && left.Location == right.Location;
 

@@ -2,7 +2,7 @@ using AgentRelay.Core;
 
 namespace AgentRelay.Infrastructure;
 
-public sealed class ProjectSettingsStore(string dataDirectory) : IProjectStateStore
+public sealed class ProjectSettingsStore(string dataDirectory) : IProjectStateStore, IProjectAccessStore
 {
     private readonly string path = Path.Combine(dataDirectory, "relay-projects.json");
     public ProjectConfiguration Load() => File.Exists(path) ? RelayJson.Deserialize<ProjectConfiguration>(File.ReadAllText(path)) : new(1, [], [], [], []);
@@ -31,6 +31,69 @@ public sealed class ProjectSettingsStore(string dataDirectory) : IProjectStateSt
         var updated = project with { Enabled = enabled, ArchiveRequested = archiveRequested, ArchiveDiagnostic = diagnostic };
         if (updated != project) SaveCore(configuration with { Projects = configuration.Projects.Select(item => item.Id == project.Id ? updated : item).ToArray() });
         return updated;
+    }
+
+    public ProjectAccessEntry ReadAccess(CallerIdentity caller, Guid projectId, Guid endpointId)
+    {
+        var configuration = Load();
+        DemandAccessAdministration(configuration, caller, projectId);
+        return AccessEntry(SelectMembership(configuration, projectId, endpointId));
+    }
+
+    public async Task<ProjectAccessEntry> SetAccessAsync(CallerIdentity caller, Guid projectId, Guid endpointId, string expectedRevision,
+        ProjectAccessChange change, CancellationToken token)
+    {
+        using var ownership = WriteLease();
+        var configuration = Load();
+        DemandAccessAdministration(configuration, caller, projectId);
+        if (caller.EndpointId == endpointId)
+            throw new RelayException("capability_denied", "Project access administrators cannot change their own grants.", false);
+        var previous = SelectMembership(configuration, projectId, endpointId);
+        var current = AccessEntry(previous);
+        if (!string.Equals(current.Revision, expectedRevision, StringComparison.Ordinal))
+            throw new RelayException("state_conflict", "The participant's access changed. Read the current revision before retrying.", false);
+        var administrative = previous.Capabilities.Where(IsAdministrative);
+        if (change.Capabilities.Any(IsAdministrative))
+            throw new RelayException("capability_denied", "Administrative grants require the relay administrator.", false);
+        var projectEndpoints = configuration.Memberships.Where(item => item.ProjectId == projectId).Select(item => item.EndpointId).ToHashSet();
+        if (change.Workspaces.Any(access => !configuration.Workspaces.Any(workspace => workspace.Id == access.WorkspaceId && projectEndpoints.Contains(workspace.EndpointId))))
+            throw new RelayException("capability_denied", "Every workspace must belong to a participant in this project.", false);
+        var records = new SqliteDocuments<RelaySession>(new RelayDatabase(dataDirectory), "sessions");
+        foreach (var mandate in change.SessionMandates)
+        {
+            var target = await records.FindAsync(mandate.SessionId, token);
+            if (target?.Definition?.Scope is not { } scope || scope.ProjectId != projectId || scope.SenderId != mandate.OwnerId)
+                throw new RelayException("capability_denied", "A session mandate must match an existing session and its recorded owner in this project.", false);
+        }
+        var updated = previous with { Capabilities = [..change.Capabilities, ..administrative], Workspaces = change.Workspaces,
+            CommandIds = change.CommandIds, MessageTargets = change.MessageTargets, SessionMandates = change.SessionMandates };
+        var result = AccessEntry(updated);
+        if (current.Revision == result.Revision) return current;
+        var next = configuration with { Memberships = configuration.Memberships.Select(item => item == previous ? updated : item).ToArray() };
+        ProjectPolicy.Validate(next);
+        token.ThrowIfCancellationRequested();
+        SaveCore(next);
+        return result;
+    }
+
+    private static bool IsAdministrative(string capability) =>
+        capability is RelayCapabilities.ManageProject or RelayCapabilities.ManageProjectAccess;
+
+    private static ProjectAccessEntry AccessEntry(ProjectMembership membership) => new(membership.EndpointId, membership.Role,
+        AgentRelay.Protocol.McpStableProtocol.Hash(RelayJson.Serialize(membership)),
+        new(membership.Capabilities.Where(item => !IsAdministrative(item)).ToArray(), membership.Workspaces,
+            membership.CommandIds ?? [], membership.MessageTargets, membership.SessionMandates ?? []));
+
+    private static ProjectMembership SelectMembership(ProjectConfiguration configuration, Guid projectId, Guid endpointId) =>
+        configuration.Memberships.SingleOrDefault(item => item.ProjectId == projectId && item.EndpointId == endpointId) ??
+        throw new RelayException("not_found", "The selected participant does not belong to this project.", false);
+
+    private static void DemandAccessAdministration(ProjectConfiguration configuration, CallerIdentity caller, Guid projectId) =>
+        new ProjectPolicy(new ConfigurationSnapshot(configuration)).Demand(caller, projectId, RelayCapabilities.ManageProjectAccess);
+
+    private sealed record ConfigurationSnapshot(ProjectConfiguration Configuration) : IProjectConfigurationStore
+    {
+        public ProjectConfiguration Load() => Configuration;
     }
     private FileStream WriteLease()
     {

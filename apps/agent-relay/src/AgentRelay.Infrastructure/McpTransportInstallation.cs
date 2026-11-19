@@ -10,10 +10,11 @@ public sealed record McpLaunch(string Command, string[] Args);
 /// <summary>Composition for the one stable launch entry; transport code/policy is never copied into the script.</summary>
 public static class McpTransportInstallation
 {
-    public static McpLaunch Launch(string data, Guid? binding = null)
+    public static McpLaunch Launch(string data, Guid? binding = null, bool wslStdio = false)
     {
         var args = new List<string> { "-NoProfile", "-NonInteractive", "-File", RuntimePaths.TransportEntryScript(data) };
         if (binding is { } id) { args.Add("-ConnectionId"); args.Add(id.ToString("D")); }
+        if (wslStdio) args.Add("-WslStdio");
         return new(PowerShell(), args.ToArray());
     }
 
@@ -87,13 +88,18 @@ public static class McpTransportInstallation
     public static string EntryScript(string data)
     {
         static string Literal(string value) => "'" + value.Replace("'", "''") + "'";
-        return "param([string]$ConnectionId,[switch]$HostLaunch,[switch]$Show)\n" +
+        return "param([string]$ConnectionId,[switch]$HostLaunch,[switch]$Show,[switch]$WslStdio)\n" +
             "$ErrorActionPreference = 'Stop'\n[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)\n$OutputEncoding = [Console]::OutputEncoding\n" +
             "$env:DOTNET_BUNDLE_EXTRACT_BASE_DIR = " + Literal(RuntimePaths.TransportBundleDirectory(data)) + "\n" +
             "$relayArguments = @('--selection'," + Literal(RuntimePaths.TransportSelection(data)) + ",'--state-dir'," + Literal(RuntimePaths.TransportStateDirectory(data)) + ")\n" +
             "if ($HostLaunch) { $relayArguments += '--launch-host'; if ($Show) { $relayArguments += '--show' } }\n" +
             "elseif ($ConnectionId) { $relayArguments += @('--connection-id',$ConnectionId) }\n" +
-            "& " + Literal(RuntimePaths.TransportBootstrapExecutable(data)) + " @relayArguments\nexit $LASTEXITCODE\n";
+            "$relayEntry = " + Literal(RuntimePaths.TransportBootstrapExecutable(data)) + "\n" +
+            "if ($WslStdio) {\n" +
+            "  $relayEntry = & $relayEntry @relayArguments --locate-wsl-entry\n" +
+            "  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n" +
+            "  $relayArguments += '--wsl-stdio'\n" +
+            "}\n& $relayEntry @relayArguments\nexit $LASTEXITCODE\n";
     }
 
     private static string Hash(string path)

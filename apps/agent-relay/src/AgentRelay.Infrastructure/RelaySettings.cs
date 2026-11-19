@@ -5,7 +5,11 @@ namespace AgentRelay.Infrastructure;
 
 public sealed record CommandRule(string Id, string Name, string Program, string[] Arguments);
 public sealed record WslProfile(string Id, string Name, string Distribution, string User, string Root, string Client, CommandRule[] Commands,
-    bool AllowLocalWork = false, string? Workspace = null, string? NativeExecutable = null);
+    bool AllowLocalWork = false, string? Workspace = null, string? NativeExecutable = null)
+{
+    [System.Text.Json.Serialization.JsonIgnore]
+    internal McpLaunch? ParticipantMcp { get; init; }
+}
 public sealed record TransferLimits(long MaximumBytes = 256L * 1024 * 1024, int WaitSeconds = 180);
 public sealed record RelaySettings(int Version, WslProfile[] Profiles, int MaximumConcurrency = 4, TransferLimits? Transfers = null);
 

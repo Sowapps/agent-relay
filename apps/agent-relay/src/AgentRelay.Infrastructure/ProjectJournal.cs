@@ -8,15 +8,16 @@ public sealed class ProjectJournal(RelayDatabase database) : IRelayJournal
         ReadAsync<WorkRecord>("work", query, null, token);
     public Task<ReadPage<InboxMessage>> MessagesAsync(ReadQuery query, Guid recipientId, CancellationToken token) =>
         ReadAsync<InboxMessage>("inbox", query, recipientId, token);
-    public Task<ReadPage<RelaySession>> SessionsAsync(ReadQuery query, Guid ownerId, CancellationToken token) =>
-        ReadAsync<RelaySession>("sessions", query, ownerId, token);
+    public Task<ReadPage<RelaySession>> SessionsAsync(ReadQuery query, Guid ownerId, CancellationToken token, SessionMandate[]? mandates = null) =>
+        ReadAsync<RelaySession>("sessions", query, ownerId, token, mandates: mandates);
     public Task<ReadPage<WorkEvent>> EventsAsync(ReadQuery query, CancellationToken token) => ReadAsync<WorkEvent>("work_events", query, null, token);
 
     // Local administrator observation only: does not poll an agent or advance its inbox cursor.
     internal Task<ReadPage<InboxMessage>> ObserveMessagesAsync(ReadQuery query, CancellationToken token) => ReadAsync<InboxMessage>("inbox", query, null, token, incrementalInbox: false);
     internal Task<ReadPage<RelaySession>> ObserveSessionsAsync(ReadQuery query, CancellationToken token) => ReadAsync<RelaySession>("sessions", query, null, token);
 
-    private async Task<ReadPage<T>> ReadAsync<T>(string table, ReadQuery query, Guid? recipient, CancellationToken token, bool incrementalInbox = true)
+    private async Task<ReadPage<T>> ReadAsync<T>(string table, ReadQuery query, Guid? recipient, CancellationToken token,
+        bool incrementalInbox = true, SessionMandate[]? mandates = null)
     {
         if (query.ProjectId == Guid.Empty || query.Limit is < 1 or > 100 || query.Cursor < 0 || query.Search?.Length > 200 || query.Since > query.Until)
             throw new RelayException("invalid_query", "Expected a project, limit1..100, nonnegative cursor and valid date/search bounds.");
@@ -30,7 +31,18 @@ public sealed class ProjectJournal(RelayDatabase database) : IRelayJournal
             clauses.Add("json_extract(payload,'$." + field + "')=$" + parameter); command.Parameters.AddWithValue("$" + parameter, value);
         }
         Equal("project", scope + "projectId", query.ProjectId.ToString("D"));
-        Equal("recipient", table == "sessions" ? "definition.scope.senderId" : "recipientEndpointId", recipient?.ToString("D"));
+        if (table == "sessions" && recipient is not null && mandates is { Length: > 0 })
+        {
+            clauses.Add("""
+                (json_extract(payload,'$.definition.scope.senderId')=$recipient OR EXISTS (
+                    SELECT 1 FROM json_each($mandates)
+                    WHERE json_extract(value,'$.sessionId')=json_extract(payload,'$.id')
+                    AND json_extract(value,'$.ownerId')=json_extract(payload,'$.definition.scope.senderId')))
+                """);
+            command.Parameters.AddWithValue("$recipient", recipient.Value.ToString("D"));
+            command.Parameters.AddWithValue("$mandates", RelayJson.Serialize(mandates));
+        }
+        else Equal("recipient", table == "sessions" ? "definition.scope.senderId" : "recipientEndpointId", recipient?.ToString("D"));
         Equal("endpoint", table == "work" ? "request.scope.recipientId" : table == "sessions" ? "definition.scope.recipientId" : table == "work_events" ? "endpointId" : "senderEndpointId", query.EndpointId?.ToString("D"));
         Equal("session", table == "sessions" ? "id" : fields + "sessionId", query.SessionId?.ToString("D"));
         if (table == "work") { Equal("task", "request.taskId", query.TaskId?.ToString("D")); Equal("kind", "request.kind", query.Kind); Equal("state", "state", query.State); }

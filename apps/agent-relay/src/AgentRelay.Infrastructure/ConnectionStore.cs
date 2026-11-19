@@ -35,6 +35,14 @@ public sealed class ConnectionStore(string dataDirectory)
     }
 
     public string Secret(Guid? connectionId) => ReadSecret(dataDirectory, connectionId);
+
+    internal async Task DemandParticipantBindingAsync(Guid id, Guid endpointId, Guid projectId, CancellationToken token)
+    {
+        var binding = await bindings.FindAsync(id, token);
+        if (binding is not { Administrator: false, Revoked: false } || binding.EndpointId != endpointId ||
+            binding.ProjectIds.Length != 1 || binding.ProjectIds[0] != projectId)
+            throw new RelayException("authentication_required", "Native participant MCP requires an active connection for this exact participant and project.", false);
+    }
     public static string ReadSecret(string dataDirectory, Guid? connectionId)
     {
         RuntimePaths.DemandActive(dataDirectory);

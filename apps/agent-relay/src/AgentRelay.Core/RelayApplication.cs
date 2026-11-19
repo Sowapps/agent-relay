@@ -152,7 +152,10 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
             if (approvalRequestId is { } expected && approval?.Request.Id != expected)
             {
                 var original = await work.ReadAsync(expected, token);
-                if (original.Request.SessionId == id && original.Request.Scope == session.Scope && original.CancellationConfirmedAt is not null)
+                if (original.Request.SessionId == id && original.Request.Scope is { } originalScope &&
+                    ProjectPolicy.IsSameSessionContext(originalScope, session.Scope) &&
+                    (originalScope.SenderId == caller.EndpointId || session.Scope.SenderId == caller.EndpointId) &&
+                    original.CancellationConfirmedAt is not null)
                     return await sessions.InspectAsync(id, token);
                 throw new RelayException("approval_stop_mismatch", "This request no longer owns a pending stop in the selected session. Inspect its retained result.", false);
             }
@@ -188,7 +191,8 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
         var session = await OwnedAsync(caller, sessionId, RelayCapabilities.SendMessage, token);
         var scope = policy.Message(caller, session.Scope.ProjectId, session.Scope.RecipientId, session.Scope.WorkspaceId);
         return await work.SubmitAsync(new(requestId, scope.RecipientId.ToString("D"), "message", text, SessionId: sessionId,
-            Scope: scope, TaskId: taskId ?? requestId, AttemptId: requestId), token, new("Message · " + session.Name, Workspace(scope).Location));
+            Scope: scope, TaskId: taskId ?? requestId, AttemptId: requestId, SessionOwnerId: DelegatingOwner(session, caller)), token,
+            new("Message · " + session.Name, Workspace(scope).Location));
     }
 
     public async Task<WorkRecord> CommandAsync(CallerIdentity caller, Guid projectId, Guid endpointId, Guid workspaceId,
@@ -213,8 +217,9 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
         policy.Transfer(caller, session.Scope.ProjectId, transfer);
         if (transfer.Source.EndpointId != session.Scope.RecipientId && transfer.Destination.EndpointId != session.Scope.RecipientId)
             throw new RelayException("capability_denied", "The selected session is not a participant in this transfer.");
-        return await work.SubmitAsync(new(requestId, session.Scope.RecipientId.ToString("D"), "transfer", SessionId: sessionId,
-            Scope: session.Scope, TaskId: requestId, AttemptId: requestId, Artifact: transfer), token,
+        var scope = session.Scope with { SenderId = caller.EndpointId };
+        return await work.SubmitAsync(new(requestId, scope.RecipientId.ToString("D"), "transfer", SessionId: sessionId,
+            Scope: scope, TaskId: requestId, AttemptId: requestId, Artifact: transfer, SessionOwnerId: DelegatingOwner(session, caller)), token,
             new("Transfer · " + transfer.Source.RelativePath, policy.Configuration().Workspaces.Single(item => item.Id == transfer.Destination.WorkspaceId).Location));
     }
 
@@ -288,10 +293,12 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
     }
 
     private RelayWorkspace Workspace(OperationScope scope) => policy.Configuration().Workspaces.Single(item => item.Id == scope.WorkspaceId);
+    private static Guid? DelegatingOwner(SessionSnapshot session, CallerIdentity caller) =>
+        session.Scope.SenderId == caller.EndpointId ? null : session.Scope.SenderId;
     private async Task<SessionSnapshot> OwnedAsync(CallerIdentity caller, Guid id, string capability, CancellationToken token)
     {
-        var session = await sessions.GetAsync(id, token); policy.Demand(caller, session.Scope.ProjectId, capability);
-        if (session.Scope.SenderId != caller.EndpointId) throw new RelayException("capability_denied", "This connection does not own the selected session.");
+        var session = await sessions.GetAsync(id, token);
+        policy.DemandSession(caller, session, capability);
         return session;
     }
 }

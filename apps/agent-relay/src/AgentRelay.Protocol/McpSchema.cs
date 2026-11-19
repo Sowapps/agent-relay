@@ -31,6 +31,7 @@ public static class McpSchema
         var matches = type switch
         {
             "object" => value.ValueKind == JsonValueKind.Object,
+            "array" => value.ValueKind == JsonValueKind.Array,
             "string" => value.ValueKind == JsonValueKind.String,
             "integer" => value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out _),
             "boolean" => value.ValueKind is JsonValueKind.True or JsonValueKind.False,
@@ -60,6 +61,15 @@ public static class McpSchema
             if ((schema.TryGetProperty("maxLength", out var maximum) && value.GetString()!.Length > maximum.GetInt32()) ||
                 (schema.TryGetProperty("minLength", out var minimum) && value.GetString()!.Length < minimum.GetInt32()))
                 throw new McpProtocolException("invalid_request", "MCP text is outside its stated bounds.");
+            if (schema.TryGetProperty("enum", out var choices) &&
+                !choices.EnumerateArray().Any(choice => choice.GetString() == value.GetString()))
+                throw new McpProtocolException("invalid_request", "MCP argument is outside its declared choices.");
+        }
+        if (type == "array")
+        {
+            if (schema.TryGetProperty("maxItems", out var maximum) && value.GetArrayLength() > maximum.GetInt32())
+                throw new McpProtocolException("invalid_request", "MCP list exceeds its stated limit.");
+            foreach (var item in value.EnumerateArray()) ValidateValue(item, schema.GetProperty("items"));
         }
         if (type == "integer" && ((schema.TryGetProperty("minimum", out var min) && value.GetInt64() < min.GetInt64()) ||
                                   (schema.TryGetProperty("maximum", out var max) && value.GetInt64() > max.GetInt64())))

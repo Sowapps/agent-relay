@@ -155,7 +155,7 @@ public sealed class SessionService
     public async Task<SessionDetail> StartAsync(Guid id, CancellationToken token)
     {
         var session = await FindAsync(id, token);
-        var agent = await agents.StartAsync(await ResolveAsync(id, session.ProfileId, token), token, resume: true);
+        var agent = await StartNativeAsync(session, await ResolveAsync(id, session.ProfileId, token), token);
         return new(session, agent);
     }
 
@@ -166,7 +166,7 @@ public sealed class SessionService
         var status = await agents.StatusAsync(profile, token);
         if (status.State == "not_started" && mayRestore && status.NativeConversationId is not null && status.DistributionRuntime is not null)
         {
-            status = await agents.StartAsync(profile, token, resume: true, requirePinnedConversation: true);
+            status = await StartNativeAsync(session, profile, token, requirePinnedConversation: true);
             var readinessDeadline = System.Diagnostics.Stopwatch.StartNew();
             while (status.State == "starting" && readinessDeadline.Elapsed < TimeSpan.FromSeconds(5))
             {
@@ -188,7 +188,24 @@ public sealed class SessionService
         var profile = await ResolveAsync(id, session.ProfileId, token, allowClosed: true);
         session = session with { State = "created", UpdatedAt = DateTimeOffset.UtcNow };
         await store.SaveAsync(id, session, token);
-        return new(session, await agents.StartAsync(profile, token, resume: true));
+        return new(session, await StartNativeAsync(session, profile, token));
+    }
+
+    private async Task<AgentStatus> StartNativeAsync(RelaySession session, WslProfile profile, CancellationToken token, bool requirePinnedConversation = false)
+    {
+        if (session.Definition is { Scope: var scope })
+        {
+            var participant = new ProjectSettingsStore(dataDirectory).Load().Memberships.SingleOrDefault(
+                item => item.ProjectId == scope.ProjectId && item.EndpointId == scope.RecipientId);
+            if (participant?.NativeConnectionId is { } binding)
+            {
+                await new ConnectionStore(dataDirectory).DemandParticipantBindingAsync(binding, scope.RecipientId, scope.ProjectId, token);
+                if (!File.Exists(RuntimePaths.TransportEntryScript(dataDirectory)))
+                    throw new RelayException("adapter_unavailable", "Prepare the scoped MCP transport for this installation before enabling native participant access.", false);
+                profile = profile with { ParticipantMcp = McpTransportInstallation.Launch(dataDirectory, binding, wslStdio: true) };
+            }
+        }
+        return await agents.StartAsync(profile, token, resume: true, requirePinnedConversation: requirePinnedConversation);
     }
 
     private static void DemandResumable(RelaySession session)
@@ -216,11 +233,11 @@ public sealed class SessionService
 
     internal async Task<bool> CloseApprovalSessionAsync(RelaySession session, WorkRequest request, CancellationToken token)
     {
-        if (request.Kind != "message" || request.Scope != session.Definition?.Scope || request.SessionId != session.Id ||
+        if (request.Kind != "message" || session.Definition is not { } definition || !ProjectPolicy.IsSessionRequest(request, definition) ||
             session.RetiredForCancellationId is { } other && other != request.Id)
             throw new RelayException("cancellation_unconfirmed", "The retained request does not identify this native approval.", false);
         var profile = await ResolveAsync(session.Id, session.ProfileId, token, allowClosed: true);
-        var proofRequest = new { requestId = request.Id, request.Scope };
+        var proofRequest = new { requestId = request.Id, definition.Scope };
         bool stopped;
         try
         {

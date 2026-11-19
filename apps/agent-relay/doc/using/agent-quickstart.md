@@ -60,6 +60,10 @@ Examples below use operation notation: wrap each `operation_id`/`arguments` pair
 {"tool":"get_result","arguments":{"request_id":"<retained-request-uuid>"}}
 ```
 
+## Local participant access
+
+If the project enabled local participant access, a native session has the `relay_project` MCP connection. Use it to act as that participant in the project. Use the original `relay` message channel to return the conversation's correlated reply. See [local participants and project access](mcp-tools.md#local-participants-and-project-access).
+
 ## Follow retained work, reports and conversations
 
 `list_results` and `list_events` accept explicit `project_id` plus optional `session_id`, `task_id`, endpoint, state, kind, search, date and cursor filters. They return bounded pages with `items`, `nextCursor` and `hasMore`; follow returned cursors, not a guessed total. Results are previews; open a specific result for full details. Results/events are newest-first. Updating an existing operation requires reading that request again; an old pagination cursor is not a subscription to updates.

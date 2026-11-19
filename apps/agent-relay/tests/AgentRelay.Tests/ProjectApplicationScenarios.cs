@@ -12,8 +12,11 @@ internal static class ProjectApplicationScenarios
              new(project, worker, "secondary", [RelayCapabilities.ReceiveMessage, RelayCapabilities.SendMessage], [])]);
         var settings = new ProjectSettingsStore(data); settings.Save(configuration);
         var store = new SqliteWorkStore(new RelayDatabase(data)); var adapter = new MemoryAdapter(store);
-        await using var work = new WorkService(store, adapter, () => [new(worker.ToString("D"), false, true)]);
-        var app = new RelayApplication(new(settings), work, adapter, new ProjectJournal(new RelayDatabase(data)));
+        var sessionRouter = new SessionAdapterRouter(adapter, new Dictionary<string, IRelaySessions> { ["memory"] = adapter },
+            (_, _) => Task.FromResult("memory"));
+        var workRouter = new ScopedWorkRouter(settings, new Dictionary<string, IScopedWorkAdapter> { ["memory"] = adapter }, adapter);
+        await using var work = new WorkService(store, workRouter, () => [new(worker.ToString("D"), false, true)]);
+        var app = new RelayApplication(new(settings), work, sessionRouter, new ProjectJournal(new RelayDatabase(data)));
         var caller = new CallerIdentity(owner, [project]);
         var session = await app.OpenSessionAsync(caller, project, worker, workspace, Guid.NewGuid(), "Memory contract", CancellationToken.None);
         var request = Guid.NewGuid(); var exact = "line one\n\tline two — été";
@@ -92,7 +95,7 @@ internal static class ProjectApplicationScenarios
         Console.WriteLine("PASS: production pipe bound identity, project-only discovery/read, admin refusal and live revocation");
     }
 
-    internal sealed class MemoryAdapter(SqliteWorkStore store) : IRelaySessions, IWorkExecutor
+    internal sealed class MemoryAdapter(SqliteWorkStore store) : IRelaySessions, IScopedWorkAdapter
     {
         private readonly Dictionary<Guid, SessionSnapshot> sessions = new();
         public Task<SessionSnapshot> OpenAsync(SessionDefinition definition, CancellationToken token)
@@ -102,6 +105,11 @@ internal static class ProjectApplicationScenarios
         public Task<ReadPage<SessionSnapshot>> ListAsync(ReadQuery query, Guid owner, CancellationToken token) => Task.FromResult(new ReadPage<SessionSnapshot>(sessions.Values.Where(session => session.Scope.ProjectId == query.ProjectId && session.Scope.SenderId == owner).ToArray(), null, false));
         public Task<SessionSnapshot> ControlAsync(Guid id, string action, CancellationToken token) => GetAsync(id, token);
         public Task<IReadOnlyList<string>> RefreshMessagesAsync(Guid projectId, Guid recipientId, Guid? sessionId, CancellationToken token) => Task.FromResult<IReadOnlyList<string>>([]);
+        public Task<IPreparedWork> PrepareAsync(WorkRequest request, CancellationToken token) =>
+            Task.FromResult<IPreparedWork>(new ScopedPreparedWork(dispatch => ExecuteAsync(request, dispatch)));
+        public Task<WorkRecord> ReconcileAsync(WorkRecord record, CancellationToken token) => Task.FromResult(record);
+        public Task<TransferPartial> PartialAsync(WorkRequest request, bool remove, CancellationToken token) =>
+            throw new RelayException("adapter_unavailable", "This fixture exercises messaging only.", false);
         public async Task<WorkResult> ExecuteAsync(WorkRequest request, CancellationToken token)
         {
             var scope = request.Scope!;

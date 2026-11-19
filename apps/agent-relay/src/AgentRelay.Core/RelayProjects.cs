@@ -4,9 +4,10 @@ public static class RelayCapabilities
 {
     public const string SendMessage = "message.send", ReceiveMessage = "message.receive", ReadHistory = "history.read",
         ManageSession = "session.manage", DecideApproval = "session.approval", RunCommand = "command.execute", InspectHost = "host.inspect",
-        ReadFile = "file.read", WriteFile = "file.write", ReplaceFile = "file.replace", LocalWork = "agent.local-work", ManageProject = "project.manage";
+        ReadFile = "file.read", WriteFile = "file.write", ReplaceFile = "file.replace", LocalWork = "agent.local-work", ManageProject = "project.manage",
+        ManageProjectAccess = "project.access.manage";
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
-    { SendMessage, ReceiveMessage, ReadHistory, ManageSession, DecideApproval, RunCommand, InspectHost, ReadFile, WriteFile, ReplaceFile, LocalWork, ManageProject };
+    { SendMessage, ReceiveMessage, ReadHistory, ManageSession, DecideApproval, RunCommand, InspectHost, ReadFile, WriteFile, ReplaceFile, LocalWork, ManageProject, ManageProjectAccess };
 }
 
 public sealed record RelayProject(Guid Id, string Name, bool Enabled = true, bool ArchiveRequested = false, string? ArchiveDiagnostic = null)
@@ -14,8 +15,10 @@ public sealed record RelayProject(Guid Id, string Name, bool Enabled = true, boo
 public sealed record RelayEndpoint(Guid Id, string Name, string AdapterId, string BindingId);
 public sealed record RelayWorkspace(Guid Id, Guid EndpointId, string Name, string Location, bool ConcurrentWrites = false);
 public sealed record WorkspaceAccess(Guid WorkspaceId, bool Read, bool Write = false, bool Replace = false);
+public sealed record SessionMandate(Guid SessionId, Guid OwnerId, string[] Capabilities);
 public sealed record ProjectMembership(Guid ProjectId, Guid EndpointId, string Role, string[] Capabilities,
-    WorkspaceAccess[] Workspaces, string[]? CommandIds = null);
+    WorkspaceAccess[] Workspaces, string[]? CommandIds = null, Guid[]? MessageTargets = null,
+    SessionMandate[]? SessionMandates = null, Guid? NativeConnectionId = null);
 public sealed record ProjectConfiguration(int Version, RelayProject[] Projects, RelayEndpoint[] Endpoints,
     RelayWorkspace[] Workspaces, ProjectMembership[] Memberships);
 public sealed record CallerIdentity(Guid EndpointId, Guid[] ProjectIds);
@@ -68,6 +71,15 @@ public sealed class ProjectPolicy(IProjectConfigurationStore configuration)
                 member.Capabilities.Distinct().Count() != member.Capabilities.Length || member.Workspaces.Select(item => item.WorkspaceId).Distinct().Count() != member.Workspaces.Length ||
                 member.Workspaces.Any(access => !value.Workspaces.Any(workspace => workspace.Id == access.WorkspaceId) || (access.Replace && !access.Write)))
                 throw new RelayException("invalid_configuration", "Membership references, role or explicit capabilities are invalid.");
+            var peers = value.Memberships.Where(item => item.ProjectId == member.ProjectId).Select(item => item.EndpointId).ToHashSet();
+            if (member.NativeConnectionId == Guid.Empty ||
+                (member.MessageTargets ?? []).Any(id => !peers.Contains(id)) ||
+                (member.MessageTargets ?? []).Distinct().Count() != (member.MessageTargets?.Length ?? 0) ||
+                (member.SessionMandates ?? []).Select(item => item.SessionId).Distinct().Count() != (member.SessionMandates?.Length ?? 0) ||
+                (member.SessionMandates ?? []).Any(item => item.SessionId == Guid.Empty || item.OwnerId == member.EndpointId ||
+                    !peers.Contains(item.OwnerId) || item.Capabilities is null || item.Capabilities.Length == 0 ||
+                    item.Capabilities.Distinct().Count() != item.Capabilities.Length || item.Capabilities.Any(cap => !IsMandateCapability(cap))))
+                throw new RelayException("invalid_configuration", "Message targets and session mandates must refer to this project's participants and supported operations.");
         }
     }
 
@@ -99,12 +111,42 @@ public sealed class ProjectPolicy(IProjectConfigurationStore configuration)
 
     public OperationScope Message(CallerIdentity caller, Guid projectId, Guid recipientId, Guid? workspaceId = null)
     {
-        Demand(caller, projectId, RelayCapabilities.SendMessage);
+        var sender = Demand(caller, projectId, RelayCapabilities.SendMessage);
+        if (sender.MessageTargets is { } targets && !targets.Contains(recipientId)) Denied();
         var receiver = Configuration().Memberships.SingleOrDefault(item => item.ProjectId == projectId && item.EndpointId == recipientId);
         if (receiver is null || !receiver.Capabilities.Contains(RelayCapabilities.ReceiveMessage, StringComparer.Ordinal)) Denied();
         if (workspaceId is { } id) Workspace(caller, projectId, id, write: false, recipientId);
         return new(projectId, caller.EndpointId, recipientId, workspaceId);
     }
+
+    private static bool IsMandateCapability(string capability) => capability is
+        RelayCapabilities.SendMessage or RelayCapabilities.ReceiveMessage or RelayCapabilities.ReadHistory or RelayCapabilities.ManageSession;
+
+    /// <summary>Authorize the actual requester for this exact retained session under current project policy.</summary>
+    public void DemandSession(CallerIdentity caller, SessionSnapshot session, string capability)
+    {
+        var member = Demand(caller, session.Scope.ProjectId, capability);
+        if (!CanUseSession(member, session, capability)) Denied();
+    }
+
+    public bool CanControlSession(CallerIdentity caller, SessionSnapshot session, string capability)
+    {
+        var member = Configuration().Memberships.SingleOrDefault(item => item.ProjectId == session.Scope.ProjectId && item.EndpointId == caller.EndpointId);
+        return caller.ProjectIds.Contains(session.Scope.ProjectId) && member is not null &&
+            member.Capabilities.Contains(capability, StringComparer.Ordinal) && CanUseSession(member, session, capability);
+    }
+
+    private static bool CanUseSession(ProjectMembership member, SessionSnapshot session, string capability) =>
+        session.Scope.SenderId == member.EndpointId || (member.SessionMandates ?? []).Any(item =>
+            item.SessionId == session.Id && item.OwnerId == session.Scope.SenderId && item.Capabilities.Contains(capability, StringComparer.Ordinal));
+
+    /// <summary>Check that the requester and delivery both refer to the same retained session context.</summary>
+    public static bool IsSameSessionContext(OperationScope requested, OperationScope retained) =>
+        requested.ProjectId == retained.ProjectId && requested.RecipientId == retained.RecipientId && requested.WorkspaceId == retained.WorkspaceId;
+
+    public static bool IsSessionRequest(WorkRequest request, SessionDefinition definition) =>
+        request.SessionId == definition.Id && request.Scope is { } scope && IsSameSessionContext(scope, definition.Scope) &&
+        (request.SessionOwnerId ?? scope.SenderId) == definition.Scope.SenderId;
 
     public RelayWorkspace Workspace(CallerIdentity caller, Guid projectId, Guid workspaceId, bool write, Guid? owner = null, bool replace = false)
     {

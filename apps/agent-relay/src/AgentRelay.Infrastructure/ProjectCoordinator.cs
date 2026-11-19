@@ -5,10 +5,11 @@ namespace AgentRelay.Infrastructure;
 public sealed record ProjectAction(string Name, Guid? ProjectId = null, Guid? EndpointId = null, Guid? WorkspaceId = null,
     Guid? SessionId = null, Guid? RequestId = null, string? Text = null, string? DisplayName = null, string? CommandId = null,
     string? Control = null, ReadQuery? Query = null, ArtifactTransfer? Transfer = null, Guid? TaskId = null, Guid? ActorId = null,
-    string? State = null, string? ExpectedState = null, string? ApprovalRevision = null);
+    string? State = null, string? ExpectedState = null, string? ApprovalRevision = null, ProjectAccessChange? Access = null);
 public sealed record ProjectReply(ProjectConfiguration? Configuration = null, SessionSnapshot? Session = null, WorkRecord? Operation = null,
     ReadPage<SessionSnapshot>? Sessions = null, ReadPage<WorkRecord>? Operations = null, ReadPage<InboxMessage>? Messages = null, HostReport? Host = null, ReadPage<WorkEvent>? Events = null, TransferPartial? Partial = null, RelayProject? Project = null,
-    CancellationProgress? Cancellation = null, SessionTerminal? Terminal = null, TerminalSignalReceipt? TerminalSignal = null)
+    CancellationProgress? Cancellation = null, SessionTerminal? Terminal = null, TerminalSignalReceipt? TerminalSignal = null,
+    ProjectAccessEntry? ProjectAccess = null)
 {
     internal static ProjectReply WithCancellation(WorkRecord operation) => new(Operation: operation, Cancellation: CancellationProgress.From(operation));
 }
@@ -73,7 +74,7 @@ public sealed class ProjectCoordinator : IAsyncDisposable
     public WorkService Work { get; }
     public RelayApplication Application { get; }
     private readonly SqliteWorkStore store;
-    private readonly ScopedSessions adapter;
+    private readonly IRelaySessions adapter;
     private readonly ProjectJournal observation;
 
     private readonly CancellationTokenSource archiveStop = new();
@@ -167,6 +168,10 @@ public sealed class ProjectCoordinator : IAsyncDisposable
         return action.Name switch
         {
             "configuration" => new(Configuration: Application.Discover(caller)),
+            "get_project_access" => new(ProjectAccess: Application.ReadProjectAccess(caller, Required(action.ProjectId, "projectId"), Required(action.EndpointId, "endpointId"))),
+            "set_project_access" => new(ProjectAccess: await Application.SetProjectAccessAsync(caller, Required(action.ProjectId, "projectId"),
+                Required(action.EndpointId, "endpointId"), action.ExpectedState ?? "",
+                action.Access ?? throw new RelayException("invalid_request", "Project access fields are required.", false), token)),
             "inspect_host" => new(Host: await Application.InspectHostAsync(caller, Required(action.ProjectId, "projectId"), Required(action.EndpointId, "endpointId"), token)),
             "open_session" => new(Session: await Application.OpenSessionAsync(caller, Required(action.ProjectId, "projectId"), Required(action.EndpointId, "endpointId"), Required(action.WorkspaceId, "workspaceId"), Required(action.SessionId, "sessionId"), action.DisplayName ?? "", token)),
             "get_session" => new(Session: await Application.SessionAsync(caller, Required(action.SessionId, "sessionId"), token)),

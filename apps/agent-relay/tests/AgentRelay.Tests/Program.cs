@@ -18,6 +18,11 @@ if (args.Length == 3 && args[0] == "selected-update-crash") { SelectedUpdateScen
 if (args.Length == 2 && args[0] == "installation-runtime") { await InstallationRuntimeScenarios.RunAsync(Path.GetFullPath(args[1])); return; }
 if (args.Length == 2 && args[0] == "update-host-fixture") { await InstallationRuntimeScenarios.FixtureAsync(Path.GetFullPath(args[1])); return; }
 if (args.Length == 4 && args[0] == "mcp-entry") { await McpEntryScenarios.RunAsync(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), Path.GetFullPath(args[3])); return; }
+if (args.Length == 6 && args[0] == "local-agent-communication")
+{
+    await LocalAgentCommunicationScenarios.RunAsync(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), Path.GetFullPath(args[3]), args[4], args[5]);
+    return;
+}
 
 if (args.Length == 2 && args[0] == "stable-mcp-contract") { await McpContractScenarios.RunAsync(Path.GetFullPath(args[1])); return; }
 

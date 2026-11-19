@@ -9,6 +9,17 @@ public static class McpToolCatalog
 {
     private static object Text(int maximum = 200) => new { type = "string", maxLength = maximum };
     private static object Id() => new { type = "string", format = "uuid" };
+    private static object List(object items, int maximum = 100) => new { type = "array", items, maxItems = maximum };
+    private static object Flag() => new { type = "boolean" };
+    private static object Access()
+    {
+        var workspace = new { type = "object", properties = new { workspace_id = Id(), read = Flag(), write = Flag(), replace = Flag() },
+            required = new[] { "workspace_id", "read", "write", "replace" }, additionalProperties = false };
+        var mandate = new { type = "object", properties = new { session_id = Id(), owner_id = Id(), capabilities = List(Text(48), 4) },
+            required = new[] { "session_id", "owner_id", "capabilities" }, additionalProperties = false };
+        return new { project_id = Id(), endpoint_id = Id(), expected_revision = Text(64), capabilities = List(Text(48), 20),
+            workspaces = List(workspace), command_ids = List(Text()), all_message_targets = Flag(), message_targets = List(Id()), session_mandates = List(mandate) };
+    }
     private static Registration Tool(string name, string description, Func<Arguments, ProjectAction> route, object properties, params string[] required)
         => Register(name, description, properties, required, route, false);
 
@@ -35,6 +46,11 @@ public static class McpToolCatalog
             new { }, [], Discover, allowStaleCatalog: true),
         Tool("set_project_state", "Archive or reactivate an authorized project with explicit project.manage permission. Archival suspends new work, persists its request and waits for existing work before automatic finalization; no task/session is stopped automatically. Archived history stays readable.",
             a => new("set_project_state", a.Id("project_id"), State: a.Text("state"), ExpectedState: a.Text("expected_state")), new { project_id = Id(), state = Text(8), expected_state = Text(8) }, "project_id", "state", "expected_state"),
+        Tool("get_project_access", "Read the operational grants and revision of an existing participant in a project you administer.",
+            a => new("get_project_access", a.Id("project_id"), a.Id("endpoint_id")), new { project_id = Id(), endpoint_id = Id() }, "project_id", "endpoint_id"),
+        Tool("set_project_access", "Replace one project's operational grants for an existing participant. Requires project.access.manage and the current revision.",
+            a => new("set_project_access", a.Id("project_id"), a.Id("endpoint_id"), ExpectedState: a.Text("expected_revision"), Access: a.ProjectAccess()),
+            Access(), "project_id", "endpoint_id", "expected_revision", "capabilities", "workspaces", "command_ids", "all_message_targets", "message_targets", "session_mandates"),
         Tool("inspect_host", "Read authorized endpoint user/platform/tool versions and selected service presence. No model, secret dump or configuration change.",
             a => new("inspect_host", a.Id("project_id"), a.Id("endpoint_id")), new { project_id = Id(), endpoint_id = Id() }, "project_id", "endpoint_id"),
         Tool("list_profiles", "Compatibility discovery alias for authorized project contexts; no unscoped global profiles are returned.",
@@ -138,6 +154,20 @@ public static class McpToolCatalog
             return new(location.GetProperty("endpoint_id").GetGuid(), location.GetProperty("workspace_id").GetGuid(), location.GetProperty("path").GetString()!);
         }
         internal bool Replace => Value.TryGetProperty("replace", out var replace) && replace.GetBoolean();
+        internal ProjectAccessChange ProjectAccess()
+        {
+            static string[] Strings(JsonElement values) => values.EnumerateArray().Select(value => value.GetString()!).ToArray();
+            var targets = Value.GetProperty("message_targets").EnumerateArray().Select(item => item.GetGuid()).ToArray();
+            var all = Value.GetProperty("all_message_targets").GetBoolean();
+            if (all && targets.Length != 0)
+                throw new RelayException("invalid_request", "Select all message targets or supply an explicit list.", false);
+            return new(Strings(Value.GetProperty("capabilities")),
+                Value.GetProperty("workspaces").EnumerateArray().Select(item => new WorkspaceAccess(item.GetProperty("workspace_id").GetGuid(),
+                    item.GetProperty("read").GetBoolean(), item.GetProperty("write").GetBoolean(), item.GetProperty("replace").GetBoolean())).ToArray(),
+                Strings(Value.GetProperty("command_ids")), all ? null : targets,
+                Value.GetProperty("session_mandates").EnumerateArray().Select(item => new SessionMandate(item.GetProperty("session_id").GetGuid(),
+                    item.GetProperty("owner_id").GetGuid(), Strings(item.GetProperty("capabilities")))).ToArray());
+        }
     }
 
 }

@@ -21,6 +21,8 @@ Transfer records and sibling status/candidate/active markers live below the expl
 
 Total loss of every stream owner still closes stdio and needs client cooperation. A cooperative success does not prove recovery from that failure, nor does it migrate an already-loaded legacy broker. WindowsPipeInput polls availability on the solely owned stdin handle without cancelling an unproven blocked read. It can trigger succession while idle, carrying partial-frame and unread bytes. A selected worker change drops an idle old proxy; work still executes in the independently authorized host. Unchanged failed successors are not spawned repeatedly. Bounded presence records identify actual/selected images and last observation; the updater checks all expected identities rather than infer activation from a file alone.
 
+The optional WSL stdio entry keeps its Win32 process alive for the connection. The fixed bootstrap resolves a verified versioned gateway image and exits. The byte proxy runs from that immutable slot and connects the WSL streams to ordinary redirected Windows pipes, keeping the fixed executable replaceable during updates. The gateway can transfer its Windows handles to a successor while the WSL byte streams stay open. The proxy does not interpret messages or choose the worker.
+
 ## Packaging and checks
 
 Publish Transport independently for win-x64 with its own runtime lock; it must contain no Core, Infrastructure, SQLite or WebView assembly. Self-contained runtime files are required because the transport outlives an application release; copying runtime files is not a second implementation of application policy. Its exact loaded bundle is distinct from the selected worker's release.

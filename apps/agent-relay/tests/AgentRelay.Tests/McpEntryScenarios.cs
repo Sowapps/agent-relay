@@ -7,7 +7,7 @@ using AgentRelay.Transport;
 
 internal static class McpEntryScenarios
 {
-    public static async Task RunAsync(string root, string bundle, string appSource)
+    internal static string PrepareInstallation(string root, string bundle, string appSource)
     {
         var app = Path.Combine(root, "app");
         var transport = Path.Combine(root, "transport");
@@ -22,6 +22,12 @@ internal static class McpEntryScenarios
         var data = RuntimePaths.PortableDataDirectory(root);
         Directory.CreateDirectory(data);
         McpTransportInstallation.Prepare(data, app, transport);
+        return data;
+    }
+
+    public static async Task RunAsync(string root, string bundle, string appSource)
+    {
+        var data = PrepareInstallation(root, bundle, appSource);
         var launch = McpTransportInstallation.Launch(data);
         var start = new ProcessStartInfo(launch.Command) { UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true };

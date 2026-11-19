@@ -14,8 +14,10 @@ public sealed class ScopedInbox(SessionService sessions, WslBridge bridge, Sqlit
         // Bounded refresh. Per-session cursors advance only after Windows durably imports each page.
         var refreshKey = new Guid(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("inbox-refresh:" + projectId + ":" + recipientId)).AsSpan(0, 16));
         var rotation = sessionId is null ? await cursors.FindAsync(refreshKey, token) : null;
-        var page = await journal.SessionsAsync(new(projectId, SessionId: sessionId, Cursor: rotation is { After: > 0 } ? rotation.After : null, Limit: 4), recipientId, token);
-        if (page.Items.Count == 0 && rotation is { After: > 0 }) page = await journal.SessionsAsync(new(projectId, SessionId: sessionId, Limit: 4), recipientId, token);
+        var mandates = context.Mandates(projectId, recipientId, RelayCapabilities.ReceiveMessage);
+        var page = await journal.SessionsAsync(new(projectId, SessionId: sessionId, Cursor: rotation is { After: > 0 } ? rotation.After : null, Limit: 4), recipientId, token, mandates);
+        if (page.Items.Count == 0 && rotation is { After: > 0 })
+            page = await journal.SessionsAsync(new(projectId, SessionId: sessionId, Limit: 4), recipientId, token, mandates);
         var warnings = new List<string>();
         foreach (var record in page.Items.Where(item => item.State is not ("preparing" or "setup_failed")))
         {
@@ -40,7 +42,8 @@ public sealed class ScopedInbox(SessionService sessions, WslBridge bridge, Sqlit
     }
     public async Task ImportAsync(RelaySession record, System.Text.Json.JsonElement response, CancellationToken token)
     {
-        var scope = record.Definition!.Scope;
+        var definition = record.Definition!;
+        var scope = definition.Scope;
         foreach (var value in response.GetProperty("messages").EnumerateArray())
         {
             var message = RelayJson.Deserialize<InboxMessage>(value.GetRawText());
@@ -48,7 +51,14 @@ public sealed class ScopedInbox(SessionService sessions, WslBridge bridge, Sqlit
                 throw new InvalidDataException("Native message project/session/origin binding was not confirmed.");
             message = message with { ProfileId = scope.RecipientId.ToString("D") };
             if (message.InReplyTo is { } replyId)
-                await store.AttachNativeReplyAsync(replyId, scope, record.Id, new(message.Sender, message.Text), message.ReceivedAt, token);
+            {
+                var operation = await store.FindAsync(replyId, token);
+                if (operation?.Request is not { Kind: "message", Scope: { } requested } request ||
+                    !ProjectPolicy.IsSessionRequest(request, definition))
+                    throw new InvalidDataException("Native reply does not identify a retained request in this session.");
+                await store.AttachNativeReplyAsync(replyId, requested, record.Id, new(message.Sender, message.Text), message.ReceivedAt, token);
+                message = message with { RecipientEndpointId = requested.SenderId };
+            }
             await store.AddInboxAsync(message, token);
         }
     }

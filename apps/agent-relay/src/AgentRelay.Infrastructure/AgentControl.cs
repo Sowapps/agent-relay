@@ -56,7 +56,7 @@ public sealed class AgentControl(SettingsStore settings, WslBridge bridge) : ISe
         if (!await gate.WaitAsync(0, token)) return Result(profile, "starting", "This agent already has a startup request in progress.");
         try
         {
-            try { await bridge.CallAsync(profile, "start", new { profile.AllowLocalWork, Resume = resume, RequirePinnedConversation = requirePinnedConversation }, token); }
+            try { await bridge.CallAsync(profile, "start", new { profile.AllowLocalWork, Resume = resume, RequirePinnedConversation = requirePinnedConversation, profile.ParticipantMcp }, token); }
             catch (TimeoutException)
             {
                 var observed = await StatusAsync(profile, token);

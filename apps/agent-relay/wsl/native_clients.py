@@ -17,6 +17,20 @@ AUTH_ATTENTION = ['login expired', 'please run /login', 'not logged in']
 APPROVAL_ATTENTION = ['would you like to run the following command', 'do you want to proceed?', 'allow this tool', 'permission required']
 
 
+def project_mcp_entry(launch):
+    if not launch:
+        return None
+    path = subprocess.run(['wslpath', '-u', launch['command']], check=True, text=True, capture_output=True, timeout=5).stdout.strip()
+    if not Path(path).is_file() or not isinstance(launch['args'], list) or not all(isinstance(part, str) for part in launch['args']):
+        raise NativeFailure('adapter_unavailable', 'The configured local participant MCP entry is unavailable.', False)
+    return {'command': path, 'args': launch['args']}
+
+
+def participant_instructions(enabled):
+    return ('Use relay_project for authorized project operations when useful. Keep the original relay channel for replies. '
+            if enabled else 'Use the bound relay channel for this conversation. ')
+
+
 def executable(root, client):
     configured=(context(root,client) or {}).get('nativeExecutable')
     candidate=configured or shutil.which(client) or str(Path.home()/'.local/bin'/client)
@@ -82,7 +96,7 @@ def submit_prompt(root, client, identifier, prompt, target=None):
     tmux(root, 'send-keys', '-t', target, 'Enter')
 
 
-def start(root, client, allow_work=False, resume=False, require_pinned=False):
+def start(root, client, allow_work=False, resume=False, require_pinned=False, participant_mcp=None):
     """Start without a model; @see control for the complementary owned-runtime lifecycle."""
     folder = root / client
     assigned = workspace(root, client)
@@ -105,9 +119,10 @@ def start(root, client, allow_work=False, resume=False, require_pinned=False):
             tmux(root, 'kill-session', '-t', client)
         else:
             launched = json.loads((folder / 'launch-state.json').read_text()) if (folder / 'launch-state.json').exists() else {'allowLocalWork': False}
-            if launched['allowLocalWork'] != allow_work:
-                raise RuntimeError('unavailable: existing session has different permissions; close that dedicated session manually before restarting')
+            if launched['allowLocalWork'] != allow_work or launched.get('participantMcp') != participant_mcp:
+                raise NativeFailure('session_configuration_changed', 'Reopen the dedicated conversation to apply its updated participant configuration.', False)
             return {'available': True, 'alreadyRunning': True}
+    project_entry = project_mcp_entry(participant_mcp)
     (folder / 'data/mcp-initialized.json').unlink(missing_ok=True)
     environment = {'DISABLE_AUTOUPDATER': '1', 'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC': '1'}
     if client == 'codex':
@@ -120,11 +135,14 @@ def start(root, client, allow_work=False, resume=False, require_pinned=False):
             original = original.replace('sandbox_mode="read-only"', 'sandbox_mode="workspace-write"').replace('approval_policy="never"', 'approval_policy="on-request"').replace('shell_tool=false', 'shell_tool=true')
         config.write_text(original)
         instructions = root / ('instructions-work.md' if allow_work else 'instructions.md')
-        instructions.write_text(MESSAGE_POLICY + ('Work only in the configured project workspace and obey native approval requests. ' if allow_work else 'No local commands or file changes. ') + 'No other agents. Return relay replies with the supplied correlation id.')
+        instructions.write_text(MESSAGE_POLICY + ('Work in the configured project workspace and obey native approval requests. ' if allow_work else 'No local commands or local file changes. ') + participant_instructions(project_entry) + 'Return relay replies with the supplied correlation id.')
         if allow_work:
             original = config.read_text().replace(str(root / 'instructions.md'), str(instructions))
             config.write_text(original)
         argv = [executable(root,client), '-c', 'check_for_update_on_startup=false', '--no-alt-screen', '-C', str(assigned)]
+        if project_entry:
+            argv.extend(['-c', 'mcp_servers.relay_project.command=' + json.dumps(project_entry['command']),
+                         '-c', 'mcp_servers.relay_project.args=' + json.dumps(project_entry['args'])])
         if resume and codex_logs:
             if binding and not pinned.exists():raise RuntimeError('context_lost: native conversation identity is not confirmed; refusing latest-session guessing')
             argv += ['resume', json.loads(pinned.read_text())['id']] if binding else ['resume','--last']
@@ -132,15 +150,22 @@ def start(root, client, allow_work=False, resume=False, require_pinned=False):
         environment['CLAUDE_CONFIG_DIR'] = str(folder / 'config')
         settings = {'autoMemoryEnabled': False, 'claudeMdExcludes': ['**/CLAUDE.md', '**/CLAUDE.local.md', '**/AGENTS.md'], 'enabledPlugins': {}, 'hooks': {}}
         if binding:settings['claudeMdExcludes']=[str(Path.home()/'CLAUDE.md'),str(Path.home()/'CLAUDE.local.md')]
+        mcp_config = folder / 'mcp.json'
+        if project_entry:
+            runtime_config = json.loads(mcp_config.read_text(encoding='utf-8'))
+            runtime_config['mcpServers']['relay_project'] = project_entry
+            mcp_config = folder / 'mcp-runtime.json'
+            commit(mcp_config, runtime_config)
         argv = [executable(root,client), '--setting-sources', '', '--settings', json.dumps(settings),
-                '--strict-mcp-config', '--mcp-config', str(folder / 'mcp.json'), '--disable-slash-commands', '--tools', 'Read,Glob,Grep,Write,Edit,Bash' if allow_work else '',
+                '--strict-mcp-config', '--mcp-config', str(mcp_config), '--disable-slash-commands', '--tools', 'Read,Glob,Grep,Write,Edit,Bash' if allow_work else '',
                 '--allowedTools', 'mcp__relay__send_message', '--no-chrome', '--effort', 'low',
-                '--system-prompt', MESSAGE_POLICY + ('Work in the configured project workspace, obey native approvals and do not delegate. ' if allow_work else '') + 'You are a relay endpoint. Send replies using the relay message tool with the request id. Be brief.']
+                '--system-prompt', MESSAGE_POLICY + ('Work in the configured project workspace and obey native approvals. ' if allow_work else '') + participant_instructions(project_entry) + 'Send replies using the relay message tool with the request id. Be brief.']
         if binding:
             expected=str(binding['sessionId']);pinned=folder/'native-conversation.json'
             argv += ['--resume',expected] if resume and pinned.exists() else ['--session-id',expected]
         elif resume and any((folder / 'config/projects').rglob('*.jsonl')):argv += ['--continue']
-    commit(folder / 'launch-state.json', {'allowLocalWork': allow_work, 'client': client, 'requireNativeMarker': True})
+    commit(folder / 'launch-state.json', {'allowLocalWork': allow_work, 'client': client, 'requireNativeMarker': True,
+                                         'participantMcp': participant_mcp})
     wrapper = folder / 'launch.py'
     wrapper.write_text('import os,sys\nfrom pathlib import Path\nsys.path.insert(0,'+repr(str(root/'install'))+')\nfrom native_clients import client_environment\nos.environ.update(' + repr(environment) + ')\nos.environ.update(client_environment(Path('+repr(str(root))+'),'+repr(client)+'))\nos.execv(' + repr(argv[0]) + ',' + repr(argv) + ')\n')
     tmux(root, 'new-session', '-d', '-s', client, '-c', str(assigned), '-x', '170', '-y', '45', 'python3', str(wrapper))
@@ -297,7 +322,8 @@ def send(root, client, request):
         raise NativeFailure('session_not_ready', 'Native client requires startup attention.', False)
     prompt = ('Relay request ' + request['id'] + '. User message as a JSON string (preserve its content): ' + json.dumps(request['text'],ensure_ascii=False) +
               ' Reply by calling relay.send_message with your short answer in text and in_reply_to="' + request['id'] +
-              '". ' + ('' if launched['allowLocalWork'] else 'Never execute commands. Use only relay message tools. ') + MESSAGE_POLICY + 'Do not use other agents. Then finish briefly.')
+              '". ' + ('' if launched['allowLocalWork'] else 'Do not execute local shell commands or change local files. ') +
+              MESSAGE_POLICY + participant_instructions(launched.get('participantMcp')) + 'Then finish briefly.')
     # Exclusive intent precedes terminal input. Existing uncertain intent is never replayed.
     with marker.open('x', encoding='utf-8') as stream:
         json.dump({'request': request, 'prompt': prompt}, stream)

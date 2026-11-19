@@ -41,6 +41,9 @@ public sealed class FileTransferService(SessionService sessions, WslBridge bridg
         }
     }
 
+    internal static string WslPath(string distribution, string path) =>
+        @"\\wsl.localhost\" + distribution + path.Replace('/', '\\');
+
     internal static void DemandLocalWorkspace(string path, bool scoped)
     {
         if (!Directory.Exists(path))
@@ -127,11 +130,10 @@ public sealed class FileTransferService(SessionService sessions, WslBridge bridg
         var linuxPath = native.GetProperty("path").GetString()!;
         if (native.GetProperty("workspace").GetString() != AgentControl.Context(profile).Workspace)
             throw new InvalidDataException("Transfer workspace identity was not confirmed.");
-        string Unc(string linux) => @"\\wsl.localhost\" + profile.Distribution + linux.Replace('/', '\\');
         var upload = transfer.Direction == "upload";
         using var destinationWrite = upload ? ProtectDestination(linuxPath, profile.Distribution) : ProtectDestination(windowsPath);
-        var source = upload ? windowsPath : Unc(linuxPath);
-        var destination = upload ? Unc(native.GetProperty("temporary").GetString()!) :
+        var source = upload ? windowsPath : WslPath(profile.Distribution, linuxPath);
+        var destination = upload ? WslPath(profile.Distribution, native.GetProperty("temporary").GetString()!) :
             RuntimePaths.TransferPartial(database.DataDirectory, request.Id);
         if (!upload)
         {

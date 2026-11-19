@@ -4,8 +4,8 @@ namespace AgentRelay.Infrastructure;
 
 // Owns scoped execution and recovery orchestration; concrete dependencies come from ProjectCoordinator.
 public sealed class ScopedWorkExecutor(RelayDatabase database, ProjectSettingsStore projects, SessionService sessions, WslBridge bridge,
-    SqliteWorkStore store, FileTransferService files, ScopedInbox inbox, ScopedCommands commands, ScopedSessionContext context)
-    : IWorkExecutor, IWorkPreparation, IOperationRecovery, ITransferMaintenance
+    SqliteWorkStore store, FileTransferService files, ScopedFileRoutes fileRoutes, ScopedInbox inbox, ScopedCommands commands, ScopedSessionContext context)
+    : IScopedWorkAdapter
 {
     public async Task<WorkResult> ExecuteAsync(WorkRequest request, CancellationToken token)
     {
@@ -20,42 +20,31 @@ public sealed class ScopedWorkExecutor(RelayDatabase database, ProjectSettingsSt
         var caller = new CallerIdentity(scope.SenderId, [scope.ProjectId]);
         if (request.Kind == "command") return await commands.PrepareAsync(caller, request, token);
         var record = await context.RecordAsync(request.SessionId!.Value, token);
-        if (record.Definition!.Scope != scope) throw new RelayException("capability_denied", "Session and operation scopes differ.");
+        var retainedScope = record.Definition!.Scope;
+        if (!ProjectPolicy.IsSessionRequest(request, record.Definition))
+            throw new RelayException("capability_denied", "Session and operation contexts differ.", false);
         context.ValidateDefinition(record.Definition);
         var profile = await sessions.ResolveAsync(record.Id, record.ProfileId, token);
-        var identity = await WorkspaceIdentity.VerifyNativeAsync(database, profile, record.Definition.Workspace, token);
         if (request.Kind == "transfer")
+            return await fileRoutes.PrepareAsync(request, record, profile, token);
+        void DemandMessage()
         {
-            var artifact = request.Artifact ?? throw new RelayException("invalid_work", "A scoped artifact transfer is required.");
-            ProjectConfiguration configuration;
-            using (policy.Pin())
-            {
-                policy.Transfer(caller, scope.ProjectId, artifact);
-                configuration = policy.Configuration();
-            }
-            var source = configuration.Workspaces.Single(item => item.Id == artifact.Source.WorkspaceId);
-            var destination = configuration.Workspaces.Single(item => item.Id == artifact.Destination.WorkspaceId);
-            var fromRemote = source.EndpointId == scope.RecipientId;
-            var local = fromRemote ? destination : source;
-            var remote = fromRemote ? source : destination;
-            if (remote.Id != record.Definition.Workspace.Id || configuration.Endpoints.Single(item => item.Id == local.EndpointId).AdapterId != "local-files")
-                throw new RelayException("adapter_unavailable", "This adapter supports its assigned native workspace and a configured local-files endpoint.");
-            FileTransferService.DemandLocalWorkspace(local.Location, scoped: true);
-            var transfer = new TransferRequest(fromRemote ? "download" : "upload", artifact.Source.RelativePath, artifact.Destination.RelativePath, artifact.Replace);
-            return new ScopedPreparedWork(async dispatchToken =>
-            {
-                await WorkspaceIdentity.VerifyNativeAsync(database, profile, record.Definition.Workspace, dispatchToken);
-                return await files.ExecuteAsync(request with { Transfer = transfer }, dispatchToken, profile, local.Location, uploadAuthorized: true);
-            });
+            using var snapshot = policy.Pin();
+            policy.DemandSession(caller, new(record.Id, record.Name, retainedScope, record.State), RelayCapabilities.SendMessage);
+            policy.Message(caller, scope.ProjectId, scope.RecipientId, scope.WorkspaceId);
+            if (record.Definition.AllowLocalWork && scope.SenderId != retainedScope.SenderId)
+                policy.LocalWork(caller, scope.ProjectId, scope.WorkspaceId!.Value, scope.RecipientId);
         }
-        policy.Message(caller, scope.ProjectId, scope.RecipientId, scope.WorkspaceId);
-        var membership = policy.Demand(caller, scope.ProjectId, RelayCapabilities.SendMessage);
-        var ready = await sessions.EnsureReadyAsync(record, profile, membership.Capabilities.Contains(RelayCapabilities.ManageSession), token);
+        DemandMessage();
+        var identity = await WorkspaceIdentity.VerifyNativeAsync(database, profile, record.Definition.Workspace, token);
+        var ready = await sessions.EnsureReadyAsync(record, profile, policy.CanControlSession(caller,
+            new(record.Id, record.Name, retainedScope, record.State), RelayCapabilities.ManageSession), token);
         context.ValidateDefinition(record.Definition);
         return new ScopedPreparedWork(async dispatchToken =>
         {
             context.ValidateDefinition(record.Definition);
-            var result = await bridge.CallAsync(profile, "message", new { request.Id, request.Text, profile.AllowLocalWork, request.Scope,
+            DemandMessage();
+            var result = await bridge.CallAsync(profile, "message", new { request.Id, request.Text, profile.AllowLocalWork, Scope = retainedScope,
                 ExpectedNativeGeneration = ready.NativeRuntime?.Generation, ExpectedDistributionGeneration = ready.DistributionRuntime?.Generation,
                 ExpectedWorkspaceIdentity = identity }, dispatchToken);
             await inbox.ImportAsync(record, result, dispatchToken);
@@ -80,15 +69,7 @@ public sealed class ScopedWorkExecutor(RelayDatabase database, ProjectSettingsSt
         var record = await context.RecordAsync(request.SessionId!.Value, token);
         context.ValidateDefinition(record.Definition!);
         var profile = await sessions.ResolveAsync(record.Id, record.ProfileId, token, allowClosed: true);
-        var artifact = request.Artifact!;
-        var configuration = projects.Load();
-        var fromRemote = artifact.Source.EndpointId == request.Scope!.RecipientId;
-        var local = configuration.Workspaces.Single(item => item.Id == (fromRemote ? artifact.Destination.WorkspaceId : artifact.Source.WorkspaceId));
-        var remote = fromRemote ? artifact.Source : artifact.Destination;
-        if (remote.WorkspaceId != record.Definition!.Workspace.Id || configuration.Endpoints.Single(item => item.Id == local.EndpointId).AdapterId != "local-files")
-            throw new RelayException("capability_denied", "The transfer adapter context is no longer available.");
-        await WorkspaceIdentity.VerifyNativeAsync(database, profile, record.Definition.Workspace, token);
-        return await files.PartialAsync(request, fromRemote ? "download" : "upload", artifact.Destination.RelativePath, local.Location, profile, remove, token);
+        return await fileRoutes.PartialAsync(request, record, profile, remove, token);
     }
 }
 

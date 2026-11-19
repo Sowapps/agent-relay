@@ -151,6 +151,10 @@ The installed launcher waits for exit and reuses an already running owner of the
 
 ## 6. Connect the client and prove the actual MCP path
 
+For local participant access from a WSL agent session, create an explicit non-administrative MCP connection for the receiving agent's endpoint and this project only. Set `nativeConnectionId` on that participant's central project membership. The WSL adapter attaches the installed MCP entry as `relay_project` at the next session start. The existing `relay` channel continues to carry the conversation's replies. The local adapter uses Windows interop and the installed bootstrap on the same trusted workstation. Secrets stay in the Windows credential store. Coordinate an explicit reopen of an existing conversation when applying a changed connection.
+
+Give the project supervisor `project.access.manage` if they should configure the project's operational grants, command IDs, recipient lists and session mandates. The application administrator prepares participant identities and connections. See the [project access operations](mcp-tools.md#local-participants-and-project-access).
+
 Read the generated mcp.codex.toml / mcp.windows.json in the selected data directory. They launch the fixed PowerShell 7 entry, which supplies the explicit var runtime path to the checked self-contained C# transport; no secret is passed on the command line. It follows the selected worker/gateway without rewriting client settings for every release. Register only the reviewed shared connection in supported client settings, preserving its explicit participant binding and unrelated configuration. Do not create a dedicated server per agent. Initial migration from a legacy typed registration remains separate from subsequent generic updates.
 
 1. Read resources/list → agent-relay://docs/quickstart if resources are available. A new facade advertises packaged guides; an old connected facade may need the client’s normal reconnect.

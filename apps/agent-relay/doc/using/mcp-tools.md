@@ -30,6 +30,8 @@ Parameters ending in `_id` are UUIDs, except `command_id` which is a configured 
 | --- | --- | --- |
 | list_projects | none | Authorized contexts and explicit rights |
 | set_project_state | project_id, state, expected_state | Explicit project.manage grant; active/archived transition, guarded preflight; never stops or replays work |
+| get_project_access | project_id, endpoint_id | Read one participant's operational grants and revision with project.access.manage |
+| set_project_access | project_id, endpoint_id, expected_revision, capabilities, workspaces, command_ids, all_message_targets, message_targets, session_mandates | Replace one participant's operational grants with project.access.manage |
 | list_profiles | none | Compatibility alias of list_projects |
 | inspect_host | project_id, endpoint_id | Explicit environment inspection |
 | execute_command | project_id, endpoint_id, workspace_id, command_id | request_id; configured direct command, no model |
@@ -88,6 +90,14 @@ An approval expires two hours after the relay records that the request is waitin
 The optional `cancellation` field gives the `sessionId`, `state`, `nextAction` when applicable, and `sessionRequiresResolution`. After terminal closure, `stop_unconfirmed` has no next action and `sessionRequiresResolution=false`. It remains a diagnostic for the request. Independent commands and sessions can use the same workspace.
 
 An exact dispatch tied to a previous WSL kernel boot can prove the original processes are gone if no replacement terminal exists. A same-kernel process census cannot prove that a previously detached writer is gone. The relay can still verify that its terminal is closed. Verification covers the relay-owned WSL runtime and does not undo earlier effects.
+
+## Local participants and project access
+
+The caller uses one participant identity. It can initiate several sessions and receive requests from other participants in the same project. The principal identifies the initiator of a relationship. Project grants determine which operations and recipients are available.
+
+Project access administrators read the participant's current revision before updating its operational grants. Workspaces use `workspace_id`, `read`, `write`, and `replace`. Use `all_message_targets=true` with an empty `message_targets` list to allow the project's eligible receiving participants, or `false` with the explicit list. An empty explicit list disables outbound session messages. A session mandate names `session_id`, the retained `owner_id`, and the allowed operations from `message.send`, `message.receive`, `history.read`, and `session.manage`. The participant must also have each relevant project grant. Project access changes preserve technical bindings, project roles and administrative rights.
+
+A delegated request retains both the requester and the session owner. A correlated native reply is routed to the requester and can be recovered through that participant's inbox. Independent native messages keep the established destination. Revoking a mandate prevents future admission and dispatch. Existing history and admitted effects remain attributable to their original participants.
 
 ## Active and archived projects
 
