@@ -11,7 +11,11 @@ public sealed record WorkRecord(WorkRequest Request, string State, DateTimeOffse
     DateTimeOffset? CancellationRequestedAt = null, bool DispatchBoundaryTracked = false,
     DateTimeOffset? CancellationConfirmedAt = null, DateTimeOffset? ApprovalStopRequestedAt = null,
     DateTimeOffset? ApprovalWaitingSince = null, DateTimeOffset? ApprovalExpiredAt = null,
-    DateTimeOffset? SessionClosedAt = null, DateTimeOffset? TerminalRefusalSentAt = null, bool NativeTurnEnded = false);
+    DateTimeOffset? SessionClosedAt = null, DateTimeOffset? TerminalRefusalSentAt = null, bool NativeTurnEnded = false,
+    NativeAttempt[]? NativeAttempts = null);
+
+public sealed record NativeAttempt(int Number, DateTimeOffset StartedAt, DateTimeOffset? FinishedAt = null,
+    bool? Dispatched = null, string? ErrorCode = null, DateTimeOffset? RetryAt = null);
 
 public static class ApprovalExpiry
 {

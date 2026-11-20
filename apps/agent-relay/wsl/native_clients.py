@@ -7,6 +7,7 @@ import time
 import shutil
 import uuid
 from codex_turn import TurnObservation, conversation_logs
+from native_dispatch import NativeDispatch
 from relay_files import commit, messages, context, workspace, find_reply, root_path
 from native_layout import load_layout
 from native_errors import NativeFailure
@@ -291,7 +292,7 @@ def inspect_turn(root, client, request_id):
     folder = root / client
     identifier = str(uuid.UUID(request_id))
     try:
-        marker = json.loads((folder / 'data' / f'dispatch-{identifier}.json').read_text(encoding='utf-8'))
+        marker = json.loads(NativeDispatch(folder / 'data', identifier).latest().read_text(encoding='utf-8'))
         pinned = json.loads((folder / 'native-conversation.json').read_text(encoding='utf-8'))
     except (FileNotFoundError, ValueError):
         return {'turnEnded': False}
@@ -307,12 +308,15 @@ def inspect_turn(root, client, request_id):
 def send(root, client, request):
     """Retain intent before terminal input. @see submit_prompt for the single submission boundary."""
     identifier = str(uuid.UUID(request['id']))
+    attempt = request.get('nativeAttempt', 1)
+    if type(attempt) is not int or not 1 <= attempt <= 3 or (attempt != 1 and client != 'codex'):
+        raise NativeFailure('invalid_request', 'Invalid native message attempt.', False)
+    request = {key: value for key, value in request.items() if key != 'nativeAttempt'}
+    dispatch = NativeDispatch(root / client / 'data', identifier, attempt)
     existing = find_reply(root, client, identifier)
     if existing:
-        return {'reply': existing, 'messages': [existing]}
-    marker = root / client / 'data' / ('dispatch-' + identifier + '.json')
-    if marker.exists():
-        raise NativeFailure('reply_unconfirmed', 'Prior dispatch intent exists. Inspect the original result; no replay was attempted.')
+        return {'reply': existing, 'messages': [existing], 'attemptDispatched': False}
+    dispatch.demand_unused()
     launched = json.loads((root / client / 'launch-state.json').read_text()) if (root / client / 'launch-state.json').exists() else {'allowLocalWork': False}
     if launched['allowLocalWork'] != request.get('allowLocalWork', False):
         raise NativeFailure('capability_denied', 'Permissions changed; restart the dedicated session before sending.', False)
@@ -340,17 +344,18 @@ def send(root, client, request):
             raise NativeFailure('workspace_identity_changed', 'Assigned workspace changed before dispatch.', False)
     if any(value in current['pane'] for value in ['Do you trust', 'Yes, I trust', 'Sign in', 'Log in', 'Select the login']):
         raise NativeFailure('session_not_ready', 'Native client requires startup attention.', False)
-    prompt = ('Relay request ' + request['id'] + '. User message as a JSON string (preserve its content): ' + json.dumps(request['text'],ensure_ascii=False) +
+    prompt = ('Relay request ' + request['id'] + '. ' + (f'Relay attempt {attempt}. ' if attempt > 1 else '') +
+              'User message as a JSON string (preserve its content): ' + json.dumps(request['text'],ensure_ascii=False) +
               ' Reply by calling relay.send_message with your short answer in text and in_reply_to="' + request['id'] +
               '". ' + ('' if launched['allowLocalWork'] else 'Do not execute local shell commands or change local files. ') +
               MESSAGE_POLICY + participant_instructions(launched.get('participantMcp')) + 'Then finish briefly.')
-    # Exclusive intent precedes terminal input. Existing uncertain intent is never replayed.
-    with marker.open('x', encoding='utf-8') as stream:
-        json.dump({'request': request, 'prompt': prompt}, stream)
-        stream.flush()
-        os.fsync(stream.fileno())
     turn = (TurnObservation.before_submit(root / client, current.get('nativeConversationId'), prompt)
             if client == 'codex' else None)
+    dispatch.demand_previous_proof(request, turn)
+    if (reply := find_reply(root, client, identifier)) is not None:
+        return {'reply': reply, 'messages': [reply], 'attemptDispatched': False}
+    # Exclusive intent precedes terminal input. A missing proof never authorizes another send.
+    dispatch.record_intent(request, prompt)
     submit_prompt(root, client, identifier, prompt, current['paneId'])
     deadline = time.monotonic() + 120
     checked = 0
@@ -362,7 +367,12 @@ def send(root, client, request):
             reply = find_reply(root, client, request['id'])
             if reply:
                 return {'reply': reply, 'messages': [reply]}
-            raise NativeFailure(*failure, turn_ended=True)
+            effects_excluded = turn.retry_proof is not None
+            safe = effects_excluded and bool(expected and expected_distribution and expected_workspace)
+            if safe:
+                dispatch.record_retry_proof(turn.retry_proof)
+            raise NativeFailure(*failure, effects_possible=not effects_excluded, turn_ended=True,
+                                retry_safe=safe, retry_after_seconds=turn.retry_after_seconds)
         if time.monotonic() - checked >= 2:
             checked = time.monotonic()
             observed=status(root,client)

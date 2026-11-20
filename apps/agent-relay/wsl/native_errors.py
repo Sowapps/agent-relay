@@ -2,11 +2,14 @@
 
 
 class NativeFailure(PermissionError):
-    def __init__(self, code, message, effects_possible=True, *, turn_ended=False):
+    def __init__(self, code, message, effects_possible=True, *, turn_ended=False,
+                 retry_safe=False, retry_after_seconds=None):
         super().__init__(message)
         self.code = code
         self.effects_possible = effects_possible
         self.turn_ended = turn_ended
+        self.retry_safe = retry_safe
+        self.retry_after_seconds = retry_after_seconds
 
 
 def envelope(error):
@@ -27,4 +30,5 @@ def envelope(error):
         effects = None if code == 'approval_required' else True
     return {'error': str(error), 'type': type(error).__name__, 'code': code,
             'effectsPossible': effects, 'nativeTurnEnded': getattr(error, 'turn_ended', False),
+            'retrySafe': getattr(error, 'retry_safe', False), 'retryAfterSeconds': getattr(error, 'retry_after_seconds', None),
             'recovery': 'inspect_before_retry'}

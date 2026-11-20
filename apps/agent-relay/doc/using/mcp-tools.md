@@ -75,7 +75,9 @@ Authorized commands and distinct sessions can use the same workspace concurrentl
 
 An exact Codex WSL turn can report `server_overloaded` (model capacity), `native_provider_rate_limited` (HTTP 429 after Codex exhausted its attempts) or `native_turn_failed` (another structured error). Relay reports these errors as soon as it observes the end of the correlated turn. `native_reply_missing` means a correlated turn ended and no Relay reply arrived before the deadline. `reply_unconfirmed` means the link to a terminal event or the result could not be established. An older or foreign turn is never evidence for the current request.
 
-These diagnostics preserve the original request and uncertainty about effects after dispatch. Relay never retries automatically. Use `read_inbox` for the original project and session, then `get_result` with the original ID. A valid correlated reply can complete the same request later. The error event stays in its history. `get_result` also reconciles an already imported reply if it arrived while the Windows worker was still running.
+For `server_overloaded` and HTTP 429, Relay can make two automatic attempts after the first, after 10 and 30 seconds respectively or a longer structured provider delay. This applies to the owned Codex session only when a complete, correlated turn proves no action was launched and the original process, distribution, workspace and grants still match. Each attempt has durable intent and appears under `nativeAttempts` in the original request; its correlation ID stays the same. Relay checks for the original reply again before any further terminal input. A changed or incomplete trace, lost transport or interruption does not authorize a replay.
+
+Use `read_inbox` for the original project and session, then `get_result` with the original ID. A valid correlated reply can complete the same request later. The error event stays in its history. `get_result` also reconciles an already imported reply if it arrived while the Windows worker was still running.
 
 ### Inspect and answer a native approval
 

@@ -1,6 +1,7 @@
 """Qualify complete update without losing work or a retained WSL conversation."""
 
 import argparse
+from datetime import datetime
 from functools import partial
 import hashlib
 import json
@@ -73,6 +74,23 @@ def check_participant():
         try: child.wait(timeout=8)
         except subprocess.TimeoutExpired: child.kill(); child.wait()
 
+def temporary_failure(identifier, mode):
+    from native_dispatch import NativeDispatch
+    marker=NativeDispatch(folder/'data',identifier).marker(1)
+    prompt=json.loads(marker.read_text())['prompt']
+    turn=str(uuid.uuid4())
+    records=[('event_msg',{'type':'task_started','turn_id':turn}),
+             ('event_msg',{'type':'item_completed','turn_id':turn,'item':{'type':'UserMessage',
+               'content':[{'type':'text','text':prompt,'text_elements':[]}]}})]
+    error={'codex_error_info':'server_overloaded'}
+    if mode==b'qualify rate':
+        error={'codex_error_info':{'response_too_many_failed_attempts':{'http_status_code':429,'retry_after_seconds':11}}}
+    if mode==b'qualify already acted':
+        records.append(('response_item',{'type':'function_call','name':'fixture_action','call_id':'owned-action'}))
+    records.append(('event_msg',{'type':'task_complete','turn_id':turn,'error':error}))
+    with (history/(native_id+'.jsonl')).open('a') as stream:
+        for kind,payload in records: stream.write(json.dumps({'type':kind,'payload':payload})+'\n')
+
 while True:
     content=b''
     while not content.endswith(b'\r'):
@@ -93,6 +111,11 @@ while True:
         assert (work/'decide').exists()
         print('\033[2J\033[3J\033[H',end='',flush=True)
     elif b'check participant MCP' in content: check_participant()
+    mode=next((value for value in (b'qualify rate',b'qualify late',b'qualify already acted') if value in content),None)
+    if mode and b'Relay attempt ' not in content:
+        temporary_failure(identifier,mode)
+        if mode != b'qualify late':continue
+        time.sleep(2)  # Let the adapter observe the error, then deliver the original answer during backoff.
     with (history/(native_id+'.jsonl')).open('a') as stream:
         stream.write(json.dumps({'type':'qualification_turn','requestId':identifier})+'\n')
     store_message(root,'codex',{'id':str(uuid.uuid4()),'profileId':'codex','sender':'codex-wsl','recipient':'windows-pilot',
@@ -119,7 +142,7 @@ def wait_for(check, description, seconds=35):
     raise TimeoutError(description)
 
 
-def qualify(baseline, candidate, output, distribution, linux_user):
+def qualify(baseline, candidate, output, distribution, linux_user, verify_native_retry=False):
     output.mkdir()
     installation = output / 'installation'
     data = installation / 'var/apps/agent-relay/default'
@@ -258,20 +281,44 @@ p=json.load(sys.stdin); root=pathlib.Path(p['path']); root.mkdir(mode=0o700)
                 assert reopened['id'] == session
                 current = wait_for(ready, 'Retained native session did not reopen')
                 assert current['nativeConversationId'] == initial['nativeId'], current
-                call('send_session_message', {'session_id': session, 'request_id': second, 'text': 'check participant MCP'})
+                follow_up = 'confirm resumed conversation' if verify_native_retry else 'check participant MCP'
+                call('send_session_message', {'session_id': session, 'request_id': second, 'text': follow_up})
                 result.update(nativeConversationId=initial['nativeId'], firstRequestPreserved=True,
                               originalHistorySha256=hashlib.sha256(old_history.encode()).hexdigest())
-                evidence = wait_for(lambda: native_read(native_workspace + '/participant-proof.json'), 'Session did not connect to relay_project', 80)
-                proof = json.loads(evidence)
-                result['participantMcp'] = proof
-                assert proof.get('version') == state['version'] and proof['memberships'][0]['endpointId'] == agent, proof
-                assert proof['memberships'][0]['projectId'] == project, proof
+                if not verify_native_retry:
+                    evidence = wait_for(lambda: native_read(native_workspace + '/participant-proof.json'), 'Session did not connect to relay_project', 80)
+                    proof = json.loads(evidence)
+                    result['participantMcp'] = proof
+                    assert proof.get('version') == state['version'] and proof['memberships'][0]['endpointId'] == agent, proof
+                    assert proof['memberships'][0]['projectId'] == project, proof
                 wait_for(lambda: completed(second), 'Reopened session did not reply')
                 history = native_read(history_file)
                 assert history.startswith(old_history) and second in history
+                if verify_native_retry:
+                    cases = {}
+                    for mode, expected, code, attempts in (
+                            ('qualify rate', 'completed', 'native_provider_rate_limited', 2),
+                            ('qualify late', 'completed', 'server_overloaded', 1),
+                            ('qualify already acted', 'unknown', 'server_overloaded', 1)):
+                        request = str(uuid.uuid4())
+                        call('send_session_message', {'session_id': session, 'request_id': request, 'text': mode})
+                        def settled():
+                            row = retained(request)
+                            return row if row.get('state') in ('completed','failed','unknown') else None
+                        row = wait_for(settled, 'Retry scenario never settled: ' + mode, 55)
+                        timeline = row['nativeAttempts']
+                        assert row['state'] == expected and len(timeline) == attempts and timeline[0]['errorCode'] == code, row
+                        if attempts == 2:
+                            retry_at = datetime.fromisoformat(timeline[0]['retryAt'])
+                            assert (retry_at - datetime.fromisoformat(timeline[0]['finishedAt'])).total_seconds() >= 10.9
+                            assert datetime.fromisoformat(timeline[1]['startedAt']) >= retry_at
+                        if mode == 'qualify late': assert timeline[0].get('retryAt')
+                        if mode == 'qualify already acted': assert not timeline[0].get('retryAt')
+                        cases[mode] = {'id': request, 'state': expected, 'attempts': timeline}
+                    result['nativeRetry'] = cases
                 result.update(nativeConversationId=initial['nativeId'], firstRequestPreserved=True,
                               originalHistorySha256=hashlib.sha256(old_history.encode()).hexdigest(),
-                              preservedHistoryAndNewTurn=True, participantMcp=proof, passed=True)
+                              preservedHistoryAndNewTurn=True, passed=True)
     finally:
         write(output / 'qualification.json', result)
         if (data / 'mcp-runtime.json').is_file():
@@ -301,8 +348,9 @@ if __name__ == '__main__':
         parser.add_argument('--' + option, type=Path, required=True)
     parser.add_argument('--distribution', required=True)
     parser.add_argument('--user', required=True)
+    parser.add_argument('--verify-native-retry', action='store_true')
     args = parser.parse_args()
     target = args.output.resolve()
     if not target.is_relative_to(Path(__file__).resolve().parents[4] / 'local/apps/agent-relay/qualification') or target.exists():
         parser.error('Select a new owned local qualification directory.')
-    qualify(args.baseline.resolve(), args.candidate.resolve(), target, args.distribution, args.user)
+    qualify(args.baseline.resolve(), args.candidate.resolve(), target, args.distribution, args.user, args.verify_native_retry)

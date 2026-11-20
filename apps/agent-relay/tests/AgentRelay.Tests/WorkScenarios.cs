@@ -5,6 +5,14 @@ internal static class WorkScenarios
 {
     internal static async Task Run(string data)
     {
+        var temporary = NativeFailures.Read("""
+            {"error":"typed","code":"native_provider_rate_limited","effectsPossible":false,"nativeTurnEnded":true,"retrySafe":true,"retryAfterSeconds":20}
+            """, "");
+        Assert(ScopedWorkExecutor.RetryDelay(1, temporary) == TimeSpan.FromSeconds(20), "provider delay overrides first local delay");
+        Assert(ScopedWorkExecutor.RetryDelay(2, temporary) == TimeSpan.FromSeconds(30) &&
+            ScopedWorkExecutor.RetryDelay(3, temporary) is null, "second delay and exhaustion are bounded");
+        var uncertain = new RelayException("server_overloaded", "native action was observed", true, true, TimeSpan.Zero);
+        Assert(ScopedWorkExecutor.RetryDelay(1, uncertain) is null, "uncertain effects cannot authorize another attempt");
         var store = new SqliteWorkStore(new RelayDatabase(Path.Combine(data, "work")));
         var executor = new ControlledExecutor();
         var capability = new WorkCapability("fixture", true, true);

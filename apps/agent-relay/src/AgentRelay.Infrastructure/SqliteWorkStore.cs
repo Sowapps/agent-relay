@@ -85,11 +85,11 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         {
             { State: "completed", Result: not null } => null,
             null => record,
-            _ => record with { ApprovalStopRequestedAt = existing.ApprovalStopRequestedAt }
+            _ => record with { ApprovalStopRequestedAt = existing.ApprovalStopRequestedAt, NativeAttempts = existing.NativeAttempts }
         }, token);
 
     private sealed record Transition(WorkRecord Record, DateTimeOffset? JournalExpiry = null, bool ClearExpiry = false,
-        string? Diagnostic = null, string? Event = null);
+        string? Diagnostic = null, string? Event = null, DateTimeOffset? EventAt = null);
 
     private Task<bool> WriteAsync(Guid id, Func<WorkRecord?, WorkRecord?> change, CancellationToken token) =>
         WriteTransitionAsync(id, existing => change(existing) is { } record ? new(record) : null, token);
@@ -125,7 +125,7 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
             await AppendEventAsync(record.State, record.State == "approval_expired" ? record.ApprovalExpiredAt ?? record.UpdatedAt : record.UpdatedAt,
                 transition.Diagnostic ?? record.ErrorCode);
         if (transition.Event is { } eventName)
-            await AppendEventAsync(eventName, record.TerminalRefusalSentAt ?? record.UpdatedAt, null);
+            await AppendEventAsync(eventName, transition.EventAt ?? record.UpdatedAt, transition.Diagnostic);
         transaction.Commit();
         return true;
 
@@ -214,8 +214,34 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
     }, token);
 
     public Task RecordApprovalRefusalAsync(Guid id, CancellationToken token) =>
-        WriteTransitionAsync(id, record => record is not { TerminalRefusalSentAt: null } ? null :
-            new(record with { TerminalRefusalSentAt = DateTimeOffset.UtcNow }, Event: "terminal_refusal_sent"), token);
+        WriteTransitionAsync(id, record =>
+        {
+            if (record is not { TerminalRefusalSentAt: null }) return null;
+            var now = DateTimeOffset.UtcNow;
+            return new(record with { TerminalRefusalSentAt = now }, Event: "terminal_refusal_sent", EventAt: now);
+        }, token);
+
+    internal Task<bool> BeginNativeAttemptAsync(Guid id, int number, CancellationToken token) =>
+        WriteTransitionAsync(id, record =>
+        {
+            if (record is not { State: "running", CancellationRequestedAt: null } ||
+                number != (record.NativeAttempts?.Length ?? 0) + 1) return null;
+            var now = DateTimeOffset.UtcNow;
+            return new(record with { NativeAttempts = [.. record.NativeAttempts ?? [], new(number, now)] },
+                Event: "native_attempt_started", EventAt: now);
+        }, token);
+
+    internal Task FinishNativeAttemptAsync(Guid id, int number, bool? dispatched, string? errorCode,
+        DateTimeOffset? retryAt, CancellationToken token) =>
+        WriteTransitionAsync(id, record =>
+        {
+            if (record?.NativeAttempts is not { Length: > 0 } attempts || attempts[^1].Number != number ||
+                attempts[^1].FinishedAt is not null) return null;
+            var now = DateTimeOffset.UtcNow;
+            var completed = attempts[^1] with { FinishedAt = now, Dispatched = dispatched, ErrorCode = errorCode, RetryAt = retryAt };
+            return new(record with { NativeAttempts = [.. attempts[..^1], completed] }, Diagnostic: errorCode,
+                Event: retryAt is not null ? "native_retry_scheduled" : "native_attempt_finished", EventAt: now);
+        }, token);
 
     internal Task RecordNativeTurnEndAsync(Guid id, CancellationToken token) =>
         WriteAsync(id, record => record is { NativeTurnEnded: false } ? record with { NativeTurnEnded = true } : null, token);

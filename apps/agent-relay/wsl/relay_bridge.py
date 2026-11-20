@@ -4,7 +4,7 @@ from pathlib import Path
 import subprocess
 import sys
 import uuid
-from relay_files import commit, messages, root_path, context, message_page, workspace
+from relay_files import commit, messages, root_path, context, message_page, workspace, find_reply
 import native_clients
 import approval_stop
 import terminal_control
@@ -43,8 +43,8 @@ def main():
         if profile == 'command':
             result = root / 'command/data' / (identifier + '.json')
             return {'receipt': json.loads(result.read_text()) if result.exists() else None, 'recoveryNonce': request['nonce']}
-        received = messages(root, profile)
-        return {'messages': received, 'reply': next((item for item in received if item.get('inReplyTo') == identifier), None)}
+        reply = find_reply(root, profile, identifier)
+        return {'messages': [reply] if reply else [], 'reply': reply}
     if action == 'message' and profile != 'command':
         request['id'] = str(uuid.UUID(request['id']))
         return native_clients.send(root, profile, request)

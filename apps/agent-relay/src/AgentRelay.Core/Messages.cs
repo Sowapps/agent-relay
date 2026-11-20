@@ -5,11 +5,13 @@ public sealed record RelayReply(Guid Id, Guid InReplyTo, string Sender, string R
 public sealed record RelayExchange(RelayMessage Request, RelayReply Reply, DateTimeOffset CompletedAt);
 public sealed record RelayRoute(string ProjectId, string Sender, string Recipient);
 
-public sealed class RelayException(string code, string message, bool? effectsPossible = null, bool nativeTurnEnded = false) : Exception(message)
+public sealed class RelayException(string code, string message, bool? effectsPossible = null, bool nativeTurnEnded = false,
+    TimeSpan? nativeRetryDelay = null) : Exception(message)
 {
     public string Code { get; } = code;
     public bool? EffectsPossible { get; } = effectsPossible;
     public bool NativeTurnEnded { get; } = nativeTurnEnded;
+    public TimeSpan? NativeRetryDelay { get; } = nativeRetryDelay;
 }
 
 public interface IExchangeStore
