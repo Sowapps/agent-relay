@@ -6,6 +6,7 @@ import subprocess
 import time
 import shutil
 import uuid
+from codex_turn import TurnObservation, conversation_logs
 from relay_files import commit, messages, context, workspace, find_reply, root_path
 from native_layout import load_layout
 from native_errors import NativeFailure
@@ -102,7 +103,7 @@ def start(root, client, allow_work=False, resume=False, require_pinned=False, pa
     assigned = workspace(root, client)
     binding = context(root, client)
     pinned = folder / 'native-conversation.json'
-    codex_logs = tuple((folder / 'config/sessions').rglob('*.jsonl')) if client == 'codex' and resume else ()
+    codex_logs = tuple(conversation_logs(folder)) if client == 'codex' and resume else ()
     if require_pinned:
         if not binding or not resume or not pinned.is_file():
             raise NativeFailure('context_lost', 'The original conversation identity could not be verified.', False)
@@ -265,7 +266,7 @@ def status(root, client):
             if any((folder/'config/projects').rglob(binding['sessionId']+'.jsonl')):commit(pinned,{'id':binding['sessionId']})
         else:
             found=[]
-            for log in (folder/'config/sessions').rglob('*.jsonl'):
+            for log in conversation_logs(folder):
                 with log.open(encoding='utf-8') as stream:
                     first=stream.readline()
                 if first:
@@ -329,6 +330,8 @@ def send(root, client, request):
         json.dump({'request': request, 'prompt': prompt}, stream)
         stream.flush()
         os.fsync(stream.fileno())
+    turn = (TurnObservation.before_submit(root / client, current.get('nativeConversationId'), prompt)
+            if client == 'codex' else None)
     submit_prompt(root, client, identifier, prompt, current['paneId'])
     deadline = time.monotonic() + 120
     checked = 0
@@ -336,6 +339,11 @@ def send(root, client, request):
         reply = find_reply(root, client, request['id'])
         if reply:
             return {'reply': reply, 'messages': [reply]}
+        if turn is not None and turn.overloaded():
+            reply = find_reply(root, client, request['id'])
+            if reply:
+                return {'reply': reply, 'messages': [reply]}
+            raise NativeFailure('server_overloaded', 'Codex reported that the selected model is at capacity for this request.')
         if time.monotonic() - checked >= 2:
             checked = time.monotonic()
             observed=status(root,client)

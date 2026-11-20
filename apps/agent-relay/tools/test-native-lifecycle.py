@@ -13,6 +13,50 @@ import native_clients
 
 
 class LifecycleGuardTests(unittest.TestCase):
+    def test_correlated_overload_surfaces_before_timeout_without_redispatch(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            log = root / 'codex/config/sessions' / f'rollout-{self.identifier}.jsonl'
+            log.parent.mkdir(parents=True)
+            (root / 'codex/data').mkdir()
+            overload = {'type': 'task_complete', 'error': {'codex_error_info': 'server_overloaded'}}
+
+            def event(turn, **payload):
+                return json.dumps({'type': 'event_msg', 'payload': {'turn_id': turn, **payload}}) + '\n'
+
+            log.write_text(event('old', **overload), encoding='utf8')
+
+            def publish(_, __, ___, prompt, ____):
+                accepted = {'type': 'UserMessage', 'content': [{'type': 'text', 'text': prompt, 'text_elements': []}]}
+                with log.open('a', encoding='utf8') as stream:
+                    stream.write(event('unrelated', type='item_completed', item={'type': 'UserMessage',
+                        'content': [{'type': 'text', 'text': 'other prompt'}]}))
+                    stream.write(event('unrelated', **overload))
+                    stream.write(event('current', type='item_completed', item=accepted))
+                    stream.write(event('different-turn', **overload))
+                    stream.write(event('current', **overload).rstrip('\n'))
+
+            def finish_record(_):
+                with log.open('a', encoding='utf8') as stream:
+                    stream.write('\n')
+
+            observed = {'available': True, 'mcpInitialized': True, 'pane': '', 'paneId': '%0',
+                        'nativeConversationId': str(self.identifier)}
+            request = {'id': str(self.identifier), 'text': 'Fixture'}
+            with patch.object(native_clients, 'status', return_value=observed), \
+                 patch.object(native_clients, 'find_reply', return_value=None), \
+                 patch.object(native_clients, 'submit_prompt', side_effect=publish) as submit, \
+                 patch.object(native_clients.time, 'sleep', side_effect=finish_record) as sleep:
+                with self.assertRaises(native_clients.NativeFailure) as caught:
+                    native_clients.send(root, 'codex', request)
+                self.assertEqual(caught.exception.code, 'server_overloaded')
+                self.assertTrue(caught.exception.effects_possible)
+                sleep.assert_called_once_with(.5)
+                with self.assertRaises(native_clients.NativeFailure) as repeated:
+                    native_clients.send(root, 'codex', request)
+                self.assertEqual(repeated.exception.code, 'reply_unconfirmed')
+                submit.assert_called_once()
+
     def test_long_codex_prompt_is_pasted_then_submitted_once(self):
         root = PurePosixPath('/owned/fixture')
         prompt = 'Échange de qualification. ' * 90
