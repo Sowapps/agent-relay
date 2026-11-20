@@ -87,6 +87,11 @@ while True:
         end=time.monotonic()+100
         while not (work/'release').exists() and time.monotonic()<end: time.sleep(.1)
         assert (work/'release').exists()
+        print('Would you like to run the following command?',flush=True)
+        end=time.monotonic()+180
+        while not (work/'decide').exists() and time.monotonic()<end: time.sleep(.1)
+        assert (work/'decide').exists()
+        print('\033[2J\033[3J\033[H',end='',flush=True)
     elif b'check participant MCP' in content: check_participant()
     with (history/(native_id+'.jsonl')).open('a') as stream:
         stream.write(json.dumps({'type':'qualification_turn','requestId':identifier})+'\n')
@@ -123,7 +128,7 @@ def qualify(baseline, candidate, output, distribution, linux_user):
     before = partial(run, cwd=installation, environment=dict(os.environ))
     update = partial(invoke, installation=installation, data=data)
     candidate_runtime = {'executable': str(candidate / 'app/AgentRelay.Windows.exe')}
-    project, owner, agent, workspace, binding, participant, session, first, second = (str(uuid.uuid4()) for _ in range(9))
+    project, owner, agent, workspace, binding, participant, session, first, second, warm = (str(uuid.uuid4()) for _ in range(10))
     native_root = '/srv/agent-relay/var/apps/agent-relay/sessions/' + session.replace('-', '')
     native_workspace = '/tmp/agent-relay-update-' + session.replace('-', '')
     result = {'baseVersion': old_version, 'baseSha256': digest, 'sessionId': session, 'initialRequest': first,
@@ -140,10 +145,13 @@ def qualify(baseline, candidate, output, distribution, linux_user):
     def native_read(path):
         return wsl("import json,pathlib,sys; p=pathlib.Path(json.load(sys.stdin)); print(p.read_text() if p.is_file() else '')", path)
 
-    def completed(identifier):
+    def retained(identifier):
         with sqlite3.connect((data / 'relay.sqlite').as_uri() + '?mode=ro', uri=True) as database:
             row = database.execute('SELECT payload FROM work WHERE id=?', (identifier,)).fetchone()
-        record = json.loads(row[0]) if row else {}
+        return json.loads(row[0]) if row else {}
+
+    def completed(identifier):
+        record = retained(identifier)
         return record if record.get('state') == 'completed' else None
 
     def configure(configuration, executable):
@@ -199,8 +207,11 @@ p=json.load(sys.stdin); root=pathlib.Path(p['path']); root.mkdir(mode=0o700)
                 initial = json.loads(native_read(native_workspace + '/native-launch.json'))
                 history_file = native_root + '/codex/config/sessions/' + initial['nativeId'] + '.jsonl'
                 assert initial['resumed'] is False
+                call('send_session_message', {'session_id': session, 'request_id': warm, 'text': 'retain this completed work'})
+                original = wait_for(lambda: completed(warm), 'Baseline request did not complete')
+                before_update = call('get_session', {'session_id': session})['session']
                 prepared = update(candidate_runtime, action='prepare', candidate=candidate)
-                assert prepared['activation']['nativeAdapters'] is True
+                assert prepared['activation']['nativeAdapters'] and prepared['activation']['preserveLiveSessions']
                 call('send_session_message', {'session_id': session, 'request_id': first, 'text': 'hold for update'})
                 wait_for(lambda: native_read(native_workspace + '/entered.json'), 'Native fixture never began its request')
                 updater = recovery_updater(data)
@@ -209,16 +220,10 @@ p=json.load(sys.stdin); root=pathlib.Path(p['path']); root.mkdir(mode=0o700)
                 assert not completed(first) and host.poll() is None
                 result['activeDrain'] = drained['errorCode']
                 wsl("import json,pathlib,sys; pathlib.Path(json.load(sys.stdin)).touch()", native_workspace + '/release')
-                original = wait_for(lambda: completed(first), 'Original request did not finish during drain')
-                deferred = update(updater, action='resume')
-                assert deferred['errorCode'] == 'update_native_session_open' and deferred['phase'] == 'awaiting_work', deferred
-                assert not deferred['activation']['resumeAuthorized']
-                assert host.poll() is None and not (data / 'promotion.lock').exists()
-                result['idleTerminalDeferral'] = {'code': deferred['errorCode'], 'hostUnchanged': True, 'admissionReleased': True}
+                wait_for(lambda: retained(first).get('state') == 'awaiting_approval', 'The retained native invite did not open')
+                approval = retained(first)
                 old_history = native_read(history_file)
-                assert first in old_history
-                closed = call('close_session', {'session_id': session}, revision=2)['session']
-                assert closed['id'] == session and closed['state'] == 'closed', closed
+                assert warm in old_history
 
                 def finish():
                     step = update(updater, action='resume')
@@ -229,12 +234,26 @@ p=json.load(sys.stdin); root=pathlib.Path(p['path']); root.mkdir(mode=0o700)
                 state = wait_for(finish, 'Update did not complete on the retained session', 95)
                 result['transaction'] = state['id']
                 result['candidateVersion'] = state['version']
-                assert completed(first) == original and native_read(history_file) == old_history
+                assert completed(warm) == original and retained(first) == approval and native_read(history_file) == old_history
+                live = call('get_session', {'session_id': session})['session']
+                assert live['state'] == 'awaiting_approval' and live['nativeConversationId'] == initial['nativeId'], live
+                assert live['runtime']['native']['generation'] == before_update['runtime']['native']['generation']
+                assert live['runtime']['distribution']['generation'] == before_update['runtime']['distribution']['generation']
+                terminal = call('read_session_terminal', {'session_id': session})
+                assert 'Would you like to run the following command?' in json.dumps(terminal), terminal
+                result['openApprovalPreserved'] = {'requestId': first, 'nativeGeneration': live['runtime']['native']['generation']}
                 status = client.tool('get_connection_status', timeout=30)
                 assert status['version'] == state['version'] and status['host']['connectionId'] == binding, status
                 result['hostAfter'] = status['host']['processId']
+                wsl("import json,pathlib,sys; pathlib.Path(json.load(sys.stdin)).touch()", native_workspace + '/decide')
+                def approval_completed():
+                    call('read_inbox', {'project_id': project, 'session_id': session})
+                    return completed(first)
+
+                wait_for(approval_completed, 'Original invite did not produce its retained reply')
                 settings['memberships'][1]['nativeConnectionId'] = participant
                 configure(settings, read(data / 'mcp-runtime.json')['executable'])
+                call('close_session', {'session_id': session}, revision=2)
                 reopened = call('reopen_session', {'session_id': session})['session']
                 assert reopened['id'] == session
                 current = wait_for(ready, 'Retained native session did not reopen')

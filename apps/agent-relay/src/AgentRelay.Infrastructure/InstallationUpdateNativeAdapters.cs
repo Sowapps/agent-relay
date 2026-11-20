@@ -159,7 +159,8 @@ public sealed partial class InstallationUpdate
             var request = RelayJson.Serialize(new
             {
                 action, session = new { session.Id, session.Root, template = new { session.User } },
-                names, layoutSource = layout, layoutDefinition, expected, files = desired
+                names, layoutSource = layout, layoutDefinition, expected, files = desired,
+                preserveLiveSessions = state.Activation!.PreserveLiveSessions
             });
             // The old relay host is stopped here, so a new WSL process may need a full startup window.
             var outcome = WslMaintenance.RunAsync(new(session.Distribution, session.User, script, request, NativePublicationDeadlineSeconds), CancellationToken.None)

@@ -20,11 +20,11 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         DemandMaintenanceIdleAsync(dataDirectory, allowUninitialized, false, token);
 
     internal static Task DemandUpdateIdleAsync(string dataDirectory, CancellationToken token, DateTimeOffset? historyBefore = null,
-        Func<WorkRecord, bool>? historicalApproval = null) =>
-        DemandMaintenanceIdleAsync(dataDirectory, false, true, token, historyBefore, historicalApproval);
+        Func<WorkRecord, bool>? historicalApproval = null, bool preserveLiveSessions = false) =>
+        DemandMaintenanceIdleAsync(dataDirectory, false, true, token, historyBefore, historicalApproval, preserveLiveSessions);
 
     private static async Task DemandMaintenanceIdleAsync(string dataDirectory, bool allowUninitialized, bool includeUncertain, CancellationToken token,
-        DateTimeOffset? historyBefore = null, Func<WorkRecord, bool>? historicalApproval = null)
+        DateTimeOffset? historyBefore = null, Func<WorkRecord, bool>? historicalApproval = null, bool preserveLiveSessions = false)
     {
         var path = RelayDatabase.DatabasePath(dataDirectory);
         RuntimePaths.DemandPrivatePath(path);
@@ -42,7 +42,9 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         var uncertain = includeUncertain ? " OR (json_extract(payload,'$.state')='unknown' AND json_extract(payload,'$.cancellationConfirmedAt') IS NULL AND ($historyBefore IS NULL OR " +
             "julianday(json_extract(payload,'$.createdAt')) IS NULL OR julianday(json_extract(payload,'$.updatedAt')) IS NULL OR " +
             "julianday(json_extract(payload,'$.createdAt')) >= julianday($historyBefore) OR julianday(json_extract(payload,'$.updatedAt')) >= julianday($historyBefore)))" : "";
-        var approval = $"({RetainedApproval}) OR ({LegacyApprovalStop})";
+        // The host has drained its execution leases. A parked native approval is session state,
+        // and an online update leaves its terminal and durable request alone.
+        var approval = preserveLiveSessions ? "0" : $"({RetainedApproval}) OR ({LegacyApprovalStop})";
         // An approval needs the participant to resolve it. Report it before other blockers so that prepublication admission can reopen.
         command.CommandText = $"SELECT id,json_extract(payload,'$.state'),({approval}) AS approval,payload FROM work WHERE ({ActiveState} OR ({approval}){uncertain}) ORDER BY approval DESC";
         if (includeUncertain) command.Parameters.AddWithValue("$historyBefore", historyBefore is { } before ? before.ToString("O") : DBNull.Value);

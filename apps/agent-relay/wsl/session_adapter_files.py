@@ -6,12 +6,14 @@ a replace request. A replace accepts a mix of before/after images after interrup
 
 import base64
 from contextlib import contextmanager
+import ctypes
 import fcntl
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import shutil
 import socket as unix_socket
 import stat
 import subprocess
@@ -126,6 +128,40 @@ def replace(install, observed, desired):
         os.close(directory)
 
 
+def sync_directory(path):
+    descriptor = os.open(path, os.O_DIRECTORY)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def publish_live(install, observed, desired):
+    if observed == desired:
+        return
+    # Keep the public directory present throughout. The retained before-image is
+    # outside WSL, so a resumed transaction can verify either complete generation.
+    with tempfile.TemporaryDirectory(prefix='.adapter-stage-', dir=install.parent) as staging:
+        candidate = Path(staging) / 'install'
+        shutil.copytree(install, candidate, symlinks=True, ignore=shutil.ignore_patterns('__pycache__'))
+        replace(candidate, observed, desired)
+        for directory, _, files in os.walk(candidate, topdown=False):
+            for name in files:
+                file = Path(directory) / name
+                if stat.S_ISREG(file.lstat().st_mode):
+                    with file.open('rb') as stream:
+                        os.fsync(stream.fileno())
+            sync_directory(directory)
+        sync_directory(staging)
+        exchange = ctypes.CDLL(None, use_errno=True).renameat2
+        exchange.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p, ctypes.c_uint)
+        if exchange(-100, os.fsencode(install), -100, os.fsencode(candidate), 2) != 0:  # AT_FDCWD, RENAME_EXCHANGE
+            error = ctypes.get_errno()
+            raise OSError(error, os.strerror(error))
+        sync_directory(staging)
+        sync_directory(install.parent)
+
+
 def historical_approval(install, request):
     demand_stopped(install)
     identifier = str(uuid.UUID(request['requestId']))
@@ -229,7 +265,8 @@ def maintain(request):
     if not names or len(names) > 64 or len(set(names)) != len(names):
         raise ValueError('Expected a unique, bounded native helper set')
     with exclusive(install):
-        if action != 'refresh':
+        live = request.get('preserveLiveSessions') is True and action in ('capture', 'replace')
+        if action != 'refresh' and not live:
             demand_stopped(install)
         before = observe(install, names)
         if action == 'capture':
@@ -241,7 +278,7 @@ def maintain(request):
             expected = request['expected']
             if set(names) != set(expected) or any(before[name] not in (expected[name], after[name]) for name in names):
                 raise RuntimeError('Native helpers changed outside the retained maintenance intent')
-        replace(install, before, after)
+        (publish_live if live else replace)(install, before, after)
         if observe(install, names) != after:
             raise RuntimeError('Native helper publication could not be verified')
         return {'sessionId': request['session']['id'], 'files': len(after), 'modelPrompts': 0}

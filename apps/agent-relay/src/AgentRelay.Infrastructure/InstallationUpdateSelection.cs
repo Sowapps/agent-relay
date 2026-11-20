@@ -8,7 +8,8 @@ namespace AgentRelay.Infrastructure;
 public sealed record InstallationActivation(string ReleaseRoot, string PreviousPointer, string? PreviousTransport,
     Guid[] TransportInstances, bool StartupEnabled, bool AdmissionReleased = false, bool? WasRunning = null, string? SelectionHash = null,
     InstallationStartupSnapshot? Startup = null, bool ResumeAuthorized = false, DateTimeOffset? AuthorizedAt = null,
-    bool InitialActivation = false, InstallationHost? LegacyHost = null, bool NativeAdapters = false);
+    bool InitialActivation = false, InstallationHost? LegacyHost = null, bool NativeAdapters = false,
+    bool PreserveLiveSessions = false);
 
 public sealed partial class InstallationUpdate
 {
@@ -83,7 +84,8 @@ public sealed partial class InstallationUpdate
             Activation: new(root, previous, File.Exists(RuntimePaths.TransportSelection(data)) ? File.ReadAllText(RuntimePaths.TransportSelection(data)) : null,
                 McpTransportPresences.Read(RuntimePaths.TransportStateDirectory(data)).Where(item => item.Admitted && item.State is not ("offline" or "closed")).Select(item => item.InstanceId).ToArray(), startup.Enabled, Startup: startup, InitialActivation: initial,
                 LegacyHost: initial ? (runtime as InstallationRuntime)?.LegacyHost : null,
-                NativeAdapters: nativeAdapters && declared.ContainsKey("app/wsl/session_adapter_files.py")));
+                NativeAdapters: nativeAdapters && declared.ContainsKey("app/wsl/session_adapter_files.py"),
+                PreserveLiveSessions: !initial));
         Directory.CreateDirectory(Path.Combine(directory, id));
         CacheRecoveryRunner(state, candidate, declared);
         Save(state);
@@ -158,7 +160,7 @@ public sealed partial class InstallationUpdate
                 {
                     if (host is not null) runtime.ConfirmDrain();
                     DemandUpdateIdle(state);
-                    if (activation.NativeAdapters) DemandNativeSessionsIdle(state);
+                    if (activation.NativeAdapters && !activation.PreserveLiveSessions) DemandNativeSessionsIdle(state);
                 }
                 catch (RelayException error) when (IsPreStopDeferral(error.Code))
                 {
@@ -350,8 +352,9 @@ public sealed partial class InstallationUpdate
     {
         // Pre-existing unknown outcomes are retained history, never success or permission to replay.
         // Active work and any uncertainty created/changed since this transaction began still block.
+        var preserveLiveSessions = state.Activation!.PreserveLiveSessions;
         SqliteWorkStore.DemandUpdateIdleAsync(data, CancellationToken.None, state.StartedAt,
-            work => IsHistoricalApproval(state, work)).GetAwaiter().GetResult();
+            work => IsHistoricalApproval(state, work), preserveLiveSessions).GetAwaiter().GetResult();
     }
 
     private InstallationUpdateState SaveIfChanged(InstallationUpdateState state)
