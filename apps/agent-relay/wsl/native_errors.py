@@ -2,10 +2,11 @@
 
 
 class NativeFailure(PermissionError):
-    def __init__(self, code, message, effects_possible=True):
+    def __init__(self, code, message, effects_possible=True, *, turn_ended=False):
         super().__init__(message)
         self.code = code
         self.effects_possible = effects_possible
+        self.turn_ended = turn_ended
 
 
 def envelope(error):
@@ -25,4 +26,5 @@ def envelope(error):
         # Approval is its own retained state; it does not assert either rollback or no effects.
         effects = None if code == 'approval_required' else True
     return {'error': str(error), 'type': type(error).__name__, 'code': code,
-            'effectsPossible': effects, 'recovery': 'inspect_before_retry'}
+            'effectsPossible': effects, 'nativeTurnEnded': getattr(error, 'turn_ended', False),
+            'recovery': 'inspect_before_retry'}

@@ -11,7 +11,7 @@ public sealed record WorkRecord(WorkRequest Request, string State, DateTimeOffse
     DateTimeOffset? CancellationRequestedAt = null, bool DispatchBoundaryTracked = false,
     DateTimeOffset? CancellationConfirmedAt = null, DateTimeOffset? ApprovalStopRequestedAt = null,
     DateTimeOffset? ApprovalWaitingSince = null, DateTimeOffset? ApprovalExpiredAt = null,
-    DateTimeOffset? SessionClosedAt = null);
+    DateTimeOffset? SessionClosedAt = null, DateTimeOffset? TerminalRefusalSentAt = null, bool NativeTurnEnded = false);
 
 public static class ApprovalExpiry
 {
@@ -52,6 +52,7 @@ public interface IWorkStore
     Task RecordApprovalSessionClosureAsync(Guid id, bool stopped, CancellationToken token) =>
         throw new RelayException("cancellation_unavailable", "This work store cannot retain the session closure.", false);
     Task RecordApprovalInterruptionAsync(Guid id, CancellationToken token) => Task.CompletedTask;
+    Task RecordApprovalRefusalAsync(Guid id, CancellationToken token) => Task.CompletedTask;
 }
 
 public interface IWorkExecutor
@@ -233,6 +234,7 @@ public sealed class WorkService : IAsyncDisposable
     public Task ClearApprovalStopAsync(Guid id, CancellationToken token) => store.ClearApprovalStopAsync(id, token);
     public Task RecordApprovalSessionClosureAsync(Guid id, bool stopped, CancellationToken token) =>
         store.RecordApprovalSessionClosureAsync(id, stopped, token);
+    internal Task RecordApprovalRefusalAsync(Guid id, CancellationToken token) => store.RecordApprovalRefusalAsync(id, token);
 
     internal async Task RecordTerminalInterruptionAsync(Guid sessionId, bool cancelActive, CancellationToken token)
     {
@@ -268,7 +270,8 @@ public sealed class WorkService : IAsyncDisposable
             var observedAt = DateTimeOffset.UtcNow;
             await store.SaveAsync(record with { State = state, Error = error.Message,
                 ErrorCode = error is RelayException relay ? relay.Code : error is TimeoutException ? "timeout" : "execution_unknown",
-                UpdatedAt = observedAt, ApprovalWaitingSince = state == "awaiting_approval" ? observedAt : null }, CancellationToken.None).ConfigureAwait(false);
+                UpdatedAt = observedAt, ApprovalWaitingSince = state == "awaiting_approval" ? observedAt : null,
+                NativeTurnEnded = error is RelayException { NativeTurnEnded: true } }, CancellationToken.None).ConfigureAwait(false);
         }
     }
 

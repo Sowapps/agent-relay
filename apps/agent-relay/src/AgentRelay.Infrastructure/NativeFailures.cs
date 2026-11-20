@@ -19,7 +19,8 @@ public static class NativeFailures
                 ? possible.ValueKind switch { JsonValueKind.False => false, JsonValueKind.Null => null, _ => true }
                 : true;
             // Unrefreshed legacy helpers have no typed code: preserve uncertainty, never infer from prose.
-            return new(code is not null && Regex.IsMatch(code, "\\A[a-z][a-z0-9_]{0,79}\\z") ? code : "wsl_error", Limit(message), effects);
+            return new(code is not null && Regex.IsMatch(code, "\\A[a-z][a-z0-9_]{0,79}\\z") ? code : "wsl_error", Limit(message), effects,
+                value.TryGetProperty("nativeTurnEnded", out var ended) && ended.ValueKind == JsonValueKind.True);
         }
         catch (Exception error) when (error is JsonException or InvalidOperationException)
         {

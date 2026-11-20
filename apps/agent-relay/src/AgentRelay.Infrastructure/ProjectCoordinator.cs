@@ -9,9 +9,10 @@ public sealed record ProjectAction(string Name, Guid? ProjectId = null, Guid? En
 public sealed record ProjectReply(ProjectConfiguration? Configuration = null, SessionSnapshot? Session = null, WorkRecord? Operation = null,
     ReadPage<SessionSnapshot>? Sessions = null, ReadPage<WorkRecord>? Operations = null, ReadPage<InboxMessage>? Messages = null, HostReport? Host = null, ReadPage<WorkEvent>? Events = null, TransferPartial? Partial = null, RelayProject? Project = null,
     CancellationProgress? Cancellation = null, SessionTerminal? Terminal = null, TerminalSignalReceipt? TerminalSignal = null,
-    ProjectAccessEntry? ProjectAccess = null)
+    ProjectAccessEntry? ProjectAccess = null, ApprovalProgress? Approval = null)
 {
-    internal static ProjectReply WithCancellation(WorkRecord operation) => new(Operation: operation, Cancellation: CancellationProgress.From(operation));
+    internal static ProjectReply WithCancellation(WorkRecord operation) => new(Operation: operation,
+        Cancellation: CancellationProgress.From(operation), Approval: ApprovalProgress.From(operation));
 }
 
 /// <summary>Participant-facing projection of cancellation for this one request.</summary>

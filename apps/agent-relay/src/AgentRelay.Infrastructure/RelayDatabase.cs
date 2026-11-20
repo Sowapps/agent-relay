@@ -45,6 +45,7 @@ public sealed class RelayDatabase
             CREATE INDEX IF NOT EXISTS work_session_retained_approval ON work(json_extract(payload,'$.request.sessionId'))
                 WHERE {{SqliteWorkStore.RetainedApproval}};
             CREATE INDEX IF NOT EXISTS inbox_project_recipient ON inbox(json_extract(payload,'$.projectId'),json_extract(payload,'$.recipientEndpointId'));
+            CREATE INDEX IF NOT EXISTS inbox_request_reply ON inbox(json_extract(payload,'$.inReplyTo')) WHERE json_extract(payload,'$.inReplyTo') IS NOT NULL;
             UPDATE work SET payload=json_set(payload,'$.approvalStopRequestedAt',json_extract(payload,'$.cancellationRequestedAt'))
             WHERE json_extract(payload,'$.approvalStopRequestedAt') IS NULL
               AND json_extract(payload,'$.cancellationRequestedAt') IS NOT NULL

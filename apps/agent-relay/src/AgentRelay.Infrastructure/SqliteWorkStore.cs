@@ -81,10 +81,15 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
     }
 
     public Task SaveAsync(WorkRecord record, CancellationToken token) =>
-        WriteAsync(record.Request.Id, existing => existing is null ? record :
-            record with { ApprovalStopRequestedAt = existing.ApprovalStopRequestedAt }, token);
+        WriteAsync(record.Request.Id, existing => existing switch
+        {
+            { State: "completed", Result: not null } => null,
+            null => record,
+            _ => record with { ApprovalStopRequestedAt = existing.ApprovalStopRequestedAt }
+        }, token);
 
-    private sealed record Transition(WorkRecord Record, DateTimeOffset? JournalExpiry = null, bool ClearExpiry = false, string? Diagnostic = null);
+    private sealed record Transition(WorkRecord Record, DateTimeOffset? JournalExpiry = null, bool ClearExpiry = false,
+        string? Diagnostic = null, string? Event = null);
 
     private Task<bool> WriteAsync(Guid id, Func<WorkRecord?, WorkRecord?> change, CancellationToken token) =>
         WriteTransitionAsync(id, existing => change(existing) is { } record ? new(record) : null, token);
@@ -102,6 +107,8 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         record = record with { CancellationRequestedAt = record.CancellationRequestedAt ?? existing?.CancellationRequestedAt,
             CancellationConfirmedAt = record.CancellationConfirmedAt ?? existing?.CancellationConfirmedAt,
             SessionClosedAt = record.SessionClosedAt ?? existing?.SessionClosedAt,
+            TerminalRefusalSentAt = existing?.TerminalRefusalSentAt ?? record.TerminalRefusalSentAt,
+            NativeTurnEnded = record.NativeTurnEnded || existing?.NativeTurnEnded == true,
             ApprovalWaitingSince = existing?.ApprovalWaitingSince ?? record.ApprovalWaitingSince,
             ApprovalExpiredAt = transition.ClearExpiry ? null : existing?.ApprovalExpiredAt ?? record.ApprovalExpiredAt,
             Progress = record.Progress ?? existing?.Progress };
@@ -117,6 +124,8 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         if (existing?.State != record.State)
             await AppendEventAsync(record.State, record.State == "approval_expired" ? record.ApprovalExpiredAt ?? record.UpdatedAt : record.UpdatedAt,
                 transition.Diagnostic ?? record.ErrorCode);
+        if (transition.Event is { } eventName)
+            await AppendEventAsync(eventName, record.TerminalRefusalSentAt ?? record.UpdatedAt, null);
         transaction.Commit();
         return true;
 
@@ -203,6 +212,13 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
             UpdatedAt = now
         };
     }, token);
+
+    public Task RecordApprovalRefusalAsync(Guid id, CancellationToken token) =>
+        WriteTransitionAsync(id, record => record is not { TerminalRefusalSentAt: null } ? null :
+            new(record with { TerminalRefusalSentAt = DateTimeOffset.UtcNow }, Event: "terminal_refusal_sent"), token);
+
+    internal Task RecordNativeTurnEndAsync(Guid id, CancellationToken token) =>
+        WriteAsync(id, record => record is { NativeTurnEnded: false } ? record with { NativeTurnEnded = true } : null, token);
 
     public Task RecordApprovalSessionClosureAsync(Guid id, bool stopped, CancellationToken token) => WriteAsync(id, record =>
     {
@@ -301,6 +317,25 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         command.Parameters.AddWithValue("$id", message.Id.ToString("D"));
         command.Parameters.AddWithValue("$payload", RelayJson.Serialize(message));
         await command.ExecuteNonQueryAsync(token);
+    }
+
+    internal async Task<InboxMessage?> FindBoundReplyAsync(WorkRequest request, CancellationToken token)
+    {
+        if (request.Scope is not { } scope || request.SessionId is not { } sessionId) return null;
+        using var connection = database.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT payload FROM inbox WHERE json_extract(payload,'$.inReplyTo')=$request
+            AND json_extract(payload,'$.sessionId')=$session AND json_extract(payload,'$.projectId')=$project
+            AND json_extract(payload,'$.senderEndpointId')=$sender AND json_extract(payload,'$.recipientEndpointId')=$recipient
+            ORDER BY rowid LIMIT 1
+            """;
+        command.Parameters.AddWithValue("$request", request.Id.ToString("D"));
+        command.Parameters.AddWithValue("$session", sessionId.ToString("D"));
+        command.Parameters.AddWithValue("$project", scope.ProjectId.ToString("D"));
+        command.Parameters.AddWithValue("$sender", scope.RecipientId.ToString("D"));
+        command.Parameters.AddWithValue("$recipient", scope.SenderId.ToString("D"));
+        return await command.ExecuteScalarAsync(token) is string payload ? RelayJson.Deserialize<InboxMessage>(payload) : null;
     }
 
     public async Task<IReadOnlyList<InboxMessage>> InboxAsync(CancellationToken token)

@@ -1,6 +1,6 @@
 // Reusable history and task views, independent of provider and transport identities.
 window.createRelayViews = (getData,getUI) => {
- const {escape:e,icon,badge,button:b,empty,detailShell}=window.RelayComponents;
+ const {escape:e,icon,badge,button:b,empty,detailShell,facts,formatDateTime}=window.RelayComponents;
  const M=window.RelayModel;
  const project=(data,id)=>data.projects.find(p=>p.id===id);
  const filterContext=ui=>({project:ui.project,participant:ui.participant,period:ui.period,filter:ui.filter,kind:ui.kind,state:ui.state,query:ui.query});
@@ -42,8 +42,26 @@ window.createRelayViews = (getData,getUI) => {
 Projet : ${e(task.project)}
 Aucune exécution ni relance automatique.</pre></details>`,b('Voir le projet','task-project',`data-project="${task.project}"`,'quiet'));
  }
+ function approvalFollowUp(data,op){
+  const evidence=op.approval,session=M.session(data,op.session);
+  const stamp=value=>e(formatDateTime(value,true));
+  const prompt=evidence.sessionClosedAt?'Session fermée':
+   session?.state==='attention'&&session?.runtimeObservedAt?'Observée dans la session le '+formatDateTime(session.runtimeObservedAt,true):
+   'Présence à vérifier dans la session';
+  const rows=[['Délai',evidence.expiredAt?'Expiré le '+stamp(evidence.expiredAt):'Expiration non enregistrée'],
+   ['Invite',e(prompt)],['Refus transmis',evidence.refusedAt?stamp(evidence.refusedAt):'Aucun reçu'],
+   ['Fin du tour',evidence.turnEnded?'Attestée par Codex':'Non attestée'],
+   ['Arrêt',evidence.stopConfirmedAt?'Confirmé le '+stamp(evidence.stopConfirmedAt):'Non confirmé']];
+  const check=M.can(data,op.session,'sessions.inspect')?b('Inspecter l’état natif','inspect-session',`data-id="${e(op.session)}"`,'quiet'):'';
+  const permission=evidence.stopConfirmedAt||evidence.sessionClosedAt||evidence.turnEnded?'Les effets antérieurs restent à vérifier.':
+   evidence.refusedAt?'Vérifiez la fin du tour avec get_result.':
+   session?.approvalDecisionPermitted?'Une décision ciblée est disponible via le MCP après lecture de l’invite.':
+   'Pour refuser cette invite via le MCP, il faut le droit session.approval.';
+  return `<div class="follow-up ${e(op.state)}"><strong>Suivi de l’approbation</strong>${facts(rows)}<p>${e(permission)}</p>${check}</div>`;
+ }
  function followUp(op){
   const data=getData(),message=data.messages.find(m=>m.taskId===op.taskId&&m.kind==='independent');
+  if(op.approval)return approvalFollowUp(data,op);
   const descriptor={approval_expired:['Approbation expirée',op.stopConfirmed?'L’arrêt de la session est confirmé. Les effets antérieurs restent à vérifier.':'Le délai d’approbation est écoulé. Vérifiez la session avant de la réutiliser.',''],attention:['Autorisation attendue','La session attend une approbation externe. Cette interface ne l’accorde pas.',b('Examiner la session','session',`data-id="${op.session}"`,'quiet')],blocked:['Information manquante','Le travail est suspendu. Consultez la demande de l’agent avant de décider de la suite.',message?b('Lire le message associé','message',`data-id="${message.id}"`,'quiet'):''],unknown:['Résultat incertain','La demande a été envoyée ; ses effets ne sont pas confirmés. Examinez les traces avant toute nouvelle tentative.',b('Examiner les preuves','show-evidence','','quiet')],failed:['Échec à examiner','Lisez le diagnostic avant de décider de la suite. Aucune relance automatique.',b('Lire le diagnostic','show-evidence','','quiet')]}[op.state];
   return descriptor?`<div class="follow-up ${op.state}"><strong>${descriptor[0]}</strong><p>${descriptor[1]}</p>${descriptor[2]}</div>`:'';
  }

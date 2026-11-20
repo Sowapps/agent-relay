@@ -10,9 +10,19 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'wsl'))
 import native_clients
+from codex_turn import describe_failure
 
 
 class LifecycleGuardTests(unittest.TestCase):
+    def test_native_failure_variants_are_typed_and_bounded(self):
+        wrapped = {'codex_error_info': {'response_too_many_failed_attempts': {'http_status_code': 429}}}
+        self.assertEqual(describe_failure(wrapped)[0], 'native_provider_rate_limited')
+        wrapped['codex_error_info']['response_too_many_failed_attempts']['http_status_code'] = 500
+        self.assertEqual(describe_failure(wrapped)[0], 'native_turn_failed')
+        self.assertEqual(describe_failure({'codex_error_info': 'unfamiliar'})[1],
+                         'Codex reported an error for this turn (unfamiliar).')
+        self.assertIsNone(describe_failure(None))
+
     def test_correlated_overload_surfaces_before_timeout_without_redispatch(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -51,11 +61,15 @@ class LifecycleGuardTests(unittest.TestCase):
                     native_clients.send(root, 'codex', request)
                 self.assertEqual(caught.exception.code, 'server_overloaded')
                 self.assertTrue(caught.exception.effects_possible)
+                self.assertTrue(caught.exception.turn_ended)
                 sleep.assert_called_once_with(.5)
                 with self.assertRaises(native_clients.NativeFailure) as repeated:
                     native_clients.send(root, 'codex', request)
                 self.assertEqual(repeated.exception.code, 'reply_unconfirmed')
                 submit.assert_called_once()
+            (root / 'codex/native-conversation.json').write_text(json.dumps({'id': str(self.identifier)}), encoding='utf8')
+            self.assertEqual(native_clients.inspect_turn(root, 'codex', str(self.identifier)), {'turnEnded': True})
+            self.assertEqual(native_clients.inspect_turn(root, 'codex', str(uuid.uuid4())), {'turnEnded': False})
 
     def test_long_codex_prompt_is_pasted_then_submitted_once(self):
         root = PurePosixPath('/owned/fixture')

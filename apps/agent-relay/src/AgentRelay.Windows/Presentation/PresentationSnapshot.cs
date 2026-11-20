@@ -114,7 +114,10 @@ internal static class PresentationSnapshot
                 workspace = configuration.Workspaces.FirstOrDefault(item => item.Id == session.Scope.WorkspaceId)?.Location ?? "Non renseigné",
                 workspaceId = session.Scope.WorkspaceId, state = session.WorkActive ? "running" : State(session.State),
                 time = "État conservé", conversation = session.NativeConversationId, capabilities = SessionCapabilities(session),
-                diagnostic = session.Diagnostic
+                diagnostic = session.Diagnostic,
+                runtimeObservedAt = session.Runtime is { } runtime ? Stamp(runtime.ObservedAt) : null,
+                approvalDecisionPermitted = configuration.Memberships.Any(member => member.ProjectId == session.Scope.ProjectId &&
+                    member.EndpointId == session.Scope.SenderId && member.Capabilities.Contains(RelayCapabilities.DecideApproval, StringComparer.Ordinal))
             }).ToArray(),
             tasks = tasks.Select(task => new
             {
@@ -158,7 +161,7 @@ internal static class PresentationSnapshot
             program = operation.Result?.Details?.GetValueOrDefault("program"), arguments = CommandArguments(operation),
             progress = operation.Progress is { TotalBytes: > 0 } progress ? (int?)Math.Clamp(progress.Bytes * 100 / progress.TotalBytes, 0, 100) : null,
             progressPhase = operation.Progress?.Phase, errorCode = operation.ErrorCode, transfer = operation.Request.Artifact,
-            stopConfirmed = operation.CancellationConfirmedAt is not null,
+            stopConfirmed = operation.CancellationConfirmedAt is not null, approval = ApprovalProgress.From(operation),
             reviewToken = AttentionReviews.Token(operation), reviewed = reviews?.IsReviewed(operation) == true, reviewable = MonitorProjection.NeedsAttention(operation.State),
             hasResult = operation.Result is not null, previewOnly = previewOnly || operation.Result?.Details?.ContainsKey("previewOnly") == true, technical = operation
         };

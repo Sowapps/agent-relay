@@ -285,6 +285,25 @@ def status(root, client):
             'distributionRuntime': process_stamp(1), 'nativeRuntime': process, 'paneId': pane_id}
 
 
+def inspect_turn(root, client, request_id):
+    if client != 'codex':
+        return {'turnEnded': False}
+    folder = root / client
+    identifier = str(uuid.UUID(request_id))
+    try:
+        marker = json.loads((folder / 'data' / f'dispatch-{identifier}.json').read_text(encoding='utf-8'))
+        pinned = json.loads((folder / 'native-conversation.json').read_text(encoding='utf-8'))
+    except (FileNotFoundError, ValueError):
+        return {'turnEnded': False}
+    if marker.get('request', {}).get('id') != identifier or not isinstance(marker.get('prompt'), str):
+        return {'turnEnded': False}
+    observed = TurnObservation.retained(folder, pinned.get('id'), marker['prompt'])
+    if observed is None:
+        return {'turnEnded': False}
+    observed.failure()
+    return {'turnEnded': observed.finished}
+
+
 def send(root, client, request):
     """Retain intent before terminal input. @see submit_prompt for the single submission boundary."""
     identifier = str(uuid.UUID(request['id']))
@@ -339,11 +358,11 @@ def send(root, client, request):
         reply = find_reply(root, client, request['id'])
         if reply:
             return {'reply': reply, 'messages': [reply]}
-        if turn is not None and turn.overloaded():
+        if turn is not None and (failure := turn.failure()):
             reply = find_reply(root, client, request['id'])
             if reply:
                 return {'reply': reply, 'messages': [reply]}
-            raise NativeFailure('server_overloaded', 'Codex reported that the selected model is at capacity for this request.')
+            raise NativeFailure(*failure, turn_ended=True)
         if time.monotonic() - checked >= 2:
             checked = time.monotonic()
             observed=status(root,client)
@@ -351,4 +370,6 @@ def send(root, client, request):
             if any(value in observed['pane'].lower() for value in AUTH_ATTENTION):
                 raise RuntimeError('execution_unknown: native login expired after dispatch; inspect effects and receipts before any new attempt')
         time.sleep(.5)
+    if turn is not None and turn.finished:
+        raise NativeFailure('native_reply_missing', 'The correlated Codex turn ended without a relay reply before the deadline.', turn_ended=True)
     raise NativeFailure('reply_unconfirmed', 'No correlated native reply arrived before the deadline. Inspect the session before sending new work.')

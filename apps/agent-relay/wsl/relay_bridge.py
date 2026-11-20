@@ -29,6 +29,8 @@ def main():
         return native_clients.control(root, profile, action == 'stop')
     if profile != 'command' and action == 'read_terminal':
         return terminal_control.read(root, profile, request['sessionId'])
+    if profile != 'command' and action == 'inspect_turn':
+        return native_clients.inspect_turn(root, profile, request['requestId'])
     if profile != 'command' and action == 'signal_terminal':
         return terminal_control.signal(root, profile, request['sessionId'], request['action'], request.get('approvalRevision'))
     if action in ['prepare_approval_stop', 'confirm_approval_stop'] and profile != 'command':

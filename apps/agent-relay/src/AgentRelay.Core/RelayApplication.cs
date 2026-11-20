@@ -236,7 +236,9 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
         var result = await work.ReadAsync(requestId, token);
         if (result.Request.Scope is not { } scope) throw new RelayException("legacy_unassigned", "This legacy operation has no authorized project assignment.");
         policy.Demand(caller, scope.ProjectId, RelayCapabilities.ReadHistory);
-        return result.State == "unknown" && recovery is not null && policy.Configuration().Projects.Single(project => project.Id == scope.ProjectId).Enabled ? await recovery.ReconcileAsync(result, token) : result;
+        var needsRecovery = result.State == "unknown" || result is { TerminalRefusalSentAt: not null, NativeTurnEnded: false };
+        return needsRecovery && recovery is not null && policy.Configuration().Projects.Single(project => project.Id == scope.ProjectId).Enabled
+            ? await recovery.ReconcileAsync(result, token) : result;
     }
 
     public async Task<WorkRecord> CancelAsync(CallerIdentity caller, Guid requestId, CancellationToken token)

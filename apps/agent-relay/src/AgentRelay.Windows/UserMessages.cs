@@ -31,6 +31,10 @@ internal static class UserMessages
         "approval_stop_mismatch" => "Cette opération n’attend plus de fermeture dans cette session. Consultez son résultat.",
         "cancellation_unconfirmed" => "L’arrêt reste à vérifier avant de réutiliser cette session.",
         "approval_expired" => "Le délai d’approbation est écoulé.",
+        "server_overloaded" => "Le modèle Codex est saturé. Vérifiez si une réponse à cette demande arrive.",
+        "native_provider_rate_limited" => "Le service a renvoyé HTTP 429 après les tentatives de Codex.",
+        "native_turn_failed" => "Codex a signalé une erreur sur le tour associé à cette demande.",
+        "native_reply_missing" => "Le tour Codex est terminé. Aucune réponse liée à cette demande n’a été reçue.",
         "transfer_destination_busy" => "Un transfert écrit déjà vers ce fichier.",
         "cancelled_effects_unconfirmed" => "L’arrêt est confirmé. Les effets déjà produits restent à vérifier.",
         "not_found" => "Cette opération ou cette destination n’est plus disponible.",
@@ -46,8 +50,8 @@ internal static class UserMessages
     public static string Cancellation(string state) => state switch
     {
         "close_required" => "Annulation enregistrée. Vous pouvez fermer la session liée pour vérifier l’arrêt.",
-        "approval_expired" => "Approbation expirée. Vous pouvez fermer la session liée pour vérifier l’arrêt.",
-        "stop_unconfirmed" => "Fermeture en attente de preuve. La session reste indisponible.",
+        "approval_expired" => "Approbation expirée. Inspectez l’invite avant de décider de la suite.",
+        "stop_unconfirmed" => "L’arrêt du travail lié reste à vérifier.",
         "stop_confirmed" => "Arrêt confirmé. Ouvrez une nouvelle session pour poursuivre.",
         "finished" => "L’opération a atteint un résultat final.",
         _ => "Annulation demandée. Consultez le résultat pour suivre sa confirmation."

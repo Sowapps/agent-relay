@@ -55,7 +55,14 @@ public sealed class ScopedWorkExecutor(RelayDatabase database, ProjectSettingsSt
     }
     public async Task<WorkRecord> ReconcileAsync(WorkRecord record, CancellationToken token)
     {
-        if (record.State != "unknown" || record.Request.Scope is null) return record;
+        if (record.Request.Scope is null) return record;
+        if (record.Request.Kind == "message")
+        {
+            if (record.State == "unknown") record = await inbox.ReconcileRetainedReplyAsync(record, token);
+            return record is { TerminalRefusalSentAt: not null, NativeTurnEnded: false }
+                ? await ObserveRefusedTurnEndAsync(record, token) : record;
+        }
+        if (record.State != "unknown") return record;
         WorkResult? receipt = null;
         if (record.Request.Kind == "transfer") receipt = await files.ReceiptAsync(record.Request, token);
         else if (record.Request.Kind == "command") receipt = await commands.RecoverAsync(record.Request, token);
@@ -63,6 +70,27 @@ public sealed class ScopedWorkExecutor(RelayDatabase database, ProjectSettingsSt
         var updated = record with { State = receipt.ExitCode is not (null or 0) ? "failed" : "completed", Result = receipt, Error = null, ErrorCode = null, UpdatedAt = DateTimeOffset.UtcNow };
         await store.SaveAsync(updated, token);
         return updated;
+    }
+
+    private async Task<WorkRecord> ObserveRefusedTurnEndAsync(WorkRecord work, CancellationToken token)
+    {
+        if (work.Request.SessionId is not { } id) return work;
+        var session = await context.RecordAsync(id, token);
+        if (session.Definition is not { } definition || !ProjectPolicy.IsSessionRequest(work.Request, definition)) return work;
+        try
+        {
+            context.ValidateDefinition(definition);
+            var profile = await sessions.ResolveAsync(id, session.ProfileId, token, allowClosed: true);
+            var observed = await bridge.CallAsync(profile, "inspect_turn", new { RequestId = work.Request.Id }, token);
+            if (!observed.TryGetProperty("turnEnded", out var ended) || ended.ValueKind != System.Text.Json.JsonValueKind.True) return work;
+        }
+        catch (Exception error) when (error is RelayException or IOException or TimeoutException)
+        {
+            // Inaccessible or older native histories provide no evidence of termination.
+            return work;
+        }
+        await store.RecordNativeTurnEndAsync(work.Request.Id, token);
+        return await store.FindAsync(work.Request.Id, token) ?? work;
     }
     public async Task<TransferPartial> PartialAsync(WorkRequest request, bool remove, CancellationToken token)
     {

@@ -144,6 +144,21 @@ internal static class ApApprovalCancellationScenarios
         await RefusesAsync("session_awaiting_approval", () => app.ControlSessionAsync(caller, session.Id, "start", token));
         await RefusesAsync("update_approval_pending", async () => { await SqliteWorkStore.DemandUpdateIdleAsync(data, token, now); return true; });
         await SqliteWorkStore.DemandUpdateIdleAsync(data, token, now.AddMinutes(-1), item => item.Request.Id == expiring.Id);
+        backend.RecognizedApproval = true;
+        var withoutGrant = await app.ReadSessionTerminalAsync(caller, session.Id, token);
+        Check(withoutGrant is { Approval: not null, ObservedAt: not null, CanDecideApproval: false, MissingCapability: RelayCapabilities.DecideApproval },
+            "An observed native prompt did not identify the missing approval right.");
+        var configuration = settings.Load();
+        settings.Save(configuration with { Memberships = configuration.Memberships.Select(member => member.EndpointId == owner
+            ? member with { Capabilities = [.. member.Capabilities, RelayCapabilities.DecideApproval] } : member).ToArray() });
+        var reviewed = await app.ReadSessionTerminalAsync(caller, session.Id, token);
+        Check(reviewed.CanDecideApproval == true &&
+            (await app.SignalSessionTerminalAsync(caller, session.Id, "refuse", reviewed.Approval!.Revision, token)).KeySent,
+            "The existing right did not allow the exact reviewed refusal.");
+        var refusal = ProjectReply.WithCancellation(await app.ResultAsync(caller, expiring.Id, token)).Approval;
+        Check(refusal is { ExpiredAt: not null, RefusedAt: not null, TurnEnded: false, SessionClosedAt: null, StopConfirmedAt: null },
+            "Expiry, sent refusal and stop evidence were conflated.");
+        backend.RecognizedApproval = false;
         await app.ControlSessionAsync(caller, session.Id, "close", token, expiring.Id);
         Check((await app.ResultAsync(caller, expiring.Id, token)) is { State: "approval_expired", CancellationConfirmedAt: not null },
             "Explicitly verified stop erased expiry history.");
@@ -167,7 +182,36 @@ internal static class ApApprovalCancellationScenarios
         Check(adopted is not null && WorkExecution.ApprovalStopPending(adopted), "An older retained session fence was discarded during upgrade.");
         await VerifyReceiptTimingAsync(database, store, request, token);
         await VerifyRetainedApprovalIndexAsync(database, store, request, token);
+        await VerifyRetainedReplyAsync(database, store, request, token);
         Console.WriteLine("AP_APPROVAL_CANCELLATION=PASS (active cancellation, terminal closure without stop proof, late reply, expiry, retained index)");
+    }
+
+    private static async Task VerifyRetainedReplyAsync(RelayDatabase database, SqliteWorkStore store, WorkRequest template, CancellationToken token)
+    {
+        var request = template with { Id = Guid.NewGuid(), TaskId = Guid.NewGuid() };
+        var scope = request.Scope!;
+        var session = request.SessionId!.Value;
+        var now = DateTimeOffset.UtcNow;
+        var running = new WorkRecord(request, "running", now, now);
+        await store.SaveAsync(running, token);
+        var reply = new InboxMessage(Guid.NewGuid(), request.ProfileId, "fixture", "origin", "genuine", request.Id,
+            now, session, scope.ProjectId, scope.RecipientId, scope.SenderId);
+        await store.AddInboxAsync(reply with { Id = Guid.NewGuid(), SessionId = Guid.NewGuid(), Text = "foreign" }, token);
+        Check(await store.FindBoundReplyAsync(request, token) is null, "A foreign session supplied a receipt.");
+        await store.AddInboxAsync(reply, token);
+        await store.AttachNativeReplyAsync(request.Id, scope, session, new("fixture", "genuine"), now, token);
+        Check((await store.FindAsync(request.Id, token))?.State == "running", "Import removed the active execution slot.");
+        var failure = running with { State = "unknown", ErrorCode = "native_provider_rate_limited", NativeTurnEnded = true };
+        await store.SaveAsync(failure, token);
+        var inbox = new ScopedInbox(null!, null!, store, null!, null!, null!);
+        var completed = await inbox.ReconcileRetainedReplyAsync(failure, token);
+        await store.SaveAsync(failure, token);
+        Check(await inbox.ReconcileRetainedReplyAsync(failure, token) == completed &&
+            completed is { State: "completed", NativeTurnEnded: true, Result.Output: "genuine" },
+            "A retained receipt was lost, overwritten by a stale worker, or reconciled with foreign data.");
+        var events = await new ProjectJournal(database).EventsAsync(new(scope.ProjectId, TaskId: request.TaskId), token);
+        Check(events.Items.Count(item => item.State == "completed") == 1 &&
+            events.Items.Any(item => item.ErrorCode == "native_provider_rate_limited"), "The late result lost its error or emitted duplicate completion.");
     }
 
     private static async Task VerifyReceiptTimingAsync(RelayDatabase database, SqliteWorkStore store, WorkRequest template, CancellationToken token)
@@ -249,6 +293,7 @@ internal static class ApApprovalCancellationScenarios
         private SessionSnapshot retained = session;
         public bool OwnedStopVerified { get; set; }
         public bool TerminalClosed { get; set; }
+        public bool RecognizedApproval { get; set; }
         public int CloseAttempts { get; private set; }
         public int Stops { get; private set; }
         private int commands;
@@ -259,9 +304,9 @@ internal static class ApApprovalCancellationScenarios
         public Task<SessionSnapshot> GetAsync(Guid id, CancellationToken token) => Task.FromResult(retained);
         public Task<SessionSnapshot> InspectAsync(Guid id, CancellationToken token) => GetAsync(id, token);
         public Task<SessionTerminal> ReadTerminalAsync(Guid id, CancellationToken token) =>
-            Task.FromResult(new SessionTerminal("fixture", "Unrecognized prompt", null));
+            Task.FromResult(new SessionTerminal("fixture", "Prompt", RecognizedApproval ? new(new('a', 64), "Fixture approval") : null));
         public Task<TerminalSignalReceipt> SignalTerminalAsync(Guid id, string action, string? approvalRevision, CancellationToken token) =>
-            Task.FromResult(new TerminalSignalReceipt(action, action == "escape"));
+            Task.FromResult(new TerminalSignalReceipt(action, action == "escape" || action == "refuse" && RecognizedApproval));
         public Task<SessionSnapshot> ControlAsync(Guid id, string action, CancellationToken token) => GetAsync(id, token);
         public Task<ReadPage<SessionSnapshot>> ListAsync(ReadQuery query, Guid ownerId, CancellationToken token) => Task.FromResult(new ReadPage<SessionSnapshot>([retained], null, false));
         public Task<IReadOnlyList<string>> RefreshMessagesAsync(Guid projectId, Guid recipientId, Guid? sessionId, CancellationToken token) => Task.FromResult<IReadOnlyList<string>>([]);
