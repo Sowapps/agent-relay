@@ -32,9 +32,12 @@ Parameters ending in `_id` are UUIDs, except `command_id` which is a configured 
 | set_project_state | project_id, state, expected_state | Explicit project.manage grant; active/archived transition, guarded preflight; never stops or replays work |
 | get_project_access | project_id, endpoint_id | Read one participant's operational grants and revision with project.access.manage |
 | set_project_access | project_id, endpoint_id, expected_revision, capabilities, workspaces, command_ids, all_message_targets, message_targets, session_mandates | Replace one participant's operational grants with project.access.manage |
+| get_project_reactions | project_id | Read the revision, rules and declared project command targets |
+| set_project_reactions | project_id, expected_revision, rules | Replace the rules for an existing project |
+| list_reaction_results | project_id, source_request_id | Read the receipt and decision for each reaction to the source message |
 | list_profiles | none | Compatibility alias of list_projects |
 | inspect_host | project_id, endpoint_id | Explicit environment inspection |
-| execute_command | project_id, endpoint_id, workspace_id, command_id | request_id; configured direct command, no model |
+| execute_command | project_id, endpoint_id, workspace_id, command_id | request_id, after_request_id (revision 2); configured direct command, no model |
 | open_session | project_id, endpoint_id, workspace_id, session_id, name | Prepare/start conversation without model prompt |
 | list_sessions | project_id | Query fields below; retained owned sessions |
 | get_session | session_id | Inspect native readiness |
@@ -46,7 +49,7 @@ Parameters ending in `_id` are UUIDs, except `command_id` which is a configured 
 | start_session | session_id | Explicit model-free start/reconnection |
 | start_agent | session_id | Alias of start_session |
 | reopen_session | session_id | Reopen the same retained conversation |
-| send_session_message | session_id, text | request_id, task_id; starts an authorized model turn |
+| send_session_message | session_id, text | request_id, task_id, after_request_id (revision 2); starts an authorized model turn |
 | send_agent_message | session_id, text | request_id, task_id; compatibility alias |
 | interrupt_session | session_id | Request interruption, not rollback |
 | close_session | session_id | Revision 2 accepts optional request_id to guard the exact approval cancellation; also closes an idle terminal |
@@ -112,6 +115,8 @@ The optional `cancellation` field gives the `sessionId`, `state`, `nextAction` w
 An exact dispatch tied to a previous WSL kernel boot can prove the original processes are gone if no replacement terminal exists. A same-kernel process census cannot prove that a previously detached writer is gone. The relay can still verify that its terminal is closed. Verification covers the relay-owned WSL runtime and does not undo earlier effects.
 
 ## Local participants and project access
+
+[Project reactions](project-reactions.md) documents the explicit targets, revision checks and linked continuation rules.
 
 The caller uses one participant identity. It can initiate several sessions and receive requests from other participants in the same project. The principal identifies the initiator of a relationship. Project grants determine which operations and recipients are available.
 

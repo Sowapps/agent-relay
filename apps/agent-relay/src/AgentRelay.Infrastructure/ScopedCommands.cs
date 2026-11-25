@@ -12,6 +12,30 @@ public sealed class ScopedCommands(string data, SettingsStore technical, Project
 {
     private readonly RelayDatabase database = new(data);
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> provisioning = new();
+
+    internal static bool IsLocalWindowsPath(string path) => path.Length >= 3 && char.IsAsciiLetter(path[0]) &&
+        path[1] == ':' && path[2] is '\\' or '/';
+
+    internal static string? Destination(RelayEndpoint endpoint) => endpoint.AdapterId switch
+    {
+        "windows-command" => "windows",
+        "wsl-command" => "wsl",
+        _ => null
+    };
+
+    internal static CommandRule[] Declared(RelaySettings settings, RelayEndpoint endpoint) => Destination(endpoint) switch
+    {
+        "windows" => (settings.WindowsCommands ?? []).SingleOrDefault(item => item.Id == endpoint.BindingId)?.Commands ?? [],
+        "wsl" => settings.Profiles.SingleOrDefault(item => item.Id == endpoint.BindingId && item.Client == "command")?.Commands ?? [],
+        _ => []
+    };
+
+    internal static void ValidateTarget(RelaySettings settings, RelayEndpoint endpoint, ProjectReaction rule)
+    {
+        if (Destination(endpoint) != rule.Destination || endpoint.BindingId != rule.Environment ||
+            !Declared(settings, endpoint).Any(command => command.Id == rule.CommandId))
+            throw new RelayException("reaction_target_invalid", "Select a declared command in the explicit destination and environment.", false);
+    }
     /// <seealso cref="RecoverAsync"/>
     internal async Task<IPreparedWork> PrepareAsync(CallerIdentity caller, WorkRequest request, CancellationToken token)
     {
@@ -27,9 +51,16 @@ public sealed class ScopedCommands(string data, SettingsStore technical, Project
             workspace = policy.Workspace(caller, scope.ProjectId, scope.WorkspaceId!.Value, false, scope.RecipientId);
             endpoint = policy.Configuration().Endpoints.Single(item => item.Id == scope.RecipientId);
         }
-        var binding = technical.Load().Profiles.SingleOrDefault(item => item.Id == endpoint.BindingId && item.Client == "command")
+        var settings = technical.Load();
+        var destination = Destination(endpoint);
+        if (request.ExecutionBinding is { } expected && expected != destination + ":" + endpoint.BindingId)
+            throw new RelayException("reaction_target_invalid", "The retained command environment changed.", false);
+        var command = Declared(settings, endpoint).SingleOrDefault(item => item.Id == request.CommandId)
+            ?? throw new RelayException("command_denied", "Command is not declared for this endpoint.");
+        if (destination == "windows")
+            return new ScopedPreparedWork(dispatchToken => ExecuteWindowsAsync(workspace.Location, command, dispatchToken));
+        var binding = settings.Profiles.SingleOrDefault(item => item.Id == endpoint.BindingId && item.Client == "command")
             ?? throw new RelayException("adapter_unavailable", "A configured direct-command adapter is required.");
-        var command = binding.Commands.SingleOrDefault(item => item.Id == request.CommandId) ?? throw new RelayException("command_denied", "Command is not configured.");
         var key = new Guid(SHA256.HashData(System.Text.Encoding.UTF8.GetBytes("command-runtime:" + endpoint.Id + ":" + scope.ProjectId + ":" + workspace.Id + ":" + scope.SenderId)).AsSpan(0, 16));
         var definition = new SessionDefinition(key, endpoint.Name, scope, endpoint, workspace, false);
         await WorkspaceIdentity.VerifyNativeAsync(database, binding, workspace, token);
@@ -48,6 +79,18 @@ public sealed class ScopedCommands(string data, SettingsStore technical, Project
             var result = await bridge.CallAsync(profile, "command", new { request.Id, request.CommandId, nonce = dispatch.Nonce, command, Workspace = workspace.Location }, dispatchToken);
             return CommandResult(request, dispatch, result);
         });
+    }
+    private static async Task<WorkResult> ExecuteWindowsAsync(string location, CommandRule command, CancellationToken token)
+    {
+        if (!OperatingSystem.IsWindows() || !IsLocalWindowsPath(location))
+            throw new RelayException("invalid_workspace", "Windows commands require a local drive workspace.", false);
+        var directory = Path.GetFullPath(location);
+        RuntimePaths.DemandPrivatePath(directory);
+        if (!Directory.Exists(directory))
+            throw new RelayException("invalid_workspace", "The declared Windows workspace is unavailable.", false);
+        var result = await LocalProcess.RunAsync(command.Program, command.Arguments, null, TimeSpan.FromSeconds(10), token, directory);
+        return new("endpoint-command", result.Output, result.Error, result.ExitCode, new Dictionary<string, string>
+        { ["workspace"] = directory, ["user"] = Environment.UserName, ["program"] = command.Program });
     }
     private static WorkResult CommandResult(WorkRequest request, CommandDispatch dispatch, System.Text.Json.JsonElement result)
     {

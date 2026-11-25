@@ -3,7 +3,7 @@ namespace AgentRelay.Core;
 public sealed record TransferRequest(string Direction, string SourcePath, string DestinationPath, bool Overwrite = false);
 public sealed record WorkRequest(Guid Id, string ProfileId, string Kind, string Text = "", string? CommandId = null, Guid? SessionId = null,
     TransferRequest? Transfer = null, OperationScope? Scope = null, Guid? TaskId = null, Guid? AttemptId = null,
-    ArtifactTransfer? Artifact = null, Guid? SessionOwnerId = null);
+    ArtifactTransfer? Artifact = null, Guid? SessionOwnerId = null, string? ExecutionBinding = null);
 public sealed record WorkResult(string Origin, string Output, string ErrorOutput = "", int? ExitCode = null,
     IReadOnlyDictionary<string, string>? Details = null);
 public sealed record WorkRecord(WorkRequest Request, string State, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,

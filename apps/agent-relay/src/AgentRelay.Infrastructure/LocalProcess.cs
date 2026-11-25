@@ -20,12 +20,13 @@ public static class LocalProcess
     internal static string DiagnosticTail(string value) => value.Length > 1800 ? value[^1800..] : value;
 
     public static async Task<ProcessOutput> RunAsync(string executable, IEnumerable<string> arguments, string? input,
-        TimeSpan timeout, CancellationToken token)
+        TimeSpan timeout, CancellationToken token, string? workingDirectory = null)
     {
         token.ThrowIfCancellationRequested();
         var start = new ProcessStartInfo(executable) { UseShellExecute = false, CreateNoWindow = true,
             RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
             StandardInputEncoding = new UTF8Encoding(false), StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8 };
+        if (workingDirectory is not null) start.WorkingDirectory = workingDirectory;
         foreach (var argument in arguments) start.ArgumentList.Add(argument);
         var watch = Stopwatch.StartNew();
         using var process = Process.Start(start) ?? throw new IOException("The local process could not start.");

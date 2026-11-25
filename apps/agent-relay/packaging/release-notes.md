@@ -1,4 +1,6 @@
-# Agent Relay v1.1.2
+# Agent Relay v1.2.9
+
+Existing projects can configure reactions to a correlated reply followed by native turn release. Reactions use declared Windows or WSL commands. Only exit code 2 from a blocking rule rejects an explicitly linked continuation.
 
 Updates replace all managed application, documentation, MCP and startup-launcher components in the existing installation. Repeating a completed update preserves the running host and installed files. Projects, permissions, credentials, history and the startup preference are retained.
 

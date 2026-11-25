@@ -36,6 +36,12 @@ public sealed class RelayDatabase
             CREATE TABLE IF NOT EXISTS cursors(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS work_events(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS dispatches(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS reaction_settings(project_id TEXT PRIMARY KEY,payload TEXT NOT NULL,after_event INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS reaction_runs(id TEXT PRIMARY KEY,project_id TEXT NOT NULL,source_id TEXT NOT NULL,
+                rule_id TEXT NOT NULL,payload TEXT NOT NULL,last_checked INTEGER NOT NULL DEFAULT 0,UNIQUE(project_id,source_id,rule_id));
+            CREATE INDEX IF NOT EXISTS reaction_pending ON reaction_runs(last_checked) WHERE json_extract(payload,'$.state') IN ('waiting_for_release','ready');
+            CREATE INDEX IF NOT EXISTS event_completed_project ON work_events(json_extract(payload,'$.projectId'))
+                WHERE json_extract(payload,'$.state')='completed';
             CREATE INDEX IF NOT EXISTS event_project_task ON work_events(json_extract(payload,'$.projectId'),json_extract(payload,'$.taskId'));
             CREATE INDEX IF NOT EXISTS work_project ON work(json_extract(payload,'$.request.scope.projectId'));
             CREATE INDEX IF NOT EXISTS work_session_approval ON work(json_extract(payload,'$.request.sessionId'))

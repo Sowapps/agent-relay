@@ -16,7 +16,7 @@ internal static class McpStableFacadeScenarios
         var binding = Guid.NewGuid();
         new ProjectSettingsStore(data).Save(new(1, [new(project, "Visible"), new(Guid.NewGuid(), "Hidden")],
             [new(endpoint, "Caller", "external", "fixture"), peer], [workspace],
-            [new(project, endpoint, "main", [RelayCapabilities.ReadHistory, RelayCapabilities.ManageSession], []),
+            [new(project, endpoint, "main", [RelayCapabilities.ReadHistory, RelayCapabilities.ManageSession, RelayCapabilities.ManageProjectReactions], []),
              new(project, peer.Id, "secondary", [], [])]));
         var connections = new ConnectionStore(data);
         await connections.CreateAsync(binding, endpoint, [project], false, CancellationToken.None);
@@ -61,6 +61,14 @@ internal static class McpStableFacadeScenarios
         Check(invocation.GetProperty("configuration").GetProperty("projects").GetArrayLength() == 1, "Scoped generic invocation");
         Task<JsonElement> Invoke(string operation, object arguments) => Call("invoke_operation",
             new { call_id = Guid.NewGuid(), operation_id = operation, revision = 1, arguments });
+        Check((await Invoke("get_project_reactions", new { project_id = project })).GetProperty("reactions").GetProperty("revision").GetInt64() == 0,
+            "Current participant can configure an existing project");
+        Check(Error(await Invoke("get_project_reactions", new { project_id = Guid.NewGuid() })) == "capability_denied",
+            "Reaction configuration exposed outside the project grant");
+        var replacement = new { project_id = project, expected_revision = 0, rules = Array.Empty<object>() };
+        Check((await Invoke("set_project_reactions", replacement)).GetProperty("reactions").GetProperty("revision").GetInt64() == 1,
+            "Stable facade retains the reaction configuration revision");
+        Check(Error(await Invoke("set_project_reactions", replacement)) == "state_conflict", "MCP reaction settings accepted a stale revision");
         Check(Error(await Invoke("decide_session_approval", new { session_id = session, decision = "approve", revision = new string('a', 64) })) ==
               "capability_denied", "Session management alone approved a native request");
         Check(Error(await Invoke("send_session_escape", new { session_id = Guid.NewGuid() })) == "not_found",

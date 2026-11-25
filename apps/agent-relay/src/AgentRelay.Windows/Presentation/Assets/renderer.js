@@ -58,7 +58,7 @@ window.createRelayRenderer=(getData,getUI)=>{
   let header=body;body='';
   if(p.archiveRequested)body+=`<div class="info-block"><strong>Archivage en cours · nouveaux travaux suspendus</strong>Le travail engagé peut se terminer. ${b('Gérer les projets','manage-projects','','quiet')}${p.archiveDiagnostic?`<details><summary>Détails de l’attente</summary><pre>${e(p.archiveDiagnostic)}</pre></details>`:''}</div>`;
   if(p.state==='archived')body+=`<div class="info-block"><strong>Projet archivé · historique consultable</strong>Aucune nouvelle opération ne peut être lancée. ${b('Gérer les projets','manage-projects','','quiet')}</div>`;
-  if(ui.tab==='settings')return header+panel('tab','settings',body+projectSettings(p));
+  if(ui.tab==='settings')return header+panel('tab','settings',body+projectSettings(p)+projectReactionSettings(p));
   if(['tasks','activity'].includes(ui.tab))body+=attention(ops);
   if(ui.tab==='summary'){
    body+=stats(p.id)+attention(ops);
@@ -98,6 +98,10 @@ window.createRelayRenderer=(getData,getUI)=>{
   const workspaceIds=new Set((p.permissions||[]).flatMap(member=>(member.workspaces||[]).map(access=>access.workspaceId)));
   const workspaces=(data.workspaces||[]).filter(workspace=>workspaceIds.has(workspace.id));
   return `<div class="section-heading"><h2>Réglages de ${e(p.name)}</h2></div><p class="view-intro">Participants, espaces de travail et permissions propres à ce projet. Les agents administrateurs préparent les changements selon vos règles.</p>`+facts([['Projet relayé',e(p.name)],['État',p.archiveRequested?'Actif · archivage en cours':p.state==='archived'?'Archivé':'Actif']])+`${section('Participants et connexions','Identifier qui participe au projet, son rôle, son client et son environnement de travail.',3)}`+contextFacts(p)+`${section('Espaces de travail accordés','Dossiers dans lesquels les participants sont autorisés à travailler pour ce projet.',3)}`+(workspaces.length?facts(workspaces.map(w=>[e(w.name),`<code>${e(w.location)}</code>`])):empty('Aucun espace de travail accordé','Les permissions du projet définissent les espaces accessibles.','folder'))+section('Permissions','Actions et espaces accordés à chaque participant. Les rôles seuls ne donnent aucun droit.',3)+facts((p.permissions||[]).map(m=>[e(participant(m.endpointId)?.name||m.endpointId),e((m.capabilities||[]).map(cap=>({'history.read':'Lire l’historique','message.send':'Envoyer des messages','session.manage':'Gérer les sessions','project.manage':'Gérer le projet','host.inspect':'Inspecter l’environnement','command.execute':'Exécuter les commandes autorisées','artifact.transfer':'Transférer des fichiers'}[cap]||cap)).join(' · ')||'Aucune action accordée')]))+`<details class="advanced"><summary>Détails techniques des permissions</summary><pre>${e(JSON.stringify(p.permissions||[],null,2))}</pre></details>`;
+ }
+ function projectReactionSettings(p){
+  return section('Réactions aux événements','Lancer une commande déclarée après une remise confirmée et la libération de sa session.',3)
+   +facts([['Configuration',b('Gérer les réactions','project-reactions-open',`data-project="${e(p.id)}"`)]]);
  }
  function projectList(){
   return section('Projets','Retrouver tous les projets, ouvrir leurs réglages et gérer leur archivage.')+`<p class="view-intro">Les projets archivés restent consultables ici, même lorsqu’ils ne figurent plus à gauche.</p><div class="card project-directory">${data.projects.map(p=>{

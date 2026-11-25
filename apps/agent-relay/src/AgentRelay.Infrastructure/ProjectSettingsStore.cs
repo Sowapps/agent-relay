@@ -77,7 +77,7 @@ public sealed class ProjectSettingsStore(string dataDirectory) : IProjectStateSt
     }
 
     private static bool IsAdministrative(string capability) =>
-        capability is RelayCapabilities.ManageProject or RelayCapabilities.ManageProjectAccess;
+        capability is RelayCapabilities.ManageProject or RelayCapabilities.ManageProjectAccess or RelayCapabilities.ManageProjectReactions;
 
     private static ProjectAccessEntry AccessEntry(ProjectMembership membership) => new(membership.EndpointId, membership.Role,
         AgentRelay.Protocol.McpStableProtocol.Hash(RelayJson.Serialize(membership)),

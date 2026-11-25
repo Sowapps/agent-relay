@@ -11,7 +11,9 @@ public sealed record WslProfile(string Id, string Name, string Distribution, str
     internal McpLaunch? ParticipantMcp { get; init; }
 }
 public sealed record TransferLimits(long MaximumBytes = 256L * 1024 * 1024, int WaitSeconds = 180);
-public sealed record RelaySettings(int Version, WslProfile[] Profiles, int MaximumConcurrency = 4, TransferLimits? Transfers = null);
+public sealed record WindowsCommandProfile(string Id, CommandRule[] Commands);
+public sealed record RelaySettings(int Version, WslProfile[] Profiles, int MaximumConcurrency = 4, TransferLimits? Transfers = null,
+    WindowsCommandProfile[]? WindowsCommands = null);
 
 public sealed class SettingsStore(string dataDirectory)
 {
@@ -42,11 +44,23 @@ public sealed class SettingsStore(string dataDirectory)
                 profile.Commands is null || (profile.Client != "command" && profile.Commands.Length != 0) ||
                 (profile.NativeExecutable is { } executable && (!executable.StartsWith('/') || executable.Length > 500 || executable.Any(char.IsControl))))
                 throw new RelayException("invalid_configuration", "Profiles require a dedicated host runtime root under /srv/agent-relay/var/apps/agent-relay (or an explicit legacy root), Linux user, distribution and supported client.");
-            if (profile.Commands.Length > 100 || profile.Commands.Select(rule => rule.Id).Distinct().Count() != profile.Commands.Length)
-                throw new RelayException("invalid_configuration", "Commands require unique identifiers and a bounded count.");
-            foreach (var rule in profile.Commands)
-                if (string.IsNullOrWhiteSpace(rule.Id) || rule.Id.Length > 100 || !rule.Program.StartsWith('/') || rule.Program.Length > 500 || rule.Arguments is null || rule.Arguments.Length > 100 || rule.Arguments.Any(argument => argument is null || argument.Length > 1000))
-                    throw new RelayException("invalid_configuration", "Commands require an absolute program and bounded argument array.");
+            ValidateCommands(profile.Commands, program => program.StartsWith('/'));
         }
+        var windows = settings.WindowsCommands ?? [];
+        if (windows.Length > 20 || windows.Any(profile => profile is null || !Regex.IsMatch(profile.Id ?? "", "^[a-z][a-z0-9-]{0,63}$")) ||
+            windows.DistinctBy(profile => profile.Id).Count() != windows.Length)
+            throw new RelayException("invalid_configuration", "Windows command profiles require unique identifiers.");
+        foreach (var profile in windows) ValidateCommands(profile.Commands,
+            program => ScopedCommands.IsLocalWindowsPath(program) && program.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static void ValidateCommands(CommandRule[]? commands, Func<string, bool> validProgram)
+    {
+        if (commands is not { Length: <= 100 } || commands.Any(rule => rule is null || string.IsNullOrWhiteSpace(rule.Id) ||
+            rule.Id.Length > 100 || string.IsNullOrWhiteSpace(rule.Program) || rule.Program.Length > 500 ||
+            rule.Program.Any(char.IsControl) || !validProgram(rule.Program) || rule.Arguments is not { Length: <= 100 } ||
+            rule.Arguments.Any(argument => argument is null || argument.Length > 1000 || argument.Contains('\0'))) ||
+            commands.DistinctBy(rule => rule.Id).Count() != commands.Length)
+            throw new RelayException("invalid_configuration", "Commands require unique IDs, an absolute executable and a bounded argument array.");
     }
 }

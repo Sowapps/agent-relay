@@ -11,6 +11,14 @@ public static class McpToolCatalog
     private static object Id() => new { type = "string", format = "uuid" };
     private static object List(object items, int maximum = 100) => new { type = "array", items, maxItems = maximum };
     private static object Flag() => new { type = "boolean" };
+    private static object ReactionRules() => List(new
+    {
+        type = "object", properties = new { id = Id(), session_id = Id(), actor_id = Id(), endpoint_id = Id(), workspace_id = Id(),
+            command_id = Text(100), mode = new { type = "string", @enum = new[] { "async", "blocking" } }, enabled = Flag(),
+            destination = new { type = "string", @enum = new[] { "windows", "wsl" } }, environment = Text(64) },
+        required = new[] { "id", "actor_id", "endpoint_id", "workspace_id", "command_id", "mode", "enabled", "destination", "environment" },
+        additionalProperties = false
+    }, 32);
     private static object Access()
     {
         var workspace = new { type = "object", properties = new { workspace_id = Id(), read = Flag(), write = Flag(), replace = Flag() },
@@ -51,12 +59,26 @@ public static class McpToolCatalog
         Tool("set_project_access", "Replace one project's operational grants for an existing participant. Requires project.access.manage and the current revision.",
             a => new("set_project_access", a.Id("project_id"), a.Id("endpoint_id"), ExpectedState: a.Text("expected_revision"), Access: a.ProjectAccess()),
             Access(), "project_id", "endpoint_id", "expected_revision", "capabilities", "workspaces", "command_ids", "all_message_targets", "message_targets", "session_mandates"),
+        Tool("get_project_reactions", "Read this project's reaction revision, rules and eligible declared command targets. Requires project.reactions.manage.",
+            a => new("get_project_reactions", a.Id("project_id")), new { project_id = Id() }, "project_id"),
+        Tool("set_project_reactions", "Replace this existing project's reactions at the expected revision. A confirmed native reply and turn release trigger each matching rule once.",
+            a => new("set_project_reactions", a.Id("project_id"), Reactions: a.Reactions()),
+            new { project_id = Id(), expected_revision = new { type = "integer", minimum = 0 }, rules = ReactionRules() },
+            "project_id", "expected_revision", "rules"),
+        Tool("list_reaction_results", "Read the pending or settled reaction results for one retained source message in this project.",
+            a => new("list_reaction_results", a.Id("project_id"), RequestId: a.Id("source_request_id")),
+            new { project_id = Id(), source_request_id = Id() }, "project_id", "source_request_id"),
         Tool("inspect_host", "Read authorized endpoint user/platform/tool versions and selected service presence. No model, secret dump or configuration change.",
             a => new("inspect_host", a.Id("project_id"), a.Id("endpoint_id")), new { project_id = Id(), endpoint_id = Id() }, "project_id", "endpoint_id"),
         Tool("list_profiles", "Compatibility discovery alias for authorized project contexts; no unscoped global profiles are returned.",
             Discover, new { }),
         Tool("execute_command", "Submit an explicitly authorized direct endpoint command in the selected project workspace; no model and no shell string.",
             a => new("execute_command", a.Id("project_id"), a.Id("endpoint_id"), a.Id("workspace_id"), RequestId: a.Id("request_id"), CommandId: a.Text("command_id")), new { project_id = Id(), endpoint_id = Id(), workspace_id = Id(), command_id = Text(), request_id = Id() }, "project_id", "endpoint_id", "workspace_id", "command_id"),
+        Register("execute_command", "Execute a declared command. Optional after_request_id links continuation to a prior message; only blocking reaction exit code 2 rejects it.",
+            new { project_id = Id(), endpoint_id = Id(), workspace_id = Id(), command_id = Text(), request_id = Id(), after_request_id = Id() },
+            ["project_id", "endpoint_id", "workspace_id", "command_id"],
+            a => new("execute_command", a.Id("project_id"), a.Id("endpoint_id"), a.Id("workspace_id"), RequestId: a.Id("request_id"),
+                CommandId: a.Text("command_id"), AfterRequestId: a.Id("after_request_id")), false, revision: 2),
         Tool("open_session", "Name/create an isolated native conversation attached to an existing authorized project workspace; start without a model prompt.",
             a => new("open_session", a.Id("project_id"), a.Id("endpoint_id"), a.Id("workspace_id"), a.Id("session_id"), DisplayName: a.Text("name")), new { project_id = Id(), endpoint_id = Id(), workspace_id = Id(), session_id = Id(), name = Text(SessionNames.MaximumLength) }, "project_id", "endpoint_id", "workspace_id", "session_id", "name"),
         Tool("list_sessions", "Page retained project sessions owned by this participant; inspect one for actual readiness.",
@@ -83,6 +105,9 @@ public static class McpToolCatalog
             a => a.Control("reopen"), Session(), "session_id"),
         Tool("send_session_message", "Continue this participant's project session. Independent sessions may work concurrently; retain request_id and poll get_result.",
             SendMessage, Message(), "session_id", "text"),
+        Register("send_session_message", "Continue a participant session. Optional after_request_id links continuation; only blocking reaction exit code 2 rejects it.",
+            new { session_id = Id(), text = Text(8000), request_id = Id(), task_id = Id(), after_request_id = Id() },
+            ["session_id", "text"], a => SendMessage(a) with { AfterRequestId = a.Id("after_request_id") }, false, revision: 2),
         Tool("send_agent_message", "Compatibility alias for sending in an explicit authorized session.",
             SendMessage, Message(), "session_id", "text"),
         Tool("interrupt_session", "Request interruption in this owned session. Effects may remain unknown; inspect before any new attempt.",
@@ -154,6 +179,11 @@ public static class McpToolCatalog
             return new(location.GetProperty("endpoint_id").GetGuid(), location.GetProperty("workspace_id").GetGuid(), location.GetProperty("path").GetString()!);
         }
         internal bool Replace => Value.TryGetProperty("replace", out var replace) && replace.GetBoolean();
+        internal ProjectReactions Reactions() => new(Value.GetProperty("expected_revision").GetInt64(),
+            Value.GetProperty("rules").EnumerateArray().Select(item => new Arguments(item)).Select(item => new ProjectReaction(
+                item.Id("id")!.Value, item.Id("session_id"), item.Id("actor_id")!.Value, item.Id("endpoint_id")!.Value,
+                item.Id("workspace_id")!.Value, item.Text("command_id")!, item.Text("mode")!, item.Value.GetProperty("enabled").GetBoolean(),
+                item.Text("destination")!, item.Text("environment")!)).ToArray());
         internal ProjectAccessChange ProjectAccess()
         {
             static string[] Strings(JsonElement values) => values.EnumerateArray().Select(value => value.GetString()!).ToArray();

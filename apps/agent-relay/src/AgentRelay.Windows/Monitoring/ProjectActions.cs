@@ -35,6 +35,23 @@ internal sealed partial class ProjectWindow
         {
             switch (action)
             {
+                case "project-reactions-read":
+                case "project-reactions-save":
+                    var reactionProject = Guid.Parse(Value(message, "project") ?? "");
+                    try
+                    {
+                        var read = action == "project-reactions-read";
+                        var replacement = read ? null : RelayJson.Deserialize<ProjectReactions>(message.GetProperty("settings").GetRawText());
+                        var reply = (await client.RequestAsync(new("project", ProjectAction: new(
+                            read ? "get_project_reactions" : "set_project_reactions", ProjectId: reactionProject, Reactions: replacement)), lifetime.Token)).Project!;
+                        if (!released) Presentation.Send(new { type = action, project = reactionProject, settings = reply.Reactions, targets = reply.ReactionTargets });
+                    }
+                    catch (Exception failure) when (!released)
+                    {
+                        if (!released) Presentation.Send(new { type = action, project = reactionProject,
+                            error = failure is RelayException { Code: "state_conflict" } ? "Les réglages ont changé. Actualisez avant d’enregistrer." : failure.Message });
+                    }
+                    break;
                 case "cleanup-analyze":
                 case "cleanup-execute":
                     try

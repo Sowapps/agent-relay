@@ -5,15 +5,20 @@ namespace AgentRelay.Infrastructure;
 public sealed record ProjectAction(string Name, Guid? ProjectId = null, Guid? EndpointId = null, Guid? WorkspaceId = null,
     Guid? SessionId = null, Guid? RequestId = null, string? Text = null, string? DisplayName = null, string? CommandId = null,
     string? Control = null, ReadQuery? Query = null, ArtifactTransfer? Transfer = null, Guid? TaskId = null, Guid? ActorId = null,
-    string? State = null, string? ExpectedState = null, string? ApprovalRevision = null, ProjectAccessChange? Access = null);
+    string? State = null, string? ExpectedState = null, string? ApprovalRevision = null, ProjectAccessChange? Access = null,
+    ProjectReactions? Reactions = null, Guid? AfterRequestId = null);
 public sealed record ProjectReply(ProjectConfiguration? Configuration = null, SessionSnapshot? Session = null, WorkRecord? Operation = null,
     ReadPage<SessionSnapshot>? Sessions = null, ReadPage<WorkRecord>? Operations = null, ReadPage<InboxMessage>? Messages = null, HostReport? Host = null, ReadPage<WorkEvent>? Events = null, TransferPartial? Partial = null, RelayProject? Project = null,
     CancellationProgress? Cancellation = null, SessionTerminal? Terminal = null, TerminalSignalReceipt? TerminalSignal = null,
-    ProjectAccessEntry? ProjectAccess = null, ApprovalProgress? Approval = null)
+    ProjectAccessEntry? ProjectAccess = null, ApprovalProgress? Approval = null, ProjectReactions? Reactions = null,
+    ReactionTarget[]? ReactionTargets = null, ReactionRun[]? ReactionRuns = null)
 {
     internal static ProjectReply WithCancellation(WorkRecord operation) => new(Operation: operation,
         Cancellation: CancellationProgress.From(operation), Approval: ApprovalProgress.From(operation));
 }
+
+public sealed record ReactionTarget(Guid ActorId, string Actor, Guid EndpointId, string Destination, string Environment,
+    string Endpoint, Guid WorkspaceId, string Workspace, string CommandId, string Command);
 
 /// <summary>Participant-facing projection of cancellation for this one request.</summary>
 public sealed record CancellationProgress(Guid SessionId, string State, string? NextAction, bool SessionRequiresResolution)
@@ -83,6 +88,9 @@ public sealed class ProjectCoordinator : IAsyncDisposable
     private readonly CancellationTokenSource archiveStop = new();
     private readonly Task archiveLoop;
     private readonly Task replyLoop;
+    private readonly Task reactionLoop;
+    private readonly ProjectReactionService reactions;
+    private readonly SettingsStore technical;
 
     public ProjectCoordinator(string dataDirectory, Action<Exception>? reportError = null)
         : this(dataDirectory, reportError, new PromotionAdmission(dataDirectory)) { }
@@ -91,7 +99,7 @@ public sealed class ProjectCoordinator : IAsyncDisposable
     {
         Settings = new(dataDirectory); var database = new RelayDatabase(dataDirectory); store = new(database);
         observation = new(database);
-        var technical = new SettingsStore(dataDirectory);
+        technical = new SettingsStore(dataDirectory);
         WorkService? activity = null;
         var native = NativeAdapterComposition.Create(dataDirectory, technical, Settings, store, id => activity?.IsSessionActive(id) ?? false);
         adapter = native.Sessions;
@@ -99,6 +107,9 @@ public sealed class ProjectCoordinator : IAsyncDisposable
         Work = new(store, executor, () => Settings.Load().Endpoints.Select(endpoint => new WorkCapability(endpoint.Id.ToString("D"), true, true, true)).ToArray(), technical.Load().MaximumConcurrency);
         activity = Work;
         Application = new(new(Settings), Work, adapter, new ProjectJournal(database), new EndpointDiagnostics(technical), executor, executor, Settings);
+        reactions = new(new SqliteProjectReactions(database), new(Settings), Work, native.ReactionRelease,
+            (endpoint, rule) => ScopedCommands.ValidateTarget(technical.Load(), endpoint, rule), Application.Admission.EnterWork, executor);
+        reactionLoop = RunReactionMonitorAsync(promotion, reportError);
         var replies = new ReplyMonitor(store, (IReplyObservation)executor, reportError);
         replyLoop = Task.Run(async () =>
         {
@@ -143,9 +154,26 @@ public sealed class ProjectCoordinator : IAsyncDisposable
         });
     }
 
+    private async Task RunReactionMonitorAsync(PromotionAdmission promotion, Action<Exception>? reportError)
+    {
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+        try
+        {
+            while (await timer.WaitForNextTickAsync(archiveStop.Token))
+            {
+                using var admission = promotion.TryEnter();
+                if (admission is null) continue;
+                try { await reactions.SweepAsync(DateTimeOffset.UtcNow, archiveStop.Token); }
+                catch (Exception error) when (!archiveStop.IsCancellationRequested) { reportError?.Invoke(error); }
+            }
+        }
+        catch (OperationCanceledException) when (archiveStop.IsCancellationRequested) { }
+    }
+
     public async Task<ProjectReply> DispatchAsync(AuthenticatedConnection connection, ProjectAction action, CancellationToken token)
     {
         var caller = connection.Caller;
+        static Guid Required(Guid? value, string name) => value is { } id && id != Guid.Empty ? id : throw new RelayException("invalid_request", name + " is required.");
         if (!connection.Administrator && action.ActorId is { } suppliedActor && suppliedActor != caller.EndpointId)
             throw new RelayException("capability_denied", "Caller identity cannot be supplied by an agent request.");
         if (action.Name == "set_project_state")
@@ -156,6 +184,34 @@ public sealed class ProjectCoordinator : IAsyncDisposable
             return new(Project: connection.Administrator
                 ? await Application.SetProjectStateAsAdministratorAsync(id, enabled, expected, token)
                 : await Application.SetProjectStateAsync(caller, id, enabled, expected, token));
+        }
+        if (action.Name is "get_project_reactions" or "set_project_reactions")
+        {
+            var project = Required(action.ProjectId, "projectId");
+            using var admission = action.Name == "set_project_reactions" ? Application.Admission.Enter(project) : Application.Admission.EnterWork(project);
+            var policy = new ProjectPolicy(Settings);
+            using var pinned = policy.Pin();
+            if (!connection.Administrator) policy.Demand(caller, project, RelayCapabilities.ManageProjectReactions);
+            var configuration = policy.Configuration();
+            if (!configuration.Projects.Any(item => item.Id == project))
+                throw new RelayException("not_found", "Unknown project.", false);
+            if (action.Name == "set_project_reactions")
+            {
+                var replacement = action.Reactions ?? throw new RelayException("invalid_request", "Expected reaction revision and rules.", false);
+                foreach (var session in (replacement.Rules ?? []).Where(rule => rule is { Enabled: true, SessionId: not null }).Select(rule => rule.SessionId!.Value).Distinct())
+                    if ((await adapter.GetAsync(session, token)).Scope.ProjectId != project)
+                        throw new RelayException("invalid_request", "The selected session does not belong to this project.", false);
+                return new(Reactions: await reactions.SaveAsync(project, replacement, token));
+            }
+            return new(Reactions: await reactions.ReadAsync(project, token), ReactionTargets: ReactionTargets(configuration, project));
+        }
+        if (action.Name == "list_reaction_results")
+        {
+            var project = Required(action.ProjectId, "projectId");
+            var request = Required(action.RequestId, "requestId");
+            var source = connection.Administrator ? await Work.ReadAsync(request, token) : await Application.ResultAsync(caller, request, token);
+            DemandReactionSource(project, source);
+            return new(ReactionRuns: (await reactions.ResultsAsync(project, request, token)).ToArray());
         }
         if (connection.Administrator)
         {
@@ -184,8 +240,21 @@ public sealed class ProjectCoordinator : IAsyncDisposable
             caller = new(actor, Settings.Load().Memberships.Where(member => member.EndpointId == actor).Select(member => member.ProjectId).ToArray());
         }
         else if (action.ActorId is { } actor && actor != caller.EndpointId) throw new RelayException("capability_denied", "Caller identity cannot be supplied by an agent request.");
-        Guid Required(Guid? value, string name) => value is { } id && id != Guid.Empty ? id : throw new RelayException("invalid_request", name + " is required.");
         var identifier = action.RequestId ?? Guid.NewGuid();
+        if (action.AfterRequestId is { } after)
+        {
+            var source = await Application.ResultAsync(caller, after, token);
+            var target = action.Name switch
+            {
+                "send_message" => (await Application.SessionAsync(caller, Required(action.SessionId, "sessionId"), token)).Scope.ProjectId,
+                "execute_command" => Required(action.ProjectId, "projectId"),
+                _ => throw new RelayException("invalid_request", "This action cannot be linked to a reaction.", false)
+            };
+            DemandReactionSource(target, source);
+            if (MonitorProjection.InProgress(source.State) || source.State == "awaiting_approval")
+                throw new RelayException("reaction_pending", "The source message has no final result yet.", false);
+            await reactions.DemandContinuationAsync(target, after, token);
+        }
         return action.Name switch
         {
             "configuration" => new(Configuration: Application.Discover(caller)),
@@ -214,13 +283,38 @@ public sealed class ProjectCoordinator : IAsyncDisposable
         };
     }
 
+    private static void DemandReactionSource(Guid project, WorkRecord source)
+    {
+        if (source.Request.Scope?.ProjectId != project || source.Request.Kind != "message" || source.Request.SessionId is null)
+            throw new RelayException("invalid_request", "The source must be a retained session message from the same project.", false);
+    }
+
+    private ReactionTarget[] ReactionTargets(ProjectConfiguration configuration, Guid project)
+    {
+        var settings = technical.Load();
+        return (from member in configuration.Memberships
+                where member.ProjectId == project && member.Capabilities.Contains(RelayCapabilities.RunCommand)
+                    && member.Capabilities.Contains(RelayCapabilities.ReadFile)
+                let actor = configuration.Endpoints.Single(item => item.Id == member.EndpointId)
+                from access in member.Workspaces where access.Read
+                let workspace = configuration.Workspaces.Single(item => item.Id == access.WorkspaceId)
+                where configuration.Memberships.Any(item => item.ProjectId == project && item.EndpointId == workspace.EndpointId)
+                let target = configuration.Endpoints.Single(item => item.Id == workspace.EndpointId)
+                let destination = ScopedCommands.Destination(target)
+                where destination != null
+                from command in ScopedCommands.Declared(settings, target)
+                where (member.CommandIds ?? []).Contains(command.Id, StringComparer.Ordinal)
+                select new ReactionTarget(actor.Id, actor.Name, target.Id, destination, target.BindingId, target.Name,
+                    workspace.Id, workspace.Name, command.Id, command.Name)).ToArray();
+    }
+
     private ReadPage<SessionSnapshot> Convert(ReadPage<RelaySession> page) => new(page.Items.Where(item => item.Definition is not null)
         .Select(item => new SessionSnapshot(item.Id, item.Name, item.Definition!.Scope, item.State, Diagnostic: item.Diagnostic, WorkActive: Work.IsSessionActive(item.Id))).ToArray(), page.NextCursor, page.HasMore);
 
     public async ValueTask DisposeAsync()
     {
         archiveStop.Cancel();
-        try { await Task.WhenAll(archiveLoop, replyLoop); }
+        try { await Task.WhenAll(archiveLoop, replyLoop, reactionLoop); }
         finally { archiveStop.Dispose(); await Work.DisposeAsync(); }
     }
 }

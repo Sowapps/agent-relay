@@ -12,6 +12,12 @@ html,body{width:100%;height:100%;overflow:hidden}
 .app-modal-card h2{margin-bottom:16px}
 .app-modal-card input{width:100%;padding:10px;border:1px solid var(--border);border-radius:6px;margin:8px 0 18px}
 .app-modal-card .actions{display:flex;justify-content:flex-end;gap:8px;margin-top:20px;flex-wrap:wrap}
+.app-modal-card:has(#project-reaction-editor){width:640px;max-height:calc(100vh - 48px);overflow:auto}
+.reaction-rule{display:grid;gap:10px;min-width:0;margin:12px 0;padding:12px;border:1px solid var(--border);border-radius:8px}
+.reaction-rule label{display:grid;gap:4px}
+.reaction-rule label:has(input){display:flex;align-items:center;gap:8px}
+.reaction-rule select{width:100%;min-width:0}
+.reaction-rule input[type=checkbox]{width:auto;margin:0;padding:0}
 .modal-description{font-size:12px;color:var(--muted);margin-bottom:12px}
 .desktop-advanced{margin-top:18px}
 .desktop-advanced .btn{margin:8px 8px 0 0}

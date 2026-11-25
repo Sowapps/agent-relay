@@ -8,6 +8,7 @@
  ui.cleanup={logs:true,diagnostics:true,busy:false,preview:null,result:null,error:null};
  const R=window.createRelayRenderer(()=>data,()=>ui);
  const host=(action,values={})=>{
+  if(window.simulateProjectReactions?.(action,values,receive))return;
   if(!window.chrome?.webview){if(action!=='ready')toast('Action native indisponible dans cet aperçu.');return;}
   window.chrome.webview.postMessage({action,...values});
  };
@@ -51,6 +52,35 @@
   if(type==='operation'&&data.operations.find(operation=>operation.id===id)?.previewOnly!==false)host('operation',{id});
  }
  function modal(title,body,buttons){$('#app-modal').innerHTML=`<div class="app-modal-backdrop"><section class="app-modal-card" role="dialog" aria-modal="true" aria-label="${C.escape(title)}"><h2>${C.escape(title)}</h2>${body}<div class="actions">${C.button('Annuler','close-modal','','quiet')}${buttons}</div></section></div>`;}
+ let reactionEditor=null;
+ function reactionModal(){
+  const state=reactionEditor,e=C.escape;
+  const options=(entries,value)=>entries.map(([id,label])=>`<option value="${e(id)}"${id===value?' selected':''}>${e(label)}</option>`).join('');
+  const busy=state.busy?' disabled':'';
+  const sessions=[['','Toutes les sessions'],...data.sessions.filter(s=>s.project===state.project).map(s=>[s.id,s.name])];
+  const targets=state.targets.map((target,index)=>[String(index),
+   `${target.destination==='wsl'?'WSL':'Windows'} · ${target.environment} · ${target.endpoint} · ${target.workspace} · ${target.command} · ${target.actor}`]);
+  const rules=(state.settings?.rules||[]).map((rule,index)=>{
+   const targetIndex=state.targets.findIndex(target=>['actorId','endpointId','workspaceId','commandId','destination','environment'].every(key=>target[key]===rule[key]));
+   const selectedSession=rule.sessionId||'';
+   const sources=sessions.some(([id])=>id===selectedSession)?sessions:[...sessions,[selectedSession,'Session conservée · '+selectedSession]];
+   return `<fieldset class="reaction-rule" data-reaction-rule="${index}"><legend>${e(rule.commandId||'Nouvelle réaction')}</legend>
+    <label>Session source <select data-reaction="sessionId"${busy}>${options(sources,selectedSession)}</select></label>
+    <label>Destination, dossier, commande et participant <select data-reaction="target"${busy}>${options(targetIndex<0?[['','Sélectionner une commande déclarée'],...targets]:targets,targetIndex<0?'':String(targetIndex))}</select></label>
+    <label>Mode <select data-reaction="mode"${busy}>${options([['async','Asynchrone'],['blocking','Bloquant pour la suite liée']],rule.mode)}</select></label>
+    <label><input type="checkbox" data-reaction="enabled"${rule.enabled?' checked':''}${busy}> Activée</label>
+    ${C.iconButton('Retirer la réaction','project-reactions-remove','close',`data-id="${index}"${busy}`)}
+    </fieldset>`;
+  }).join('');
+  modal('Réactions aux événements',`<div id="project-reaction-editor"><p>Seul le code de retour 2 refuse la suite liée en mode bloquant. La remise reste enregistrée.</p>
+   <p role="status">${e(state.error|| (state.busy?'Opération en cours…':state.targets.length?'':'Aucune commande déclarée disponible pour ce projet.'))}</p>
+   ${rules}${state.settings&&targets.length&&state.settings.rules.length<32?C.button('Ajouter une réaction','project-reactions-add',busy,'','plus'):''}</div>`,
+   C.button('Actualiser','project-reactions-reload',busy)+ (state.settings?C.button('Enregistrer','project-reactions-save',busy,'primary'):''));
+ }
+ function openReactions(project){
+  reactionEditor={project,targets:[],settings:null,busy:true,error:null};
+  reactionModal();host('project-reactions-read',{project});
+ }
  function messageText(type,id){
   if(type==='message')return data.messages.find(m=>m.id===id)?.text||'';
   if(type==='operation')return data.operations.find(o=>o.id===id)?.result||'';
@@ -60,7 +90,18 @@
  document.addEventListener('click',event=>{
   const el=event.target.closest('[data-action]');if(!el||!data)return;
   const {action,id,value}=el.dataset;
-  if(action==='navigate')navigate(el.dataset.view);
+  if(action==='project-reactions-open')openReactions(el.dataset.project);
+  else if(action==='project-reactions-reload')openReactions(reactionEditor.project);
+  else if(action==='project-reactions-add'){
+   reactionEditor.settings.rules.push({id:crypto.randomUUID(),mode:'async',enabled:true});reactionModal();
+  }
+  else if(action==='project-reactions-remove'){reactionEditor.settings.rules.splice(Number(id),1);reactionModal();}
+  else if(action==='project-reactions-save'){
+   const state=reactionEditor;
+   if(state.settings.rules.some(rule=>!rule.commandId)){state.error='Sélectionnez une destination et une commande pour chaque réaction.';reactionModal();return;}
+   state.busy=true;state.error=null;reactionModal();host(action,{project:state.project,settings:state.settings});
+  }
+  else if(action==='navigate')navigate(el.dataset.view);
   else if(action==='project')navigate('project',el.dataset.project);
   else if(action==='tab'){if(ui.sessionId)host('stop-session');Object.assign(ui,{period:'all',participant:'',kind:'',state:'',advanced:false,messageFilter:'all',sessionId:null});ui.tab=value;ui.detail=null;ui.query='';ui.filter='all';ui.limit=5;render();}
   else if(action==='general-feed'){Object.assign(ui,{period:'all',participant:'',kind:'',state:'',advanced:false,messageFilter:'all'});ui.generalFeed=value;ui.filter='all';ui.query='';ui.limit=5;render();}
@@ -135,6 +176,16 @@
  });
  document.addEventListener('change',event=>{
   const el=event.target;
+  if(el.dataset.reaction){
+   const rule=reactionEditor.settings.rules[Number(el.closest('[data-reaction-rule]').dataset.reactionRule)];
+   const field=el.dataset.reaction;
+   if(field==='target'&&el.value!==''){
+    const target=reactionEditor.targets[Number(el.value)];
+    for(const key of ['actorId','endpointId','workspaceId','commandId','destination','environment'])rule[key]=target[key];
+   }else if(field==='enabled')rule.enabled=el.checked;
+   else if(field!=='target')rule[field]=el.value||null;
+   return;
+  }
   if(el.dataset.history){ui[el.dataset.history]=el.value;ui.limit=5;render();}
   if(el.id==='compact-view'){document.body.classList.toggle('compact-rows',el.checked);try{localStorage.setItem('compact-rows',String(el.checked));}catch{} }
  });
@@ -145,6 +196,17 @@
  });
  function receive(message){
   if(!message||typeof message!=='object')return;
+  if(message.type==='project-reactions-read'||message.type==='project-reactions-save'){
+   const state=reactionEditor;
+   if(!state||state.project!==message.project||!$('#project-reaction-editor'))return;
+   state.busy=false;state.error=message.error||null;
+   if(!state.error){
+    state.settings=message.settings;
+    if(message.targets)state.targets=message.targets;
+    if(message.type==='project-reactions-save')toast('Réactions enregistrées.');
+   }
+   reactionModal();return;
+  }
   if(message.type==='cleanup-analyze'||message.type==='cleanup-execute'){
    const c=ui.cleanup;c.busy=false;c.error=message.error||null;
    if(message.type==='cleanup-analyze')c.preview=message.data||null;else c.result=message.data||null;

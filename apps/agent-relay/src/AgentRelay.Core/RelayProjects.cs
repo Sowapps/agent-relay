@@ -5,9 +5,9 @@ public static class RelayCapabilities
     public const string SendMessage = "message.send", ReceiveMessage = "message.receive", ReadHistory = "history.read",
         ManageSession = "session.manage", DecideApproval = "session.approval", RunCommand = "command.execute", InspectHost = "host.inspect",
         ReadFile = "file.read", WriteFile = "file.write", ReplaceFile = "file.replace", LocalWork = "agent.local-work", ManageProject = "project.manage",
-        ManageProjectAccess = "project.access.manage";
+        ManageProjectAccess = "project.access.manage", ManageProjectReactions = "project.reactions.manage";
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
-    { SendMessage, ReceiveMessage, ReadHistory, ManageSession, DecideApproval, RunCommand, InspectHost, ReadFile, WriteFile, ReplaceFile, LocalWork, ManageProject, ManageProjectAccess };
+    { SendMessage, ReceiveMessage, ReadHistory, ManageSession, DecideApproval, RunCommand, InspectHost, ReadFile, WriteFile, ReplaceFile, LocalWork, ManageProject, ManageProjectAccess, ManageProjectReactions };
 }
 
 public sealed record RelayProject(Guid Id, string Name, bool Enabled = true, bool ArchiveRequested = false, string? ArchiveDiagnostic = null)

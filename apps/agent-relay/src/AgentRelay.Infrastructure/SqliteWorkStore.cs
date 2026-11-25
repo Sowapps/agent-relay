@@ -467,15 +467,19 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         await command.ExecuteNonQueryAsync(token);
     }
 
+    internal static string BoundReplyCondition(string request, string session, string project, string sender, string recipient) => $"""
+        json_extract(i.payload,'$.inReplyTo')={request} AND json_extract(i.payload,'$.sessionId')={session}
+        AND json_extract(i.payload,'$.projectId')={project} AND json_extract(i.payload,'$.senderEndpointId')={sender}
+        AND json_extract(i.payload,'$.recipientEndpointId')={recipient}
+        """;
+
     internal async Task<InboxMessage?> FindBoundReplyAsync(WorkRequest request, CancellationToken token)
     {
         if (request.Scope is not { } scope || request.SessionId is not { } sessionId) return null;
         using var connection = database.Open();
         using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT payload FROM inbox WHERE json_extract(payload,'$.inReplyTo')=$request
-            AND json_extract(payload,'$.sessionId')=$session AND json_extract(payload,'$.projectId')=$project
-            AND json_extract(payload,'$.senderEndpointId')=$sender AND json_extract(payload,'$.recipientEndpointId')=$recipient
+        command.CommandText = $"""
+            SELECT payload FROM inbox i WHERE {BoundReplyCondition("$request", "$session", "$project", "$sender", "$recipient")}
             ORDER BY rowid LIMIT 1
             """;
         command.Parameters.AddWithValue("$request", request.Id.ToString("D"));

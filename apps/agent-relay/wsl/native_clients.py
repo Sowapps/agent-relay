@@ -295,7 +295,7 @@ def status(root, client, *, inspect_auth=True):
             'distributionRuntime': process_stamp(1), 'nativeRuntime': process, 'paneId': pane_id}
 
 
-def inspect_turn(root, client, request_id):
+def inspect_turn(root, client, request_id, release_only=False):
     if client != 'codex':
         return {'turnEnded': False}
     folder = root / client
@@ -313,6 +313,8 @@ def inspect_turn(root, client, request_id):
     observed.failure()
     if not observed.finished:
         return {'turnEnded': False}
+    if release_only:
+        return {'turnEnded': True}
     from approval_stop import stop_has_not_started
     request = marker['request']
     current = status(root, client)

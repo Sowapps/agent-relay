@@ -2,7 +2,7 @@ using AgentRelay.Core;
 
 namespace AgentRelay.Infrastructure;
 
-public sealed record NativeAdapters(IRelaySessions Sessions, IScopedWorkAdapter Executor);
+public sealed record NativeAdapters(IRelaySessions Sessions, IScopedWorkAdapter Executor, IReactionRelease ReactionRelease);
 
 // Single composition owner used by production and native-adapter integration checks.
 public static class NativeAdapterComposition
@@ -31,8 +31,20 @@ public static class NativeAdapterComposition
             async (id, token) => (await context.RecordAsync(id, token)).Definition!.Endpoint.AdapterId);
         var work = new ScopedWorkRouter(projects, new Dictionary<string, IScopedWorkAdapter>(StringComparer.Ordinal)
         {
-            ["wsl-agent"] = executor, ["wsl-command"] = executor
+            ["wsl-agent"] = executor, ["wsl-command"] = executor, ["windows-command"] = executor
         }, executor);
-        return new(router, work);
+        return new(router, work, new NativeReactionRelease(context, sessions, bridge));
+    }
+}
+
+internal sealed class NativeReactionRelease(ScopedSessionContext context, SessionService sessions, WslBridge bridge) : IReactionRelease
+{
+    public async Task<bool> ConfirmAsync(Guid session, Guid request, CancellationToken token)
+    {
+        var retained = await context.RecordAsync(session, token);
+        context.ValidateDefinition(retained.Definition!);
+        var profile = await sessions.ResolveAsync(session, retained.ProfileId, token, allowClosed: true);
+        var evidence = await bridge.CallAsync(profile, "inspect_turn", new { RequestId = request, ReleaseOnly = true }, token, TimeSpan.FromSeconds(5));
+        return evidence.TryGetProperty("turnEnded", out var ended) && ended.ValueKind == System.Text.Json.JsonValueKind.True;
     }
 }
