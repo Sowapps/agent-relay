@@ -6,6 +6,7 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
 {
     private const string ActiveState = "json_extract(payload,'$.state') IN ('pending','running')";
     internal const string DeferredState = "json_extract(payload,'$.state')='retry_wait'";
+    internal const string ReplyObservationState = "(json_extract(payload,'$.state') IN ('awaiting_reply','unknown','awaiting_approval','approval_expired') AND json_extract(payload,'$.replyDispatch') IS NOT NULL)";
     internal const string RetryDue = "julianday(json_extract(payload,'$.retry.dueAt'))";
     private const string ResumeUnverified = "json_extract(payload,'$.approvalResumeVerifiedAt') IS NULL";
     internal const string PendingApprovalStop = "json_extract(payload,'$.approvalStopRequestedAt') IS NOT NULL AND json_extract(payload,'$.cancellationConfirmedAt') IS NULL AND " + ResumeUnverified;
@@ -94,7 +95,8 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
             { State: "completed", Result: not null } => null,
             { ErrorCode: WorkExecution.RetryCancelled } => null,
             null => record,
-            _ => record with { ApprovalStopRequestedAt = existing.ApprovalStopRequestedAt, NativeAttempts = existing.NativeAttempts }
+            _ => record with { ApprovalStopRequestedAt = existing.ApprovalStopRequestedAt, NativeAttempts = existing.NativeAttempts,
+                ReplyDispatch = existing.ReplyDispatch }
         }, token);
 
     private sealed record Transition(WorkRecord Record, DateTimeOffset? JournalExpiry = null, bool ClearExpiry = false,
@@ -160,15 +162,17 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
             if (record.State == "retry_wait" || record is { State: "running", Retry: not null, NativeAttempts: [.., { FinishedAt: not null }] })
                 return record with { State = "failed", Retry = null, CancellationRequestedAt = now, UpdatedAt = now,
                     ErrorCode = WorkExecution.RetryCancelled, Error = "The scheduled retry was cancelled before dispatch." };
-            return record.State is "pending" or "running" or "awaiting_approval"
+            return (record.State is "pending" or "running" or "awaiting_approval" or "awaiting_reply" ||
+                record is { State: "unknown", ReplyDispatch: not null })
                 ? record with { CancellationRequestedAt = now } : null;
         }, token);
 
-    public async Task<bool> SessionHasDeferredWorkAsync(Guid id, CancellationToken token)
+    public async Task<bool> SessionHasDeferredWorkAsync(Guid id, CancellationToken token, bool includeReplies = false)
     {
         using var connection = database.Open();
         using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT 1 FROM work WHERE {DeferredState} AND json_extract(payload,'$.request.sessionId')=$id LIMIT 1";
+        var pending = includeReplies ? $"({DeferredState} OR {ReplyObservationState})" : DeferredState;
+        command.CommandText = $"SELECT 1 FROM work WHERE {pending} AND json_extract(payload,'$.request.sessionId')=$id LIMIT 1";
         command.Parameters.AddWithValue("$id", id.ToString("D"));
         return await command.ExecuteScalarAsync(token) is not null;
     }
@@ -271,18 +275,18 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
             };
         }, token);
 
-    internal Task<bool> BeginNativeAttemptAsync(Guid id, int number, CancellationToken token) =>
+    internal Task<bool> BeginNativeAttemptAsync(Guid id, int number, CancellationToken token, NativeReplyDispatch? dispatch = null) =>
         WriteTransitionAsync(id, record =>
         {
             if (record is not { State: "running", CancellationRequestedAt: null } ||
                 number != (record.NativeAttempts?.Length ?? 0) + 1) return null;
             var now = DateTimeOffset.UtcNow;
-            return new(record with { NativeAttempts = [.. record.NativeAttempts ?? [], new(number, now)] },
+            return new(record with { NativeAttempts = [.. record.NativeAttempts ?? [], new(number, now)], ReplyDispatch = dispatch },
                 Event: "native_attempt_started", EventAt: now);
         }, token);
 
     internal async Task<bool> FinishNativeAttemptAsync(Guid id, int number, bool? dispatched, string? errorCode,
-        NativeRetry? retry, CancellationToken token)
+        NativeRetry? retry, CancellationToken token, RelayException? observation = null)
     {
         var parked = false;
         await WriteTransitionAsync(id, record =>
@@ -290,13 +294,50 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
             if (record?.NativeAttempts is not { Length: > 0 } attempts || attempts[^1].Number != number ||
                 attempts[^1].FinishedAt is not null) return null;
             var now = DateTimeOffset.UtcNow;
-            parked = retry is not null && record is { State: "running", CancellationRequestedAt: null };
+            if (observation is not null && !IsAwaitingReply(record)) return null;
+            parked = retry is not null && record.CancellationRequestedAt is null &&
+                (observation is not null || record.State == "running");
+            var state = parked ? "retry_wait" : observation?.Code switch
+            {
+                null => record.State,
+                "native_reply_missing" or "session_closed_before_reply" when record.State == "approval_expired" => "approval_expired",
+                "session_closed_before_reply" or "native_reply_missing" => "failed",
+                _ => observation.EffectsPossible == false ? "failed" : "unknown"
+            };
             var completed = attempts[^1] with { FinishedAt = now, Dispatched = dispatched, ErrorCode = errorCode, RetryAt = parked ? retry!.DueAt : null };
-            return new(record with { NativeAttempts = [.. attempts[..^1], completed], Retry = parked ? retry : null,
-                    State = parked ? "retry_wait" : record.State, ErrorCode = parked ? errorCode : record.ErrorCode, UpdatedAt = now },
+            return new(record with { NativeAttempts = [.. attempts[..^1], completed], Retry = parked ? retry : null, ReplyDispatch = null,
+                    State = state, ErrorCode = state == "approval_expired" ? record.ErrorCode : parked || observation is not null ? errorCode : record.ErrorCode,
+                    Error = state == "approval_expired" ? record.Error : observation?.Message ?? record.Error,
+                    ApprovalWaitingSince = state == "awaiting_approval" ? now : record.ApprovalWaitingSince,
+                    NativeTurnEnded = observation?.NativeTurnEnded == true || record.NativeTurnEnded, UpdatedAt = now },
                 Diagnostic: errorCode, Event: parked ? "native_retry_scheduled" : "native_attempt_finished", EventAt: now);
         }, token);
         return parked;
+    }
+
+    internal Task<bool> MarkAwaitingReplyAsync(Guid id, CancellationToken token) =>
+        WriteAsync(id, record => record is { State: "running", ReplyDispatch: not null }
+            ? record with { State = "awaiting_reply", Retry = null, UpdatedAt = DateTimeOffset.UtcNow } : null, token);
+
+    internal static bool IsAwaitingReply(WorkRecord record) =>
+        record.ReplyDispatch is not null && record.State is "awaiting_reply" or "unknown" or "awaiting_approval" or "approval_expired";
+
+    internal Task RecordReplyApprovalAsync(Guid id, CancellationToken token) =>
+        WriteAsync(id, record => record is { State: "awaiting_reply" or "unknown", ReplyDispatch: not null }
+            ? record with { State = "awaiting_approval", ApprovalWaitingSince = DateTimeOffset.UtcNow,
+                ErrorCode = "approval_required", Error = "Native task needs human approval.", UpdatedAt = DateTimeOffset.UtcNow }
+            : null, token);
+
+    internal async Task<IReadOnlyList<(long Cursor, WorkRecord Record)>> AwaitingRepliesAsync(long after, CancellationToken token)
+    {
+        using var connection = database.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT rowid,payload FROM work WHERE rowid>$after AND {ReplyObservationState} ORDER BY rowid LIMIT 16";
+        command.Parameters.AddWithValue("$after", after);
+        using var reader = await command.ExecuteReaderAsync(token);
+        var results = new List<(long, WorkRecord)>();
+        while (await reader.ReadAsync(token)) results.Add((reader.GetInt64(0), RelayJson.Deserialize<WorkRecord>(reader.GetString(1))));
+        return results;
     }
 
     internal Task RecordApprovalTurnObservationAsync(Guid id, bool ready, CancellationToken token) =>
@@ -314,7 +355,8 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
     {
         if (record is null || !WorkExecution.ApprovalStopPending(record) || !stopped && record.SessionClosedAt is not null) return null;
         var now = DateTimeOffset.UtcNow;
-        record = record with { SessionClosedAt = record.SessionClosedAt ?? now, CancellationConfirmedAt = stopped ? now : null };
+        record = record with { SessionClosedAt = record.SessionClosedAt ?? now, CancellationConfirmedAt = stopped ? now : null,
+            ReplyDispatch = stopped ? null : record.ReplyDispatch };
         if (record.State is "completed" or "failed")
             return record;
         if (record.State == "approval_expired")
@@ -334,10 +376,15 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         {
             if (record is null || record.Request.Scope != scope || record.Request.SessionId != sessionId)
                 throw new InvalidDataException("Native reply does not belong to the selected task/project.");
-            if (record.State is not ("unknown" or "awaiting_approval" or "approval_expired" or "retry_wait")) return null;
+            if (record.State is not ("unknown" or "awaiting_approval" or "approval_expired" or "retry_wait" or "awaiting_reply") &&
+                record.ErrorCode is not ("session_closed_before_reply" or "native_reply_missing")) return null;
             var observedAt = DateTimeOffset.UtcNow;
-            var completed = record with { State = "completed", Result = result, Error = null, ErrorCode = null, Retry = null, UpdatedAt = observedAt };
-            if (record.State is "unknown" or "retry_wait") return new(completed);
+            var attempts = record.NativeAttempts;
+            if (record.ReplyDispatch is not null && attempts is [.., { FinishedAt: null } sent])
+                attempts = [.. attempts[..^1], sent with { FinishedAt = observedAt, Dispatched = true }];
+            var completed = record with { State = "completed", Result = result, Error = null, ErrorCode = null, Retry = null,
+                ReplyDispatch = null, NativeAttempts = attempts, UpdatedAt = observedAt };
+            if (record.State is not ("awaiting_approval" or "approval_expired")) return new(completed);
             var started = ApprovalExpiry.StartedAt(record);
             if (record.CreatedAt == default || started < record.CreatedAt || started > observedAt ||
                 started > DateTimeOffset.MaxValue - ApprovalExpiry.WaitingLimit ||

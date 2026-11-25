@@ -58,7 +58,96 @@ internal static class WorkScenarios
             Assert(failed.State == expected, error.GetType().Name + " maps to " + expected);
         }
         await DurableRetryAsync(store, capability);
+        await DetachedReplyAsync(Path.Combine(data, "detached-reply"), capability);
         Console.WriteLine("MVP_WORK_STATES=PASS");
+    }
+
+    private static async Task DetachedReplyAsync(string data, WorkCapability capability)
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var token = deadline.Token;
+        var store = new SqliteWorkStore(new RelayDatabase(data));
+        var scope = new OperationScope(Guid.NewGuid(), Guid.NewGuid(), Guid.NewGuid(), null);
+        var message = new WorkRequest(Guid.NewGuid(), capability.ProfileId, "message", "detached", SessionId: Guid.NewGuid(), Scope: scope);
+        var executor = new ReplyFixture(store);
+        await using (var service = new WorkService(store, executor, () => [capability], maximumConcurrency: 4))
+        {
+            await service.SubmitAsync(message, token);
+            await WaitingAsync(service, message.Id);
+            await Refuses("busy", () => service.SubmitAsync(message with { Id = Guid.NewGuid() }, token));
+            for (var index = 0; index < 4; index++)
+                await service.SubmitAsync(message with { Id = Guid.NewGuid(), SessionId = Guid.NewGuid(), Text = "occupy" }, token);
+            await Refuses("busy", () => service.SubmitAsync(message with { Id = Guid.NewGuid(), SessionId = Guid.NewGuid() }, token));
+            await new ReplyMonitor(store, executor, null).SweepAsync(token);
+            Assert(service.IsActive && (await service.ReadAsync(message.Id, token)) is { State: "completed", Result.Output: "reply" },
+                "a reply is delivered while all four dispatch slots are occupied");
+            executor.Release.TrySetResult();
+            while (service.IsActive) await Task.Delay(10, token);
+            message = message with { Id = Guid.NewGuid() };
+            await service.SubmitAsync(message, token);
+            await WaitingAsync(service, message.Id);
+        }
+        var reopened = new SqliteWorkStore(new RelayDatabase(data));
+        await reopened.RecoverAsync(token);
+        Assert((await reopened.FindAsync(message.Id, token))?.State == "awaiting_reply", "restart retains awaiting_reply");
+        var restarted = new ReplyFixture(reopened);
+        await new ReplyMonitor(reopened, restarted, null).SweepAsync(token);
+        var reply = await reopened.FindBoundReplyAsync(message, token);
+        Assert(restarted.Dispatches == 0 && reply?.InReplyTo == message.Id && reply.RecipientEndpointId == scope.SenderId &&
+            (await reopened.FindAsync(message.Id, token))?.State == "completed",
+            "restart delivers the correlated reply without sending a second prompt");
+
+        var closed = message with { Id = Guid.NewGuid() };
+        var now = DateTimeOffset.UtcNow;
+        await reopened.SaveAsync(new(closed, "running", now, now), token);
+        Assert(await reopened.BeginNativeAttemptAsync(closed.Id, 1, token, new("session", "distribution", "workspace")),
+            "intent survives an interruption before the confirmation is committed");
+        await reopened.RecoverAsync(token);
+        var uncertain = await reopened.FindAsync(closed.Id, token);
+        Assert(uncertain is { State: "unknown", ReplyDispatch: not null }, "uncertain handoff remains observable without replay");
+        var closure = new RelayException("session_closed_before_reply", "Original session confirmed closed.");
+        await reopened.FinishNativeAttemptAsync(closed.Id, 1, true, closure.Code, null, token, closure);
+        Assert((await reopened.FindAsync(closed.Id, token)) is { State: "failed", ErrorCode: "session_closed_before_reply", ReplyDispatch: null },
+            "session closure records a durable outcome when there is no reply");
+        await restarted.ObserveReplyAsync(uncertain!, token);
+        Assert((await reopened.FindAsync(closed.Id, token)) is { State: "completed", Result.Output: "reply" },
+            "a verified late receipt takes precedence over a closure diagnostic");
+
+        async Task WaitingAsync(WorkService service, Guid id)
+        {
+            while (service.IsActive) await Task.Delay(10, token);
+            Assert((await service.ReadAsync(id, token)).State == "awaiting_reply", "confirmed handoff releases the execution slot");
+        }
+    }
+
+    private sealed class ReplyFixture(SqliteWorkStore store) : IWorkExecutor, IReplyObservation
+    {
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int Dispatches { get; private set; }
+
+        public async Task<WorkResult> ExecuteAsync(WorkRequest request, CancellationToken token)
+        {
+            if (request.Text == "occupy")
+            {
+                await Release.Task.WaitAsync(token);
+                return new("fixture", "released");
+            }
+            Dispatches++;
+            Assert(await store.BeginNativeAttemptAsync(request.Id, 1, token, new("session", "distribution", "workspace")) &&
+                await store.MarkAwaitingReplyAsync(request.Id, token), "reply handoff is retained");
+            throw new WorkDeferredException();
+        }
+
+        public async Task ObserveReplyAsync(WorkRecord work, CancellationToken token)
+        {
+            var request = work.Request;
+            var scope = request.Scope!;
+            var stamp = DateTimeOffset.UtcNow;
+            var reply = new InboxMessage(Guid.NewGuid(), scope.RecipientId.ToString("D"), "fixture", "sender", "reply",
+                request.Id, stamp, request.SessionId, scope.ProjectId, scope.RecipientId, scope.SenderId);
+            await store.AddInboxAsync(reply, token);
+            await store.AttachNativeReplyAsync(request.Id, scope, request.SessionId!.Value, new(reply.Sender, reply.Text), stamp, token);
+        }
     }
 
     private static async Task DurableRetryAsync(SqliteWorkStore store, WorkCapability capability)

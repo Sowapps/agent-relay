@@ -1,7 +1,7 @@
 // Pure presentation helpers: identities, capabilities, task aggregates and shared filters.
 window.RelayModel = (() => {
  const attentionStates=['unknown','blocked','attention','approval_expired','failed'];
- const workInProgress=state=>['running','pending','retry_wait'].includes(state);
+ const workInProgress=state=>['running','pending','retry_wait','awaiting_reply'].includes(state);
  const needsAttention=item=>attentionStates.includes(item.state)&&!item.reviewed;
  const participant=(data,id)=>data.participants.find(p=>p.id===id);
  const session=(data,id)=>data.sessions.find(s=>s.id===id);
@@ -12,7 +12,7 @@ window.RelayModel = (() => {
  const sessionState=(data,s)=>s.state==='closed'?'closed':data.operations.some(o=>o.session===s.id&&o.state==='running')?'running':s.state||'unknown';
  const taskState=(data,id)=>{
   const ops=data.operations.filter(o=>o.taskId===id);
-  return [...attentionStates,'running','retry_wait','pending'].find(state=>ops.some(o=>o.state===state))||(ops.length?'completed':'idle');
+  return [...attentionStates,'running','awaiting_reply','retry_wait','pending'].find(state=>ops.some(o=>o.state===state))||(ops.length?'completed':'idle');
  };
  const timeline=(data,taskId)=>[
   ...data.operations.filter(o=>o.taskId===taskId).map(o=>({...o,eventType:'operation'})),

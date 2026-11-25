@@ -3,10 +3,14 @@ using AgentRelay.Core;
 namespace AgentRelay.Infrastructure;
 
 public interface IScopedWorkAdapter : IWorkExecutor, IWorkPreparation, IOperationRecovery, ITransferMaintenance;
+internal interface IReplyObservation
+{
+    Task ObserveReplyAsync(WorkRecord record, CancellationToken token);
+}
 
 /// <summary>Route authorized work by technical endpoint capability while sharing the normal work lifecycle.</summary>
 internal sealed class ScopedWorkRouter(ProjectSettingsStore settings, IReadOnlyDictionary<string, IScopedWorkAdapter> installed,
-    IOperationRecovery transferReceipts) : IScopedWorkAdapter, IRetryPreparation
+    IOperationRecovery transferReceipts) : IScopedWorkAdapter, IRetryPreparation, IReplyObservation
 {
     private IScopedWorkAdapter? Find(WorkRequest request)
     {
@@ -23,6 +27,10 @@ internal sealed class ScopedWorkRouter(ProjectSettingsStore settings, IReadOnlyD
     public Task<IPreparedWork> PrepareRetryAsync(WorkRecord record, CancellationToken token) =>
         Select(record.Request) is IRetryPreparation retry ? retry.PrepareRetryAsync(record, token) :
             throw new RelayException("adapter_unavailable", "The selected adapter cannot resume this retry.", false);
+
+    public Task ObserveReplyAsync(WorkRecord record, CancellationToken token) =>
+        Find(record.Request) is IReplyObservation observer ? observer.ObserveReplyAsync(record, token) :
+            throw new RelayException("adapter_unavailable", "The selected adapter cannot observe this retained reply.");
 
     public async Task<WorkResult> ExecuteAsync(WorkRequest request, CancellationToken token)
     {

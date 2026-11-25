@@ -82,6 +82,7 @@ public sealed class ProjectCoordinator : IAsyncDisposable
 
     private readonly CancellationTokenSource archiveStop = new();
     private readonly Task archiveLoop;
+    private readonly Task replyLoop;
 
     public ProjectCoordinator(string dataDirectory, Action<Exception>? reportError = null)
         : this(dataDirectory, reportError, new PromotionAdmission(dataDirectory)) { }
@@ -98,6 +99,22 @@ public sealed class ProjectCoordinator : IAsyncDisposable
         Work = new(store, executor, () => Settings.Load().Endpoints.Select(endpoint => new WorkCapability(endpoint.Id.ToString("D"), true, true, true)).ToArray(), technical.Load().MaximumConcurrency);
         activity = Work;
         Application = new(new(Settings), Work, adapter, new ProjectJournal(database), new EndpointDiagnostics(technical), executor, executor, Settings);
+        var replies = new ReplyMonitor(store, (IReplyObservation)executor, reportError);
+        replyLoop = Task.Run(async () =>
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+            try
+            {
+                while (await timer.WaitForNextTickAsync(archiveStop.Token))
+                {
+                    using var admission = promotion.TryEnter();
+                    if (admission is null) continue;
+                    try { await replies.SweepAsync(archiveStop.Token); }
+                    catch (Exception error) when (!archiveStop.IsCancellationRequested) { reportError?.Invoke(error); }
+                }
+            }
+            catch (OperationCanceledException) when (archiveStop.IsCancellationRequested) { }
+        });
         archiveLoop = Task.Run(async () =>
         {
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
@@ -203,7 +220,7 @@ public sealed class ProjectCoordinator : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         archiveStop.Cancel();
-        try { await archiveLoop; }
+        try { await Task.WhenAll(archiveLoop, replyLoop); }
         finally { archiveStop.Dispose(); await Work.DisposeAsync(); }
     }
 }

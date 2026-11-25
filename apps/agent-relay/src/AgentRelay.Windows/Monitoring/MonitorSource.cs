@@ -44,7 +44,7 @@ internal sealed class PipeMonitorSource(string data) : IMonitorSource
     {
         if (!older || project.MoreOperations)
         {
-            var watching = older ? [] : project.Operations.Where(item => item.State is "pending" or "running").Select(item => item.Request.Id).ToArray();
+            var watching = older ? [] : project.Operations.Where(item => MonitorProjection.InProgress(item.State)).Select(item => item.Request.Id).ToArray();
             var page = (await Read(new("observe_operations", Query: new(project.ProjectId, SessionId: project.SessionId, Cursor: older ? project.OperationCursor : null, Limit: 50)), token)).Operations!;
             var overlaps = Merge(project.Operations, page.Items, item => item.Request.Id, out var changed); if (changed) project.Revision++;
             if (older || !project.OlderOperationsLoaded || !overlaps) { project.OperationCursor = page.NextCursor; project.MoreOperations = page.HasMore; }

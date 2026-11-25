@@ -5,7 +5,7 @@ namespace AgentRelay.Infrastructure;
 // Owns scoped execution and recovery orchestration; concrete dependencies come from ProjectCoordinator.
 public sealed class ScopedWorkExecutor(RelayDatabase database, ProjectSettingsStore projects, SessionService sessions, WslBridge bridge,
     SqliteWorkStore store, FileTransferService files, ScopedFileRoutes fileRoutes, ScopedInbox inbox, ScopedCommands commands, ScopedSessionContext context)
-    : IScopedWorkAdapter, IRetryPreparation
+    : IScopedWorkAdapter, IRetryPreparation, IReplyObservation
 {
     public async Task<WorkResult> ExecuteAsync(WorkRequest request, CancellationToken token)
     {
@@ -52,7 +52,7 @@ public sealed class ScopedWorkExecutor(RelayDatabase database, ProjectSettingsSt
         }
         context.ValidateDefinition(record.Definition);
         return new ScopedPreparedWork(dispatchToken => ExecuteMessageAsync(request, record, profile, DemandMessage, retry, attempt,
-            token => bridge.CallAsync(profile, "message", new { request.Id, request.Text, profile.AllowLocalWork, Scope = retainedScope,
+            token => bridge.CallAsync(profile, "submit_message", new { request.Id, request.Text, profile.AllowLocalWork, Scope = retainedScope,
                 ExpectedNativeGeneration = retry.NativeGeneration, ExpectedDistributionGeneration = retry.DistributionGeneration,
                 ExpectedWorkspaceIdentity = retry.WorkspaceIdentity, NativeAttempt = attempt }, token), dispatchToken));
     }
@@ -72,22 +72,24 @@ public sealed class ScopedWorkExecutor(RelayDatabase database, ProjectSettingsSt
             if (recovery.GetProperty("reply").ValueKind != System.Text.Json.JsonValueKind.Null)
                 return await ImportReplyAsync(recovery);
         }
-        if (!await store.BeginNativeAttemptAsync(request.Id, attempt, token))
+        var pending = new NativeReplyDispatch(contextAtDispatch.NativeGeneration, contextAtDispatch.DistributionGeneration,
+            contextAtDispatch.WorkspaceIdentity);
+        if (!await store.BeginNativeAttemptAsync(request.Id, attempt, token, pending))
             throw new RelayException("native_retry_interrupted", "The request changed before another native attempt was admitted.");
         System.Text.Json.JsonElement result;
         try
         {
             result = await send(token);
         }
-        catch (Exception error)
+        catch (RelayException error) when (error.EffectsPossible == false)
         {
-            var delay = profile.Client == "codex" ? RetryDelay(attempt, error) : null;
-            var relay = error as RelayException;
-            var retry = delay is { } wait ? contextAtDispatch with { DueAt = DateTimeOffset.UtcNow + wait } : null;
-            if (await store.FinishNativeAttemptAsync(request.Id, attempt, relay?.NativeTurnEnded == true ? true : null,
-                relay?.Code ?? "execution_unknown", retry, CancellationToken.None))
-                throw new WorkDeferredException();
+            await store.FinishNativeAttemptAsync(request.Id, attempt, false, error.Code, null, CancellationToken.None);
             throw;
+        }
+        if (result.TryGetProperty("submitted", out var submitted) && submitted.ValueKind == System.Text.Json.JsonValueKind.True)
+        {
+            await store.MarkAwaitingReplyAsync(request.Id, CancellationToken.None);
+            throw new WorkDeferredException();
         }
         var reused = result.TryGetProperty("attemptDispatched", out var dispatched) && dispatched.ValueKind == System.Text.Json.JsonValueKind.False;
         await store.FinishNativeAttemptAsync(request.Id, attempt, !reused, null, null, CancellationToken.None);
@@ -99,6 +101,41 @@ public sealed class ScopedWorkExecutor(RelayDatabase database, ProjectSettingsSt
             var reply = response.GetProperty("reply");
             if (reply.GetProperty("inReplyTo").GetGuid() != request.Id) throw new InvalidDataException("Reply correlation failed.");
             return new(sender, reply.GetProperty("text").GetString()!);
+        }
+    }
+
+    public async Task ObserveReplyAsync(WorkRecord work, CancellationToken token)
+    {
+        if (work is not { Request.SessionId: { } id, ReplyDispatch: { } dispatch, NativeAttempts: [.., { } attempt] }) return;
+        var retained = await inbox.ReconcileRetainedReplyAsync(work, token);
+        if (!SqliteWorkStore.IsAwaitingReply(retained)) return;
+        var session = await context.RecordAsync(id, token);
+        if (session.Definition is not { } definition || !ProjectPolicy.IsSessionRequest(work.Request, definition))
+            throw new InvalidDataException("The retained dispatch no longer matches its original session.");
+        try
+        {
+            var profile = await sessions.ResolveAsync(id, session.ProfileId, token, allowClosed: true);
+            var response = await bridge.CallAsync(profile, "observe_message", new { work.Request.Id, NativeAttempt = attempt.Number },
+                token, TimeSpan.FromSeconds(5));
+            if (response.TryGetProperty("messages", out _))
+            {
+                await inbox.ImportAsync(session, response, token);
+                return;
+            }
+            if (session.State == "closed")
+                throw new RelayException("session_closed_before_reply", "The session closed before a reply was confirmed.");
+        }
+        catch (RelayException error) when (error.Code == "approval_required")
+        {
+            await store.RecordReplyApprovalAsync(work.Request.Id, token);
+        }
+        catch (RelayException error) when (error.Code is "session_closed_before_reply" or
+            "native_reply_missing" or "server_overloaded" or "native_provider_rate_limited" or "native_turn_failed")
+        {
+            var delay = RetryDelay(attempt.Number, error);
+            var retry = delay is { } wait ? new NativeRetry(DateTimeOffset.UtcNow + wait, dispatch.NativeGeneration,
+                dispatch.DistributionGeneration, dispatch.WorkspaceIdentity) : null;
+            await store.FinishNativeAttemptAsync(work.Request.Id, attempt.Number, true, error.Code, retry, token, error);
         }
     }
 

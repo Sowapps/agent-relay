@@ -13,9 +13,10 @@ public sealed record WorkRecord(WorkRequest Request, string State, DateTimeOffse
     DateTimeOffset? ApprovalWaitingSince = null, DateTimeOffset? ApprovalExpiredAt = null,
     DateTimeOffset? SessionClosedAt = null, DateTimeOffset? TerminalRefusalSentAt = null, bool NativeTurnEnded = false,
     NativeAttempt[]? NativeAttempts = null, DateTimeOffset? TerminalEscapeSentAt = null,
-    DateTimeOffset? ApprovalResumeVerifiedAt = null, NativeRetry? Retry = null);
+    DateTimeOffset? ApprovalResumeVerifiedAt = null, NativeRetry? Retry = null, NativeReplyDispatch? ReplyDispatch = null);
 
 public sealed record NativeRetry(DateTimeOffset DueAt, string NativeGeneration, string DistributionGeneration, string WorkspaceIdentity);
+public sealed record NativeReplyDispatch(string NativeGeneration, string DistributionGeneration, string WorkspaceIdentity);
 public sealed class WorkDeferredException : Exception { }
 
 public sealed record NativeAttempt(int Number, DateTimeOffset StartedAt, DateTimeOffset? FinishedAt = null,
@@ -68,7 +69,7 @@ public interface IWorkStore
         throw new RelayException("cancellation_unavailable", "This work store cannot retain the session closure.", false);
     Task RecordApprovalInterruptionAsync(Guid id, CancellationToken token) => Task.CompletedTask;
     Task RecordApprovalSignalAsync(Guid id, string action, CancellationToken token) => Task.CompletedTask;
-    Task<bool> SessionHasDeferredWorkAsync(Guid id, CancellationToken token) => Task.FromResult(false);
+    Task<bool> SessionHasDeferredWorkAsync(Guid id, CancellationToken token, bool includeReplies = false) => Task.FromResult(false);
     Task<IReadOnlyList<WorkRecord>> DueRetriesAsync(DateTimeOffset now, CancellationToken token) => Task.FromResult<IReadOnlyList<WorkRecord>>([]);
     Task<bool> ClaimRetryAsync(Guid id, DateTimeOffset now, CancellationToken token) => Task.FromResult(false);
 }
@@ -154,8 +155,8 @@ public sealed class WorkService : IAsyncDisposable
                 if (request.SessionId is { } targetSession)
                 {
                     await DemandSessionResolvedAsync(targetSession, token);
-                    if (await store.SessionHasDeferredWorkAsync(targetSession, token))
-                        throw new RelayException("busy", "This session has a scheduled retry.", false);
+                    if (await store.SessionHasDeferredWorkAsync(targetSession, token, includeReplies: request.Kind == "message"))
+                        throw new RelayException("busy", "This session has a pending reply or scheduled retry.", false);
                 }
                 if (preparing.Values.Any(item => item.Key == key) || running.TryGetValue(key, out var active) && !active.IsCompleted)
                     throw new RelayException("busy", "This session already has an active operation.", false);
@@ -279,7 +280,9 @@ public sealed class WorkService : IAsyncDisposable
         if (record is { ErrorCode: WorkExecution.RetryCancelled, CancellationRequestedAt: not null }) return record;
         if (record.State is "completed" or "failed" or "approval_expired" || record.CancellationConfirmedAt is not null)
             throw new RelayException("operation_already_finished", "The operation is already finished and cannot be cancelled.", false);
-        if (record.State is not ("pending" or "running" or "awaiting_approval") || record.CancellationRequestedAt is null)
+        var cancellable = record.State is "pending" or "running" or "awaiting_approval" or "awaiting_reply" ||
+            record is { State: "unknown", ReplyDispatch: not null };
+        if (!cancellable || record.CancellationRequestedAt is null)
             throw new RelayException("cancellation_unavailable", "This operation has no confirmed cancellable activity. Inspect the retained result.", false);
         return record;
     }

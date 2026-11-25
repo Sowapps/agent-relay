@@ -48,6 +48,11 @@ def main():
     if action == 'message' and profile != 'command':
         request['id'] = str(uuid.UUID(request['id']))
         return native_clients.send(root, profile, request)
+    if action == 'submit_message' and profile != 'command':
+        request['id'] = str(uuid.UUID(request['id']))
+        return native_clients.submit(root, profile, request)[0]
+    if action == 'observe_message' and profile != 'command':
+        return native_clients.observe(root, profile, str(uuid.UUID(request['id'])), request['nativeAttempt'])
     if action == 'command':
         if profile != 'command':
             raise PermissionError('Command execution is not available on agent-message profiles')

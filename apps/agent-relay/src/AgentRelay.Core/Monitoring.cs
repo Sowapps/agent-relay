@@ -5,7 +5,7 @@ public sealed record MonitorTask(Guid ProjectId, Guid Id, IReadOnlyList<WorkReco
 {
     public DateTimeOffset UpdatedAt => Operations.Select(item => item.UpdatedAt).Concat(Messages.Select(item => item.ReceivedAt)).Max();
     public string State => MonitorProjection.AggregateState(Operations.Select(item => item.State));
-    public bool Active => Operations.Any(item => item.State is "running" or "pending");
+    public bool Active => Operations.Any(item => MonitorProjection.InProgress(item.State));
 }
 
 public sealed record MonitorEvent(DateTimeOffset At, WorkRecord? Operation = null, InboxMessage? Message = null);
@@ -13,11 +13,12 @@ public sealed record EndpointDescriptor(Guid EndpointId, string Connector, strin
 
 public static class MonitorProjection
 {
+    public static bool InProgress(string state) => state is "running" or "pending" or "awaiting_reply" or "retry_wait";
     public static bool NeedsAttention(string state) => state is "unknown" or "failed" or "awaiting_approval" or "approval_expired" or "blocked";
     public static string AggregateState(IEnumerable<string> states)
     {
         var values = states.ToHashSet(StringComparer.Ordinal);
-        foreach (var state in new[] { "unknown", "blocked", "awaiting_approval", "approval_expired", "failed", "running", "pending" })
+        foreach (var state in new[] { "unknown", "blocked", "awaiting_approval", "approval_expired", "failed", "running", "awaiting_reply", "retry_wait", "pending" })
             if (values.Contains(state)) return state;
         return values.Count == 0 ? "idle" : "completed";
     }

@@ -249,7 +249,7 @@ def ancestor_generations():
     return results
 
 
-def status(root, client):
+def status(root, client, *, inspect_auth=True):
     folder = root / client
     exists = tmux(root, 'has-session', '-t', client, check=False).returncode == 0
     available = exists
@@ -275,7 +275,7 @@ def status(root, client):
                     value=json.loads(first)
                     if value.get('type')=='session_meta':found.append(str(__import__('uuid').UUID(value['payload']['id'])))
             if len(set(found))==1:commit(pinned,{'id':found[0]})
-    auth=authentication(root,client) if binding else {'authenticated':None}
+    auth=authentication(root,client) if binding and inspect_auth else {'authenticated':None}
     initialized = folder / 'data/mcp-initialized.json'
     launch_file = folder / 'launch-state.json'
     require_marker = json.loads(launch_file.read_text()).get('requireNativeMarker', False) if launch_file.is_file() else False
@@ -321,7 +321,7 @@ def inspect_turn(root, client, request_id):
     return {'turnEnded': True, 'sessionReady': bool(ready)}
 
 
-def send(root, client, request):
+def submit(root, client, request):
     """Retain intent before terminal input. @see submit_prompt for the single submission boundary."""
     identifier = str(uuid.UUID(request['id']))
     attempt = request.get('nativeAttempt', 1)
@@ -331,7 +331,7 @@ def send(root, client, request):
     dispatch = NativeDispatch(root / client / 'data', identifier, attempt)
     existing = find_reply(root, client, identifier)
     if existing:
-        return {'reply': existing, 'messages': [existing], 'attemptDispatched': False}
+        return {'reply': existing, 'messages': [existing], 'attemptDispatched': False}, None
     dispatch.demand_unused()
     launched = json.loads((root / client / 'launch-state.json').read_text()) if (root / client / 'launch-state.json').exists() else {'allowLocalWork': False}
     if launched['allowLocalWork'] != request.get('allowLocalWork', False):
@@ -369,26 +369,81 @@ def send(root, client, request):
             if client == 'codex' else None)
     dispatch.demand_previous_proof(request, turn)
     if (reply := find_reply(root, client, identifier)) is not None:
-        return {'reply': reply, 'messages': [reply], 'attemptDispatched': False}
+        return {'reply': reply, 'messages': [reply], 'attemptDispatched': False}, None
     # Exclusive intent precedes terminal input. A missing proof never authorizes another send.
     dispatch.record_intent(request, prompt)
     submit_prompt(root, client, identifier, prompt, current['paneId'])
+    return {'submitted': True}, (request, dispatch, turn)
+
+
+def observe(root, client, identifier, attempt):
+    """Observe a retained submission, without ever writing another prompt."""
+    reply = find_reply(root, client, identifier)
+    if reply:
+        return {'reply': reply, 'messages': [reply]}
+    folder = root / client
+    dispatch = NativeDispatch(folder / 'data', identifier, attempt)
+    try:
+        marker = json.loads(dispatch.marker(attempt).read_text(encoding='utf-8'))
+    except FileNotFoundError:
+        return {'pending': True}
+    request = marker['request']
+    if request['id'] != identifier:
+        raise ValueError('Observed dispatch identifier does not match.')
+    current = status(root, client, inspect_auth=False)
+    def pending_or_raise(code, message, ended=False):
+        if (reply := find_reply(root, client, identifier)) is not None:
+            return {'reply': reply, 'messages': [reply]}
+        raise NativeFailure(code, message, turn_ended=ended)
+
+    native = (current['nativeRuntime'] or {}).get('generation')
+    distribution = (current['distributionRuntime'] or {}).get('generation')
+    if (not current['available'] or
+            (native and request.get('expectedNativeGeneration') and native != request['expectedNativeGeneration']) or
+            (distribution and request.get('expectedDistributionGeneration') and distribution != request['expectedDistributionGeneration'])):
+        return pending_or_raise('session_closed_before_reply', 'The original native session ended before a reply was confirmed.')
+    turn = (TurnObservation.retained(folder, current.get('nativeConversationId'), marker['prompt'])
+            if client == 'codex' else None)
+    if turn is not None:
+        outcome = observe_failure(root, client, request, dispatch, turn)
+        if outcome is not None:
+            return outcome
+        if turn.finished:
+            return pending_or_raise('native_reply_missing', 'The correlated Codex turn ended without a relay reply.', True)
+    if current.get('awaitingApproval'):
+        return pending_or_raise('approval_required', 'Native task needs human approval.')
+    return {'pending': True}
+
+
+def observe_failure(root, client, request, dispatch, turn):
+    if turn is None or not (failure := turn.failure()):
+        return None
+    reply = find_reply(root, client, request['id'])
+    if reply:
+        return {'reply': reply, 'messages': [reply]}
+    effects_excluded = turn.retry_proof is not None
+    safe = effects_excluded and all(request.get(key) for key in (
+        'expectedNativeGeneration', 'expectedDistributionGeneration', 'expectedWorkspaceIdentity'))
+    if safe and not dispatch.proof(dispatch.attempt).exists():
+        dispatch.record_retry_proof(turn.retry_proof)
+    raise NativeFailure(*failure, effects_possible=not effects_excluded, turn_ended=True,
+                        retry_safe=safe, retry_after_seconds=turn.retry_after_seconds)
+
+
+def send(root, client, request):
+    """Synchronous compatibility entry for legacy unscoped clients."""
+    response, observation = submit(root, client, request)
+    if observation is None:
+        return response
+    request, dispatch, turn = observation
     deadline = time.monotonic() + 120
     checked = 0
     while time.monotonic() < deadline:
         reply = find_reply(root, client, request['id'])
         if reply:
             return {'reply': reply, 'messages': [reply]}
-        if turn is not None and (failure := turn.failure()):
-            reply = find_reply(root, client, request['id'])
-            if reply:
-                return {'reply': reply, 'messages': [reply]}
-            effects_excluded = turn.retry_proof is not None
-            safe = effects_excluded and bool(expected and expected_distribution and expected_workspace)
-            if safe:
-                dispatch.record_retry_proof(turn.retry_proof)
-            raise NativeFailure(*failure, effects_possible=not effects_excluded, turn_ended=True,
-                                retry_safe=safe, retry_after_seconds=turn.retry_after_seconds)
+        if (outcome := observe_failure(root, client, request, dispatch, turn)) is not None:
+            return outcome
         if time.monotonic() - checked >= 2:
             checked = time.monotonic()
             observed=status(root,client)

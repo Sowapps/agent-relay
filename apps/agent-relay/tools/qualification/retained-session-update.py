@@ -128,6 +128,11 @@ while True:
         assert (work/'decide').exists()
         print('\033[2J\033[3J\033[H',end='',flush=True)
     elif b'check participant MCP' in content: check_participant()
+    elif b'await reply across host restart' in content:
+        commit(work/'detached-entered.json', {'id':identifier})
+        until=time.monotonic()+75
+        while not (work/'detached-release').exists() and time.monotonic()<until: time.sleep(.1)
+        assert (work/'detached-release').exists()
     mode=next((value for value in (b'qualify rate',b'qualify late',b'qualify already acted') if value in content),None)
     if mode and b'Relay attempt ' not in content:
         temporary_failure(identifier,mode)
@@ -159,7 +164,8 @@ def wait_for(check, description, seconds=35):
     raise TimeoutError(description)
 
 
-def qualify(baseline, candidate, output, distribution, linux_user, verify_native_retry=False, verify_approval_resume=False, candidate_release=None):
+def qualify(baseline, candidate, output, distribution, linux_user, verify_native_retry=False, verify_approval_resume=False,
+            candidate_release=None, verify_detached_reply=False):
     output.mkdir()
     installation = output / 'installation'
     data = installation / 'var/apps/agent-relay/default'
@@ -376,6 +382,26 @@ p=json.load(sys.stdin); root=pathlib.Path(p['path']); root.mkdir(mode=0o700)
                     wait_for(lambda: completed(resumed), 'The same verified session did not accept a new message')
                     result['expiredApprovalResume'] = {'requestId': request, 'nextRequestId': resumed,
                         'sessionId': session, 'sameNativeGeneration': True, 'proof': resolved['approval']}
+                if verify_detached_reply:
+                    waiting = str(uuid.uuid4())
+                    call('send_session_message', {'session_id': session, 'request_id': waiting, 'text': 'await reply across host restart'})
+                    wait_for(lambda: retained(waiting).get('state') == 'awaiting_reply', 'Handoff did not free the worker')
+                    native_entry = wait_for(lambda: native_read(native_workspace + '/detached-entered.json'), 'No native fixture turn')
+                    assert json.loads(native_entry)['id'] == waiting
+                    pointer = read(data / 'mcp-runtime.json')
+                    previous = resolve_host(pointer, data)
+                    assert previous and identity(previous, data), 'No exact isolated host to restart'
+                    os.kill(previous['pid'], signal.SIGTERM)
+                    wait_for(lambda: resolve_host(pointer, data) is None, 'Isolated relay did not stop')
+                    assert retained(waiting)['state'] == 'awaiting_reply'
+                    host = launch(pointer, data, output)
+                    assert host.pid != previous['pid']
+                    wsl("import json,pathlib,sys; pathlib.Path(json.load(sys.stdin)).touch()", native_workspace + '/detached-release')
+                    reply = wait_for(lambda: completed(waiting), 'Host did not import the response without a client poll')
+                    assert reply['request']['id'] == waiting and len(reply['nativeAttempts']) == 1
+                    assert reply['result']['output'] == 'Owned fixture reply'
+                    result['detachedReply'] = {'requestId': waiting, 'sessionId': session, 'previousHost': previous['pid'],
+                        'newHost': host.pid, 'nativeAttempts': 1}
                 result.update(nativeConversationId=initial['nativeId'], firstRequestPreserved=True,
                               originalHistorySha256=hashlib.sha256(old_history.encode()).hexdigest(),
                               preservedHistoryAndNewTurn=True, passed=True)
@@ -413,9 +439,11 @@ if __name__ == '__main__':
     parser.add_argument('--user', required=True)
     parser.add_argument('--verify-native-retry', action='store_true')
     parser.add_argument('--verify-approval-resume', action='store_true')
+    parser.add_argument('--verify-detached-reply', action='store_true')
     args = parser.parse_args()
     target = args.output.resolve()
     if not target.is_relative_to(Path(__file__).resolve().parents[4] / 'local/apps/agent-relay/qualification') or target.exists():
         parser.error('Select a new owned local qualification directory.')
     qualify(args.baseline.resolve(), args.candidate.resolve() if args.candidate else None, target, args.distribution, args.user,
-            args.verify_native_retry, args.verify_approval_resume, args.candidate_release.resolve() if args.candidate_release else None)
+            args.verify_native_retry, args.verify_approval_resume, args.candidate_release.resolve() if args.candidate_release else None,
+            args.verify_detached_reply)

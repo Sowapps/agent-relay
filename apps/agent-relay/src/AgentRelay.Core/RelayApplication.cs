@@ -256,7 +256,8 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
         using var lease = await Gate(id, token);
         await OwnedAsync(caller, id, RelayCapabilities.ManageSession, token);
         record = await work.RequestCancellationAsync(requestId, token);
-        if (record.State is not ("awaiting_approval" or "failed") && await work.IsOperationActiveAsync(requestId, token))
+        if (record.State is not ("awaiting_approval" or "failed") &&
+            (record.ReplyDispatch is not null || await work.IsOperationActiveAsync(requestId, token)))
         {
             if (record.Request.Kind == "message") await sessions.ControlAsync(id, "interrupt", token);
             await work.InterruptSessionAsync(id, token);

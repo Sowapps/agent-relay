@@ -327,6 +327,19 @@
   ],
   "operations": [
     {
+      "id": "op-awaiting-reply",
+      "taskId": "t-home",
+      "project": "atelier",
+      "session": "s1",
+      "participantId": "creator",
+      "initiatorId": "pilot",
+      "kind": "message",
+      "title": "Confirmer la structure proposée",
+      "state": "awaiting_reply",
+      "stamp": "2026-10-29T10:44:00",
+      "request": "Indique quand la proposition est prête."
+    },
+    {
       "id": "op1",
       "taskId": "t-home",
       "project": "atelier",
