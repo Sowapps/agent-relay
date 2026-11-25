@@ -68,8 +68,41 @@ class LifecycleGuardTests(unittest.TestCase):
                 self.assertEqual(repeated.exception.code, 'reply_unconfirmed')
                 submit.assert_called_once()
             (root / 'codex/native-conversation.json').write_text(json.dumps({'id': str(self.identifier)}), encoding='utf8')
-            self.assertEqual(native_clients.inspect_turn(root, 'codex', str(self.identifier)), {'turnEnded': True})
+            with patch.object(native_clients, 'status', return_value=observed):
+                self.assertEqual(native_clients.inspect_turn(root, 'codex', str(self.identifier)),
+                                 {'turnEnded': True, 'sessionReady': False})
             self.assertEqual(native_clients.inspect_turn(root, 'codex', str(uuid.uuid4())), {'turnEnded': False})
+
+    def test_finished_approval_requires_same_ready_generation_and_no_later_turn(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            folder = root / 'codex'
+            log = folder / 'config/sessions' / f'rollout-{self.identifier}.jsonl'
+            log.parent.mkdir(parents=True)
+            (folder / 'data').mkdir()
+            (folder / 'native-conversation.json').write_text(json.dumps({'id': str(self.identifier)}))
+            request = {'id': str(self.identifier), 'expectedNativeGeneration': 'native', 'expectedDistributionGeneration': 'wsl'}
+            (folder / 'data' / f'dispatch-{self.identifier}.json').write_text(json.dumps({'request': request, 'prompt': 'reviewed'}))
+            def event(kind, **payload):
+                return json.dumps({'type': 'event_msg', 'payload': {'type': kind, 'turn_id': 'original', **payload}}) + '\n'
+            log.write_text(event('item_completed', item={'type': 'UserMessage', 'content': [{'type': 'text', 'text': 'reviewed'}]}) +
+                           event('task_complete'))
+            observed = {'nativeConversationId': str(self.identifier), 'available': True, 'mcpInitialized': True,
+                        'authenticated': True, 'awaitingApproval': False, 'nativeRuntime': {'generation': 'native'},
+                        'distributionRuntime': {'generation': 'wsl'}}
+            with patch.object(native_clients, 'status', return_value=observed):
+                inspect = lambda: native_clients.inspect_turn(root, 'codex', str(self.identifier))
+                self.assertEqual(inspect(), {'turnEnded': True, 'sessionReady': True})
+                observed['awaitingApproval'] = True
+                self.assertFalse(inspect()['sessionReady'])
+                observed['awaitingApproval'] = False
+                marker = folder / 'data' / f'approval-stop-{self.identifier}.json'
+                marker.write_text(json.dumps({'requestId': str(self.identifier), 'stopStarted': True}))
+                self.assertFalse(inspect()['sessionReady'])
+                marker.unlink()
+                with log.open('a') as stream:
+                    stream.write(event('task_started'))
+                self.assertEqual(inspect(), {'turnEnded': True, 'sessionReady': False})
 
     def test_long_codex_prompt_is_pasted_then_submitted_once(self):
         root = PurePosixPath('/owned/fixture')

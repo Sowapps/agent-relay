@@ -4,19 +4,10 @@ from hashlib import sha256
 import re
 import subprocess
 
+from codex_approval import MAX_VIEWPORT, codex_approval
 from native_clients import owned_session_root, process_stamp, tmux
 from native_errors import NativeFailure
 from relay_files import context
-
-
-MAX_VIEWPORT = 8000
-CODEX_HEADING = re.compile(
-    r'Would you like to run the following command\?'
-    r'|Do you want to approve network access to ".+"\?'
-)
-CODEX_FOOTER = re.compile(r'Press enter to confirm or esc to cancel(?: or .+ to open thread)?', re.IGNORECASE)
-CODEX_APPROVE = re.compile(r'\d+\. Yes, (?:proceed|just this once) \(y\)')
-CODEX_REFUSE = re.compile(r'\d+\. No, (?:and tell Codex what to do differently|continue without running it) \((esc|n)\)')
 
 
 def _owned(root, client, session_id):
@@ -42,29 +33,13 @@ def _target(root, client):
     return pane, pid, stamp['generation']
 
 
-def _codex_approval(text):
-    # Inspect the live footer and choices together. A heading in output or scrollback cannot select a key.
-    lines = [line.strip().lstrip('›❯> ').rstrip() for line in text.splitlines() if line.strip()]
-    if not lines or not CODEX_FOOTER.fullmatch(lines[-1]):
-        return None
-    heading = next((index for index in range(len(lines) - 2, -1, -1) if CODEX_HEADING.fullmatch(lines[index])), None)
-    if heading is None:
-        return None
-    body = lines[heading:]
-    yes = [line for line in body if CODEX_APPROVE.fullmatch(line)]
-    no = [match for line in body if (match := CODEX_REFUSE.fullmatch(line))]
-    if len(yes) != 1 or len(no) != 1 or body.index(yes[0]) >= body.index(no[0][0]):
-        return None
-    return '\n'.join(body), 'Escape' if no[0][1] == 'esc' else 'n'
-
-
 def _viewport(root, client):
     target = _target(root, client)
     screen = tmux(root, 'capture-pane', '-p', '-t', target[0], check=False)
     if screen.returncode or _target(root, client) != target:
         raise NativeFailure('terminal_changed', 'The terminal changed during capture. Read it again.', False)
     text = ''.join(char for char in screen.stdout if char in '\n\t' or ord(char) >= 32 and not 127 <= ord(char) <= 159).rstrip()
-    approval = _codex_approval(text) if client == 'codex' and len(text) <= MAX_VIEWPORT else None
+    approval = codex_approval(text) if client == 'codex' else None
     return target, text[-MAX_VIEWPORT:], approval
 
 

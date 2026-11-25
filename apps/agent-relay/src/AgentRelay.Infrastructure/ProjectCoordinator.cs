@@ -23,6 +23,7 @@ public sealed record CancellationProgress(Guid SessionId, string State, string? 
         if (operation.Request.SessionId is not { } sessionId || operation is
             { CancellationRequestedAt: null, ApprovalExpiredAt: null, ApprovalStopRequestedAt: null, CancellationConfirmedAt: null }) return null;
         if (operation.CancellationConfirmedAt is not null) return new(sessionId, "stop_confirmed", null, false);
+        if (operation.ApprovalResumeVerifiedAt is not null) return new(sessionId, "turn_finished", null, false);
         if (WorkExecution.ApprovalStopPending(operation))
             return operation.SessionClosedAt is null ? new(sessionId, "stop_unconfirmed", "close_session", true) :
                 new(sessionId, "stop_unconfirmed", null, false);
@@ -30,6 +31,7 @@ public sealed record CancellationProgress(Guid SessionId, string State, string? 
         {
             "awaiting_approval" => new(sessionId, "close_required", "close_session", true),
             "approval_expired" => new(sessionId, "approval_expired", "close_session", true),
+            "unknown" when WorkExecution.NeedsApprovalObservation(operation) => new(sessionId, "turn_unconfirmed", "get_result", true),
             "completed" or "failed" => new(sessionId, "finished", null, false),
             "unknown" => new(sessionId, "stop_unconfirmed", null, false),
             _ => new(sessionId, "requested", "get_result", false)

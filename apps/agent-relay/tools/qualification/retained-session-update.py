@@ -100,6 +100,19 @@ while True:
     match=re.search(rb'Relay request ([0-9a-f-]{36})',content)
     if not match: continue
     identifier=match[1].decode()
+    if b'qualify approval escape' in content:
+        from native_dispatch import NativeDispatch
+        prompt=json.loads(NativeDispatch(folder/'data',identifier).latest().read_text())['prompt']
+        turn=str(uuid.uuid4())
+        def append_event(kind, **values):
+            with (history/(native_id+'.jsonl')).open('a') as stream:
+                stream.write(json.dumps({'type':'event_msg','payload':dict(type=kind,turn_id=turn,**values)})+'\n')
+        append_event('item_completed',item={'type':'UserMessage','content':[{'type':'text','text':prompt}]})
+        print("Allow relay_project.get_connection_status?\n1. Yes, proceed (y)\n2. No, continue without running it (esc)\nPress enter to confirm or esc to cancel",flush=True)
+        while os.read(0,1)!=b'\x1b': pass
+        print('\033[2J\033[3J\033[H',end='',flush=True)
+        append_event('task_complete')
+        continue
     if b'hold for update' in content:
         commit(work/'entered.json', {'requestId':identifier})
         end=time.monotonic()+100
@@ -142,7 +155,7 @@ def wait_for(check, description, seconds=35):
     raise TimeoutError(description)
 
 
-def qualify(baseline, candidate, output, distribution, linux_user, verify_native_retry=False):
+def qualify(baseline, candidate, output, distribution, linux_user, verify_native_retry=False, verify_approval_resume=False):
     output.mkdir()
     installation = output / 'installation'
     data = installation / 'var/apps/agent-relay/default'
@@ -281,11 +294,12 @@ p=json.load(sys.stdin); root=pathlib.Path(p['path']); root.mkdir(mode=0o700)
                 assert reopened['id'] == session
                 current = wait_for(ready, 'Retained native session did not reopen')
                 assert current['nativeConversationId'] == initial['nativeId'], current
-                follow_up = 'confirm resumed conversation' if verify_native_retry else 'check participant MCP'
+                focused = verify_native_retry or verify_approval_resume
+                follow_up = 'confirm resumed conversation' if focused else 'check participant MCP'
                 call('send_session_message', {'session_id': session, 'request_id': second, 'text': follow_up})
                 result.update(nativeConversationId=initial['nativeId'], firstRequestPreserved=True,
                               originalHistorySha256=hashlib.sha256(old_history.encode()).hexdigest())
-                if not verify_native_retry:
+                if not focused:
                     evidence = wait_for(lambda: native_read(native_workspace + '/participant-proof.json'), 'Session did not connect to relay_project', 80)
                     proof = json.loads(evidence)
                     result['participantMcp'] = proof
@@ -316,6 +330,34 @@ p=json.load(sys.stdin); root=pathlib.Path(p['path']); root.mkdir(mode=0o700)
                         if mode == 'qualify already acted': assert not timeline[0].get('retryAt')
                         cases[mode] = {'id': request, 'state': expected, 'attempts': timeline}
                     result['nativeRetry'] = cases
+                if verify_approval_resume:
+                    request = str(uuid.uuid4())
+                    call('send_session_message', {'session_id': session, 'request_id': request, 'text': 'qualify approval escape'})
+                    wait_for(lambda: retained(request).get('state') == 'awaiting_approval', 'Native MCP approval was not detected')
+                    approval = call('read_session_terminal', {'session_id': session})['terminal']['approval']
+                    assert 'Allow relay_project.get_connection_status?' in approval['text']
+                    # Set the clock outcome only in the isolated fixture, without waiting two hours.
+                    with sqlite3.connect(data / 'relay.sqlite') as db:
+                        payload = retained(request)
+                        payload.update(state='approval_expired', approvalExpiredAt=payload['updatedAt'], errorCode='approval_expired')
+                        db.execute('UPDATE work SET payload=? WHERE id=?', (json.dumps(payload), request))
+                    before = call('get_result', {'request_id': request})
+                    assert before['cancellation']['sessionRequiresResolution']
+                    signal = call('send_session_escape', {'session_id': session})
+                    assert signal['terminalSignal']['keySent']
+                    def observed_resume():
+                        status = call('get_result', {'request_id': request})
+                        return status if status['approval']['resumeVerifiedAt'] else None
+                    resolved = wait_for(observed_resume, 'The exact expired approval did not release the session')
+                    assert resolved['operation']['state'] == 'approval_expired' and resolved['approval']['turnEnded']
+                    assert resolved['approval']['stopConfirmedAt'] is None and not resolved['cancellation']['sessionRequiresResolution']
+                    after = call('get_session', {'session_id': session})['session']
+                    assert after['nativeConversationId'] == initial['nativeId'] and after['runtime']['native']['generation'] == current['runtime']['native']['generation']
+                    resumed = str(uuid.uuid4())
+                    call('send_session_message', {'session_id': session, 'request_id': resumed, 'text': 'same session after expired approval'})
+                    wait_for(lambda: completed(resumed), 'The same verified session did not accept a new message')
+                    result['expiredApprovalResume'] = {'requestId': request, 'nextRequestId': resumed,
+                        'sessionId': session, 'sameNativeGeneration': True, 'proof': resolved['approval']}
                 result.update(nativeConversationId=initial['nativeId'], firstRequestPreserved=True,
                               originalHistorySha256=hashlib.sha256(old_history.encode()).hexdigest(),
                               preservedHistoryAndNewTurn=True, passed=True)
@@ -349,8 +391,10 @@ if __name__ == '__main__':
     parser.add_argument('--distribution', required=True)
     parser.add_argument('--user', required=True)
     parser.add_argument('--verify-native-retry', action='store_true')
+    parser.add_argument('--verify-approval-resume', action='store_true')
     args = parser.parse_args()
     target = args.output.resolve()
     if not target.is_relative_to(Path(__file__).resolve().parents[4] / 'local/apps/agent-relay/qualification') or target.exists():
         parser.error('Select a new owned local qualification directory.')
-    qualify(args.baseline.resolve(), args.candidate.resolve(), target, args.distribution, args.user, args.verify_native_retry)
+    qualify(args.baseline.resolve(), args.candidate.resolve(), target, args.distribution, args.user,
+            args.verify_native_retry, args.verify_approval_resume)

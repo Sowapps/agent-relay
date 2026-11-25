@@ -6,6 +6,7 @@ from pathlib import Path
 import pwd
 import shutil
 import signal
+import socket
 import sys
 import tempfile
 import time
@@ -52,6 +53,14 @@ def exercise(base, adapter):
     layout.write_text(json.dumps(json.loads(layout.read_text()) | {'base': str(base)}))
     sys.path.insert(0, str(tools))
     from approval_stop import pane, recover
+    from native_layout import owned_socket_absent
+    endpoint = base / 'socket-probe'
+    assert owned_socket_absent(endpoint)
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as listener:
+        listener.bind(str(endpoint))
+        listener.listen(1)
+        assert not owned_socket_absent(endpoint)
+    assert owned_socket_absent(endpoint)
     from native_clients import process_stamp, tmux
     from relay_files import commit
     from session_adapter_files import parked_approval_stop

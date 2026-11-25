@@ -42,7 +42,8 @@ public sealed class RelayDatabase
                 WHERE json_extract(payload,'$.state')='awaiting_approval';
             CREATE INDEX IF NOT EXISTS work_session_stopping ON work(json_extract(payload,'$.request.sessionId'))
                 WHERE {{SqliteWorkStore.PendingApprovalStop}};
-            CREATE INDEX IF NOT EXISTS work_session_retained_approval ON work(json_extract(payload,'$.request.sessionId'))
+            DROP INDEX IF EXISTS work_session_retained_approval;
+            CREATE INDEX IF NOT EXISTS work_session_unresolved_approval ON work(json_extract(payload,'$.request.sessionId'))
                 WHERE {{SqliteWorkStore.RetainedApproval}};
             CREATE INDEX IF NOT EXISTS inbox_project_recipient ON inbox(json_extract(payload,'$.projectId'),json_extract(payload,'$.recipientEndpointId'));
             CREATE INDEX IF NOT EXISTS inbox_request_reply ON inbox(json_extract(payload,'$.inReplyTo')) WHERE json_extract(payload,'$.inReplyTo') IS NOT NULL;

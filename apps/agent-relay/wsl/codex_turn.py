@@ -80,6 +80,14 @@ class TurnObservation:
             pass
         return None
 
+    def at_live_end(self):
+        try:
+            current = self.path.stat()
+        except OSError:
+            return False
+        return self.finished and (current.st_dev, current.st_ino, current.st_size) == (
+            self.identity.st_dev, self.identity.st_ino, self.offset)
+
     def _read_record(self, line):
         try:
             record = json.loads(line)

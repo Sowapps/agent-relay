@@ -35,8 +35,8 @@ internal static class ApApprovalCancellationScenarios
             "An owned terminal with an unknown prompt did not accept Escape.");
         Check((await work.ReadAsync(undisplayed.Id, token)) is
             { State: "unknown", ErrorCode: "terminal_interruption_unconfirmed", CancellationConfirmedAt: null } &&
-            (await work.RetainedApprovalsAsync(session.Id, token)).Count == 0,
-            "Escape left the operation waiting for approval or incorrectly confirmed cancellation.");
+            (await work.RetainedApprovalsAsync(session.Id, token)).Single().Request.Id == undisplayed.Id,
+            "Escape prematurely released the unverified turn or confirmed cancellation.");
         await store.AttachNativeReplyAsync(undisplayed.Id, scope, session.Id, new("fixture", "reply after Escape"), now, token);
 
         using (var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5)))
@@ -183,6 +183,21 @@ internal static class ApApprovalCancellationScenarios
         await VerifyReceiptTimingAsync(database, store, request, token);
         await VerifyRetainedApprovalIndexAsync(database, store, request, token);
         await VerifyRetainedReplyAsync(database, store, request, token);
+        var sessionToReuse = Guid.NewGuid();
+        var endedRequest = request with { Id = Guid.NewGuid(), SessionId = sessionToReuse };
+        await store.SaveAsync(new(endedRequest, "approval_expired", waited, now, ApprovalExpiredAt: now), token);
+        Check(await store.BeginApprovalStopAsync(endedRequest.Id, token), "Did not record the intent of the old failed close.");
+        await store.RecordApprovalSignalAsync(endedRequest.Id, "escape", token);
+        await store.RecordApprovalTurnObservationAsync(endedRequest.Id, ready: false, token);
+        Check((await work.RetainedApprovalsAsync(sessionToReuse, token)).Count == 1 &&
+            (await work.ReadAsync(endedRequest.Id, token)).NativeTurnEnded, "End of turn alone released an unverified session.");
+        await store.RecordApprovalTurnObservationAsync(endedRequest.Id, ready: true, token);
+        var canReuse = await work.ReadAsync(endedRequest.Id, token);
+        Check((await work.RetainedApprovalsAsync(sessionToReuse, token)).Count == 0 &&
+            canReuse is { State: "approval_expired", ApprovalExpiredAt: not null, ApprovalResumeVerifiedAt: not null,
+                ApprovalStopRequestedAt: not null, CancellationConfirmedAt: null, TerminalEscapeSentAt: not null } &&
+            ProjectReply.WithCancellation(canReuse).Cancellation is { State: "turn_finished", SessionRequiresResolution: false },
+            "Reusing the verified session discarded history or claimed a confirmed stop.");
         Console.WriteLine("AP_APPROVAL_CANCELLATION=PASS (active cancellation, terminal closure without stop proof, late reply, expiry, retained index)");
     }
 
@@ -258,7 +273,7 @@ internal static class ApApprovalCancellationScenarios
         using (var seed = connection.CreateCommand())
         {
             seed.CommandText = """
-                DROP INDEX work_session_retained_approval;
+                DROP INDEX work_session_unresolved_approval;
                 WITH RECURSIVE rows(id) AS (VALUES(1) UNION ALL SELECT id+1 FROM rows WHERE id < 10000)
                 INSERT INTO work SELECT 'history-' || id, json_object('state','completed') FROM rows;
                 """;
@@ -271,7 +286,7 @@ internal static class ApApprovalCancellationScenarios
             explain.CommandText = "EXPLAIN QUERY PLAN " + SqliteWorkStore.RetainedApprovalsQuery;
             explain.Parameters.AddWithValue("$id", request.SessionId!.Value.ToString("D"));
             using var plan = await explain.ExecuteReaderAsync(token);
-            Check(await plan.ReadAsync(token) && plan.GetString(3).Contains("SEARCH work USING INDEX work_session_retained_approval", StringComparison.Ordinal),
+            Check(await plan.ReadAsync(token) && plan.GetString(3).Contains("SEARCH work USING INDEX work_session_unresolved_approval", StringComparison.Ordinal),
                 "The retained approval lookup scans the work history.");
         }
         var approvals = await new SqliteWorkStore(migrated).RetainedApprovalsAsync(request.SessionId!.Value, token);

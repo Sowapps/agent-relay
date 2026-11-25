@@ -6,6 +6,7 @@ import subprocess
 import time
 import shutil
 import uuid
+from codex_approval import approval_pending
 from codex_turn import TurnObservation, conversation_logs
 from native_dispatch import NativeDispatch
 from relay_files import commit, messages, context, workspace, find_reply, root_path
@@ -260,7 +261,7 @@ def status(root, client):
         if available and state[1].isdigit():
             process = process_stamp(int(state[1]))
             pane_id = state[2]
-    pane = tmux(root, 'capture-pane', '-p', '-t', client, '-S', '-35', check=False).stdout if exists else ''
+    pane = tmux(root, 'capture-pane', '-p', '-t', client, check=False).stdout if exists else ''
     pinned=folder/'native-conversation.json';binding=context(root,client)
     if binding and not pinned.exists():
         if client=='claude':
@@ -281,7 +282,8 @@ def status(root, client):
     marker = json.loads(initialized.read_text()) if initialized.is_file() else {}
     marker_matches = process is not None and process['generation'] in marker.get('nativeAncestors', [])
     return {'available': available, 'mcpInitialized': bool(marker.get('initialized')) and (marker_matches or not require_marker), 'pane': pane[-2800:],
-            'authenticated':auth['authenticated'],'authenticationChecked':bool(binding),'awaitingApproval':any(value in pane.lower() for value in APPROVAL_ATTENTION),
+            'authenticated':auth['authenticated'],'authenticationChecked':bool(binding),
+            'awaitingApproval': approval_pending(pane) if client == 'codex' else any(value in pane.lower() for value in APPROVAL_ATTENTION),
             'nativeConversationId':json.loads(pinned.read_text())['id'] if pinned.exists() else None,
             'distributionRuntime': process_stamp(1), 'nativeRuntime': process, 'paneId': pane_id}
 
@@ -302,7 +304,21 @@ def inspect_turn(root, client, request_id):
     if observed is None:
         return {'turnEnded': False}
     observed.failure()
-    return {'turnEnded': observed.finished}
+    if not observed.finished:
+        return {'turnEnded': False}
+    from approval_stop import stop_has_not_started
+    request = marker['request']
+    current = status(root, client)
+    native = current.get('nativeRuntime') or {}
+    distribution = current.get('distributionRuntime') or {}
+    same_runtime = (native.get('generation') is not None and native['generation'] == request.get('expectedNativeGeneration')
+                    and distribution.get('generation') is not None and
+                    distribution['generation'] == request.get('expectedDistributionGeneration'))
+    ready = (same_runtime and current.get('nativeConversationId') == pinned.get('id') and
+             current.get('available') and current.get('mcpInitialized') and current.get('authenticated') is True and
+             not current.get('awaitingApproval') and
+             stop_has_not_started(folder / 'data', identifier) and observed.at_live_end())
+    return {'turnEnded': True, 'sessionReady': bool(ready)}
 
 
 def send(root, client, request):

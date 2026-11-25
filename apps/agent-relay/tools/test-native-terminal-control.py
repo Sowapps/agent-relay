@@ -98,12 +98,20 @@ def exercise(base):
         revision = read(root, 'codex', session)['approval']['revision']
         assert bridge('signal_terminal', action='refuse', approvalRevision=revision)['keySent']
         wait_for(lambda: seen.read_bytes() == b'y\x1b')
+        screen.write_text(approve_screen('fixture MCP').replace('Would you like to run the following command?',
+            'Allow relay_project.get_connection_status?'))
+        tmux(root, 'send-keys', '-t', 'codex', 'r')
+        wait_for(lambda: 'fixture MCP' in read(root, 'codex', session)['text'])
+        mcp = bridge('read_terminal')['approval']
+        assert 'Allow relay_project.get_connection_status?' in mcp['text']
+        assert bridge('signal_terminal', action='refuse', approvalRevision=mcp['revision'])['keySent']
+        wait_for(lambda: seen.read_bytes() == b'y\x1b\x1b')
         screen.write_text('Unknown modal.\nWould you like to run the following command?\nHistorical heading only.\n')
         tmux(root, 'send-keys', '-t', 'codex', 'r')
         wait_for(lambda: 'Unknown modal.' in read(root, 'codex', session)['text'])
         assert read(root, 'codex', session)['approval'] is None
         assert bridge('signal_terminal', action='escape')['keySent']
-        wait_for(lambda: seen.read_bytes() == b'y\x1b\x1b')
+        wait_for(lambda: seen.read_bytes() == b'y\x1b\x1b\x1b')
         assert not other_keys.exists()
         print('NATIVE_TERMINAL_CONTROL=PASS (fresh one-time decision, stale/replay refusal, unknown prompt Escape, other pane untouched)')
     finally:

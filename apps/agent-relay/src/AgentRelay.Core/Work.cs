@@ -12,7 +12,8 @@ public sealed record WorkRecord(WorkRequest Request, string State, DateTimeOffse
     DateTimeOffset? CancellationConfirmedAt = null, DateTimeOffset? ApprovalStopRequestedAt = null,
     DateTimeOffset? ApprovalWaitingSince = null, DateTimeOffset? ApprovalExpiredAt = null,
     DateTimeOffset? SessionClosedAt = null, DateTimeOffset? TerminalRefusalSentAt = null, bool NativeTurnEnded = false,
-    NativeAttempt[]? NativeAttempts = null);
+    NativeAttempt[]? NativeAttempts = null, DateTimeOffset? TerminalEscapeSentAt = null,
+    DateTimeOffset? ApprovalResumeVerifiedAt = null);
 
 public sealed record NativeAttempt(int Number, DateTimeOffset StartedAt, DateTimeOffset? FinishedAt = null,
     bool? Dispatched = null, string? ErrorCode = null, DateTimeOffset? RetryAt = null);
@@ -27,10 +28,15 @@ public static class ApprovalExpiry
 public static class WorkExecution
 {
     public static bool ApprovalStopPending(WorkRecord record) =>
-        record.ApprovalStopRequestedAt is not null && record.CancellationConfirmedAt is null;
+        record.ApprovalStopRequestedAt is not null && record.CancellationConfirmedAt is null && record.ApprovalResumeVerifiedAt is null;
 
     public static bool MayContinue(WorkRecord record) =>
-        ApprovalStopPending(record) || record.CancellationConfirmedAt is null && record.State is not ("completed" or "failed");
+        ApprovalStopPending(record) || record.CancellationConfirmedAt is null && record.ApprovalResumeVerifiedAt is null &&
+        record.State is not ("completed" or "failed");
+
+    public static bool NeedsApprovalObservation(WorkRecord record) =>
+        record.ApprovalResumeVerifiedAt is null && record.CancellationConfirmedAt is null &&
+        (record.State == "approval_expired" || record.TerminalRefusalSentAt is not null || record.TerminalEscapeSentAt is not null);
 }
 public sealed record WorkProgress(long Bytes, long TotalBytes, string Phase, DateTimeOffset UpdatedAt);
 public sealed record WorkEvent(Guid Id, Guid RequestId, Guid? ProjectId, Guid? TaskId, Guid? AttemptId, Guid? SessionId,
@@ -56,7 +62,7 @@ public interface IWorkStore
     Task RecordApprovalSessionClosureAsync(Guid id, bool stopped, CancellationToken token) =>
         throw new RelayException("cancellation_unavailable", "This work store cannot retain the session closure.", false);
     Task RecordApprovalInterruptionAsync(Guid id, CancellationToken token) => Task.CompletedTask;
-    Task RecordApprovalRefusalAsync(Guid id, CancellationToken token) => Task.CompletedTask;
+    Task RecordApprovalSignalAsync(Guid id, string action, CancellationToken token) => Task.CompletedTask;
 }
 
 public interface IWorkExecutor
@@ -238,7 +244,7 @@ public sealed class WorkService : IAsyncDisposable
     public Task ClearApprovalStopAsync(Guid id, CancellationToken token) => store.ClearApprovalStopAsync(id, token);
     public Task RecordApprovalSessionClosureAsync(Guid id, bool stopped, CancellationToken token) =>
         store.RecordApprovalSessionClosureAsync(id, stopped, token);
-    internal Task RecordApprovalRefusalAsync(Guid id, CancellationToken token) => store.RecordApprovalRefusalAsync(id, token);
+    internal Task RecordApprovalSignalAsync(Guid id, string action, CancellationToken token) => store.RecordApprovalSignalAsync(id, action, token);
 
     internal async Task RecordTerminalInterruptionAsync(Guid sessionId, bool cancelActive, CancellationToken token)
     {

@@ -5,9 +5,29 @@
 """
 import base64
 import json
+import os
+import socket
+import stat
 from pathlib import Path, PurePosixPath
 import re
 import uuid
+
+
+def owned_socket_absent(path):
+    """Check a bounded owned Unix socket after tmux cannot answer."""
+    try:
+        attributes = path.lstat()
+    except FileNotFoundError:
+        return True
+    if not stat.S_ISSOCK(attributes.st_mode) or attributes.st_uid != os.getuid():
+        raise PermissionError('Owned native runtime socket cannot be verified')
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+        probe.settimeout(2)
+        try:
+            probe.connect(str(path))
+        except (ConnectionRefusedError, FileNotFoundError):
+            return True
+    return False
 
 
 class NativeLayout:

@@ -5,13 +5,16 @@ public sealed record SessionTerminal(string Client, string Text, TerminalApprova
     DateTimeOffset? ObservedAt = null, bool? CanDecideApproval = null, string? MissingCapability = null);
 public sealed record TerminalSignalReceipt(string Action, bool KeySent);
 public sealed record ApprovalProgress(DateTimeOffset? ExpiredAt, DateTimeOffset? RefusedAt, bool TurnEnded,
-    DateTimeOffset? SessionClosedAt, DateTimeOffset? StopConfirmedAt)
+    DateTimeOffset? SessionClosedAt, DateTimeOffset? StopConfirmedAt, DateTimeOffset? EscapeSentAt,
+    DateTimeOffset? ResumeVerifiedAt)
 {
-    public string? NextAction => StopConfirmedAt is not null || SessionClosedAt is not null || TurnEnded ? null :
-        RefusedAt is not null ? "get_result" : "read_session_terminal";
+    public string? NextAction => StopConfirmedAt is not null || SessionClosedAt is not null || ResumeVerifiedAt is not null ? null :
+        RefusedAt is not null || EscapeSentAt is not null || TurnEnded ? "get_result" : "read_session_terminal";
     public static ApprovalProgress? From(WorkRecord work) => work is
-        { State: "awaiting_approval" or "approval_expired" } or { ApprovalWaitingSince: not null } or { TerminalRefusalSentAt: not null }
-        ? new(work.ApprovalExpiredAt, work.TerminalRefusalSentAt, work.NativeTurnEnded, work.SessionClosedAt, work.CancellationConfirmedAt)
+        { State: "awaiting_approval" or "approval_expired" } or { ApprovalWaitingSince: not null } or
+        { TerminalRefusalSentAt: not null } or { TerminalEscapeSentAt: not null }
+        ? new(work.ApprovalExpiredAt, work.TerminalRefusalSentAt, work.NativeTurnEnded, work.SessionClosedAt,
+            work.CancellationConfirmedAt, work.TerminalEscapeSentAt, work.ApprovalResumeVerifiedAt)
         : null;
 }
 
@@ -54,10 +57,10 @@ public sealed partial class RelayApplication
         var session = await OwnedAsync(caller, id, RelayCapabilities.ManageSession, token);
         if (action != "escape")
             policy.Demand(caller, session.Scope.ProjectId, RelayCapabilities.DecideApproval);
-        var pending = action == "refuse" ? await work.RetainedApprovalsAsync(id, token) : [];
+        var pending = action != "approve" ? await work.RetainedApprovalsAsync(id, token) : [];
         var receipt = await sessions.SignalTerminalAsync(id, action, approvalRevision, token);
         if (receipt.KeySent && pending.Count == 1)
-            await work.RecordApprovalRefusalAsync(pending[0].Request.Id, CancellationToken.None);
+            await work.RecordApprovalSignalAsync(pending[0].Request.Id, action, CancellationToken.None);
         if (receipt.KeySent && action is ("escape" or "refuse"))
             await work.RecordTerminalInterruptionAsync(id, cancelActive: action == "escape", CancellationToken.None);
         return receipt;

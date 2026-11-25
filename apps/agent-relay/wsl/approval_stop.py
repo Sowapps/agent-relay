@@ -9,11 +9,29 @@ import uuid
 
 from native_clients import _process_fields, generation_identity, owned_session_root, process_stamp, tmux
 from native_errors import NativeFailure
+from native_layout import owned_socket_absent
 from relay_files import commit, context, find_reply
 
 
 def refuse(message, effects_possible=False):
     return NativeFailure('cancellation_unconfirmed', message, effects_possible)
+
+
+def stop_record(data, identifier):
+    return data / f'approval-stop-{identifier}.json'
+
+
+def stop_has_not_started(data, identifier):
+    path = stop_record(data, identifier)
+    if path.is_symlink():
+        return False
+    try:
+        proof = json.loads(path.read_text(encoding='utf-8'))
+    except FileNotFoundError:
+        return True
+    except (OSError, ValueError):
+        return False
+    return isinstance(proof, dict) and proof.get('requestId') == identifier and proof.get('stopStarted', False) is False
 
 
 def owned_processes():
@@ -47,10 +65,11 @@ def tracked(processes, leader, prior=None):
 def pane(root, client):
     result = tmux(root, 'list-panes', '-a', '-F', '#{session_name}\t#{pane_pid} #{pane_dead} #{session_id}', check=False)
     if result.returncode:
-        error = result.stderr.strip()
-        missing_socket = error.startswith('error connecting to ') and error.endswith('(No such file or directory)')
-        if missing_socket or error.startswith('no server running on '):
-            return None
+        try:
+            if owned_socket_absent(root / 'tmux.sock'):
+                return None
+        except OSError as error:
+            raise refuse('The owned terminal socket could not be verified.') from error
         raise refuse('The owned terminal could not be inspected.')
     matches = [line.partition('\t')[2] for line in result.stdout.splitlines() if line.partition('\t')[0] == client]
     if not matches:
@@ -90,7 +109,7 @@ def recover(root, client, request, stop):
     dispatch_hash = hashlib.sha256(raw).hexdigest()
     if any(path != dispatch and path.stat().st_mtime_ns >= size.st_mtime_ns for path in data.glob('dispatch-*.json')):
         raise refuse('A later native dispatch may own the terminal. No stop was attempted.')
-    saved = data / f'approval-stop-{identifier}.json'
+    saved = stop_record(data, identifier)
     if saved.is_symlink():
         raise refuse('The native stop proof is not an owned record.')
     current = pane(root, client)

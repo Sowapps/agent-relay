@@ -14,7 +14,6 @@ import os
 from pathlib import Path
 import re
 import shutil
-import socket as unix_socket
 import stat
 import subprocess
 import sys
@@ -40,7 +39,7 @@ def owned_install(request):
     install = root / 'install'
     if install.resolve(strict=True) != install or not install.is_dir() or install.stat().st_uid != os.getuid():
         raise PermissionError('Native helper directory is not owned by the selected session')
-    return install
+    return install, namespace["owned_socket_absent"]
 
 
 @contextmanager
@@ -61,7 +60,7 @@ class NativeSessionActive(RuntimeError):
     pass
 
 
-def demand_stopped(install):
+def demand_stopped(install, socket_absent):
     socket = install.parent / 'tmux.sock'
     if not socket.exists() and not socket.is_symlink():
         return
@@ -71,12 +70,8 @@ def demand_stopped(install):
     result = subprocess.run(['tmux', '-S', str(socket), 'list-panes', '-a', '-F', '#{pane_dead}'],
                             capture_output=True, text=True, encoding='utf-8', timeout=5)
     if result.returncode:
-        with unix_socket.socket(unix_socket.AF_UNIX, unix_socket.SOCK_STREAM) as probe:
-            probe.settimeout(2)
-            try:
-                probe.connect(str(socket))
-            except (ConnectionRefusedError, FileNotFoundError):
-                return  # The socket survived its server, or was cleaned up while interrogated.
+        if socket_absent(socket):
+            return
         raise RuntimeError('Owned native runtime is reachable but could not be inspected')
     if any(line != '1' for line in result.stdout.splitlines()):
         raise NativeSessionActive('The owned native session is still running')
@@ -162,8 +157,8 @@ def publish_live(install, observed, desired):
         sync_directory(install.parent)
 
 
-def historical_approval(install, request):
-    demand_stopped(install)
+def historical_approval(install, request, socket_absent):
+    demand_stopped(install, socket_absent)
     identifier = str(uuid.UUID(request['requestId']))
     client = request['client']
     if client not in ('codex', 'claude'):
@@ -237,11 +232,11 @@ def parked_approval_stop(data, marker, identifier, raw, dispatch, current_boot):
 
 
 def maintain(request):
-    install = owned_install(request)
+    install, socket_absent = owned_install(request)
     action = request['action']
     if action == 'check-idle':
         try:
-            demand_stopped(install)
+            demand_stopped(install, socket_absent)
         except NativeSessionActive:
             return {'sessionId': request['session']['id'], 'idle': False}
         return {'sessionId': request['session']['id'], 'idle': True}
@@ -257,17 +252,17 @@ def maintain(request):
         if binding.get('sessionId') != request['session']['id'] or any(
                 binding.get(key) != scope.get(key) for key in ('projectId', 'senderId', 'recipientId')):
             raise PermissionError('The retained native session binding differs')
-        demand_stopped(install)
+        demand_stopped(install, socket_absent)
         return {'sessionId': request['session']['id'], 'dormant': True}
     if action == 'approval-history':
-        return historical_approval(install, request)
+        return historical_approval(install, request, socket_absent)
     names = request['names']
     if not names or len(names) > 64 or len(set(names)) != len(names):
         raise ValueError('Expected a unique, bounded native helper set')
     with exclusive(install):
         live = request.get('preserveLiveSessions') is True and action in ('capture', 'replace')
         if action != 'refresh' and not live:
-            demand_stopped(install)
+            demand_stopped(install, socket_absent)
         before = observe(install, names)
         if action == 'capture':
             return {'sessionId': request['session']['id'], 'files': before}
