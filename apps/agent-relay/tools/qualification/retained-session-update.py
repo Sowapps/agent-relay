@@ -343,8 +343,8 @@ p=json.load(sys.stdin); root=pathlib.Path(p['path']); root.mkdir(mode=0o700)
                         db.execute('UPDATE work SET payload=? WHERE id=?', (json.dumps(payload), request))
                     before = call('get_result', {'request_id': request})
                     assert before['cancellation']['sessionRequiresResolution']
-                    signal = call('send_session_escape', {'session_id': session})
-                    assert signal['terminalSignal']['keySent']
+                    escape_receipt = call('send_session_escape', {'session_id': session})
+                    assert escape_receipt['terminalSignal']['keySent']
                     def observed_resume():
                         status = call('get_result', {'request_id': request})
                         return status if status['approval']['resumeVerifiedAt'] else None
