@@ -52,7 +52,7 @@ internal sealed class TechnicalConsoleWindow : Form
         var split = new SplitContainer { Dock = DockStyle.Fill, Size = new Size(1100, 360), SplitterDistance = 445, SplitterWidth = 12, Panel1MinSize = 350, Panel2MinSize = 350 };
         var left = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 3, ColumnCount = 1 }; left.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); left.RowStyles.Add(new RowStyle(SizeType.Absolute, 110)); left.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); left.RowStyles.Add(new RowStyle(SizeType.Absolute, 42));
         var filters = new FlowLayoutPanel { Dock = DockStyle.Fill, WrapContents = true }; kind.Items.AddRange(["Tout", "Messages", "Commandes", "Transferts"]); kind.SelectedIndex = 0;
-        stateFilter.Items.AddRange(["Tous les états", "En attente", "En cours", "À autoriser", "Terminée", "Échec", "À vérifier", "Approbation expirée"]); stateFilter.SelectedIndex = 0;
+        stateFilter.Items.AddRange(["Tous les états", "En attente", "En cours", "À autoriser", "Terminée", "Échec", "À vérifier", "Approbation expirée", UserMessages.WorkState("retry_wait")]); stateFilter.SelectedIndex = 0;
         period.Items.AddRange(["Toutes les dates", "Dernières 24 h", "7 derniers jours"]); period.SelectedIndex = 0;
         filters.Controls.Add(search); filters.Controls.Add(kind); filters.Controls.Add(stateFilter); filters.Controls.Add(period); filters.Controls.Add(sessionOnly);
         filters.Controls.Add(UiTheme.Button("Filtrer", async (_, _) => { taskFilter = null; await RefreshActivity(true); }));
@@ -241,7 +241,7 @@ internal sealed class TechnicalConsoleWindow : Form
             var requestedProject = ProjectId; var requestedActor = ActorId;
             var selectedId = (operations.SelectedItem as WorkRecord)?.Request.Id;
             var type = kind.SelectedIndex switch { 1 => "message", 2 => "command", 3 => "transfer", _ => null };
-            var state = stateFilter.SelectedIndex switch { 1 => "pending", 2 => "running", 3 => "awaiting_approval", 4 => "completed", 5 => "failed", 6 => "unknown", 7 => "approval_expired", _ => null };
+            var state = stateFilter.SelectedIndex switch { 1 => "pending", 2 => "running", 3 => "awaiting_approval", 4 => "completed", 5 => "failed", 6 => "unknown", 7 => "approval_expired", 8 => "retry_wait", _ => null };
             DateTimeOffset? since = period.SelectedIndex switch { 1 => DateTimeOffset.UtcNow.AddDays(-1), 2 => DateTimeOffset.UtcNow.AddDays(-7), _ => null };
             var response = await Call(new("list_results", Query: new(ProjectId, SessionId: sessionOnly.Checked ? (session.SelectedItem as SessionSnapshot)?.Id : null, TaskId: taskFilter, Kind: type, State: state, Search: search.Text, Since: since, Cursor: reset ? null : more, Limit: 50)));
             if (ProjectId != requestedProject || ActorId != requestedActor) return;

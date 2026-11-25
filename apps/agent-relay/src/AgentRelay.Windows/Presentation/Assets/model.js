@@ -1,6 +1,7 @@
 // Pure presentation helpers: identities, capabilities, task aggregates and shared filters.
 window.RelayModel = (() => {
  const attentionStates=['unknown','blocked','attention','approval_expired','failed'];
+ const workInProgress=state=>['running','pending','retry_wait'].includes(state);
  const needsAttention=item=>attentionStates.includes(item.state)&&!item.reviewed;
  const participant=(data,id)=>data.participants.find(p=>p.id===id);
  const session=(data,id)=>data.sessions.find(s=>s.id===id);
@@ -11,7 +12,7 @@ window.RelayModel = (() => {
  const sessionState=(data,s)=>s.state==='closed'?'closed':data.operations.some(o=>o.session===s.id&&o.state==='running')?'running':s.state||'unknown';
  const taskState=(data,id)=>{
   const ops=data.operations.filter(o=>o.taskId===id);
-  return [...attentionStates,'running','pending'].find(state=>ops.some(o=>o.state===state))||(ops.length?'completed':'idle');
+  return [...attentionStates,'running','retry_wait','pending'].find(state=>ops.some(o=>o.state===state))||(ops.length?'completed':'idle');
  };
  const timeline=(data,taskId)=>[
   ...data.operations.filter(o=>o.taskId===taskId).map(o=>({...o,eventType:'operation'})),
@@ -38,7 +39,7 @@ window.RelayModel = (() => {
   const age=item.stamp?(Date.parse(data.referenceDate+'T00:00:00Z')-Date.parse(item.stamp.slice(0,10)+'T00:00:00Z'))/86400000:NaN;
   const period=filters.period==='all'||(age>=0&&(filters.period==='week'?age<7:age===0));
   const state=item.state||'completed';
-  const quick=filters.filter==='all'||filters.filter==='follow'&&needsAttention(item)||filters.filter==='running'&&['running','pending'].includes(state);
+  const quick=filters.filter==='all'||filters.filter==='follow'&&needsAttention(item)||filters.filter==='running'&&workInProgress(state);
   const kind=!filters.kind||item.kind===filters.kind;
   const preciseState=!filters.state||state===filters.state;
   const text=[item.title,item.text,item.description,item.result,actor(data,item)].filter(Boolean).join(' ').toLocaleLowerCase('fr');
@@ -51,7 +52,7 @@ window.RelayModel = (() => {
   const broad={...filters,query:'',filter:'all',state:''};
   const context=entries.length?entries.some(item=>matches(data,item,broad)):matches(data,summary,broad);
   const state=summary.state;
-  const stateMatch=(filters.filter==='all'||filters.filter==='follow'&&entries.some(item=>item.eventType==='operation'&&needsAttention(item))||filters.filter==='running'&&entries.some(item=>['running','pending'].includes(item.state)))&&(!filters.state||filters.state===state);
+  const stateMatch=(filters.filter==='all'||filters.filter==='follow'&&entries.some(item=>item.eventType==='operation'&&needsAttention(item))||filters.filter==='running'&&entries.some(item=>workInProgress(item.state)))&&(!filters.state||filters.state===state);
   const text=!filters.query||(task.title+' '+task.description).toLocaleLowerCase('fr').includes(filters.query.toLocaleLowerCase('fr'))||entries.some(item=>matches(data,item,{...filters,filter:'all',state:''}));
   return context&&stateMatch&&text;
  };

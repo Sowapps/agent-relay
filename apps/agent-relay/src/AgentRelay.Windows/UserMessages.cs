@@ -4,9 +4,10 @@ namespace AgentRelay.Windows;
 
 internal static class UserMessages
 {
-    public static string WorkState(string state) => state switch { "pending" => "En attente", "running" => "En cours", "completed" => "Terminé", "failed" => "Échec", "awaiting_approval" => "Autorisation attendue", "approval_expired" => "Approbation expirée", _ => "À confirmer" };
+    public static string WorkState(string state) => state switch { "pending" => "En attente", "running" => "En cours", "retry_wait" => "Reprise planifiée", "completed" => "Terminé", "failed" => "Échec", "awaiting_approval" => "Autorisation attendue", "approval_expired" => "Approbation expirée", _ => "À confirmer" };
     public static string Error(string? code) => code switch
     {
+        WorkExecution.RetryCancelled => "La reprise planifiée a été annulée avant l’envoi.",
         "project_draining" => "Archivage en cours : les nouveaux travaux sont suspendus. Le travail engagé peut se terminer.",
             "project_archived" => "Ce projet est archivé. Son historique reste consultable ; réactivez-le avant une nouvelle opération.",
         "archive_blocked" => "Le projet n’a pas été archivé : terminez ou vérifiez les opérations en cours et les résultats incertains, puis fermez ses sessions.",

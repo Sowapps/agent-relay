@@ -156,6 +156,7 @@ internal static class PresentationSnapshot
             operation.Request.Kind, title = MonitorComponents.OperationTitle(operation),
             state = State(operation.State), stamp = Stamp(operation.CreatedAt), time = DisplayDateTime.Time(operation.CreatedAt),
             updatedAt = Stamp(operation.UpdatedAt), request = operation.Request.Text,
+            retryDueAt = operation.State == "retry_wait" && operation.Retry is { } retry ? Stamp(retry.DueAt) : null,
             result = operation.Error is not null ? UserMessages.Error(operation.ErrorCode) : operation.Result?.Output ?? "En attente de confirmation…",
             workspace = operation.Result?.Details?.GetValueOrDefault("workspace") ?? operation.Metadata?.Context ?? configuration.Workspaces.FirstOrDefault(item => item.Id == scope.WorkspaceId)?.Location,
             program = operation.Result?.Details?.GetValueOrDefault("program"), arguments = CommandArguments(operation),

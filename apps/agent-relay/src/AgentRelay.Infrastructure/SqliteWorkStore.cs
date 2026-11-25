@@ -92,6 +92,7 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         WriteAsync(record.Request.Id, existing => existing switch
         {
             { State: "completed", Result: not null } => null,
+            { ErrorCode: WorkExecution.RetryCancelled } => null,
             null => record,
             _ => record with { ApprovalStopRequestedAt = existing.ApprovalStopRequestedAt, NativeAttempts = existing.NativeAttempts }
         }, token);
@@ -150,17 +151,18 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         }
     }
 
-    public async Task RequestCancellationAsync(Guid id, CancellationToken token)
-    {
-        if (await WriteAsync(id, record => record is { State: "retry_wait" } ? record with
-            {
-                State = "failed", Retry = null, CancellationRequestedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
-                ErrorCode = "native_retry_cancelled", Error = "The scheduled retry was cancelled before dispatch."
-            } : null, token)) return;
-        using var connection = database.Open(); using var command = connection.CreateCommand();
-        command.CommandText = $"UPDATE work SET payload=json_set(payload,'$.cancellationRequestedAt',$at) WHERE id=$id AND ({ActiveState} OR json_extract(payload,'$.state')='awaiting_approval') AND json_extract(payload,'$.cancellationRequestedAt') IS NULL";
-        command.Parameters.AddWithValue("$id", id.ToString("D")); command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O")); await command.ExecuteNonQueryAsync(token);
-    }
+    public Task RequestCancellationAsync(Guid id, CancellationToken token) =>
+        WriteAsync(id, record =>
+        {
+            if (record is not { CancellationRequestedAt: null }) return null;
+            var now = DateTimeOffset.UtcNow;
+            // BeginNativeAttemptAsync uses the same transaction boundary. A claim alone never needs a terminal signal.
+            if (record.State == "retry_wait" || record is { State: "running", Retry: not null, NativeAttempts: [.., { FinishedAt: not null }] })
+                return record with { State = "failed", Retry = null, CancellationRequestedAt = now, UpdatedAt = now,
+                    ErrorCode = WorkExecution.RetryCancelled, Error = "The scheduled retry was cancelled before dispatch." };
+            return record.State is "pending" or "running" or "awaiting_approval"
+                ? record with { CancellationRequestedAt = now } : null;
+        }, token);
 
     public async Task<bool> SessionHasDeferredWorkAsync(Guid id, CancellationToken token)
     {

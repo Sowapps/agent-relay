@@ -30,6 +30,8 @@ public static class ApprovalExpiry
 /// <summary>Execution evidence is independent of a result received during an explicit stop.</summary>
 public static class WorkExecution
 {
+    public const string RetryCancelled = "native_retry_cancelled";
+
     public static bool ApprovalStopPending(WorkRecord record) =>
         record.ApprovalStopRequestedAt is not null && record.CancellationConfirmedAt is null && record.ApprovalResumeVerifiedAt is null;
 
@@ -274,7 +276,7 @@ public sealed class WorkService : IAsyncDisposable
     {
         await store.RequestCancellationAsync(id, token);
         var record = await ReadAsync(id, token);
-        if (record is { ErrorCode: "native_retry_cancelled", CancellationRequestedAt: not null }) return record;
+        if (record is { ErrorCode: WorkExecution.RetryCancelled, CancellationRequestedAt: not null }) return record;
         if (record.State is "completed" or "failed" or "approval_expired" || record.CancellationConfirmedAt is not null)
             throw new RelayException("operation_already_finished", "The operation is already finished and cannot be cancelled.", false);
         if (record.State is not ("pending" or "running" or "awaiting_approval") || record.CancellationRequestedAt is null)
@@ -308,7 +310,8 @@ public sealed class WorkService : IAsyncDisposable
             using var reservation = retry ? await ((IRetryPreparation)executor).PrepareRetryAsync(record, token) : prepared;
             if (token.IsCancellationRequested)
                 throw new RelayException("cancelled_before_dispatch", "The request was cancelled before dispatch.", false);
-            await store.SaveAsync(record with { State = "running", Error = null, ErrorCode = null, UpdatedAt = DateTimeOffset.UtcNow }, CancellationToken.None).ConfigureAwait(false);
+            if (!retry)
+                await store.SaveAsync(record with { State = "running", UpdatedAt = DateTimeOffset.UtcNow }, CancellationToken.None).ConfigureAwait(false);
             var result = reservation is null ? await executor.ExecuteAsync(record.Request, token).ConfigureAwait(false) :
                 await reservation.ExecuteAsync(token).ConfigureAwait(false);
             await store.SaveAsync(record with { State = result.ExitCode is not (null or 0) ? "failed" : "completed", Result = result,

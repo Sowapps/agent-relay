@@ -60,10 +60,14 @@ def check_participant():
         return value['result']
     try:
         initialization=call(1,'initialize',dict(protocolVersion='2025-11-25',capabilities={},clientInfo=dict(name='owned fixture',version='1')))
+        child.stdin.write(json.dumps(dict(jsonrpc='2.0',method='notifications/initialized'))+'\n')
+        child.stdin.flush()
         result=call(2,'tools/call',dict(name='invoke_operation',arguments=dict(call_id=str(uuid.uuid4()),
             operation_id='list_projects',revision=1,arguments={})))
+        configuration=result['structuredContent']['configuration']
         commit(work/'participant-proof.json',{'version':initialization['serverInfo']['version'],
-            'memberships':result['structuredContent']['configuration']['memberships']})
+            'projects':[item['id'] for item in configuration['projects']],
+            'memberships':configuration['memberships']})
     except Exception as error:
         child.stdin.close()
         try: child.wait(timeout=8)
@@ -155,7 +159,7 @@ def wait_for(check, description, seconds=35):
     raise TimeoutError(description)
 
 
-def qualify(baseline, candidate, output, distribution, linux_user, verify_native_retry=False, verify_approval_resume=False):
+def qualify(baseline, candidate, output, distribution, linux_user, verify_native_retry=False, verify_approval_resume=False, candidate_release=None):
     output.mkdir()
     installation = output / 'installation'
     data = installation / 'var/apps/agent-relay/default'
@@ -163,12 +167,16 @@ def qualify(baseline, candidate, output, distribution, linux_user, verify_native
     runtime = {'executable': str(installation / 'app/AgentRelay.Windows.exe')}
     before = partial(run, cwd=installation, environment=dict(os.environ))
     update = partial(invoke, installation=installation, data=data)
-    candidate_runtime = {'executable': str(candidate / 'app/AgentRelay.Windows.exe')}
     project, owner, agent, workspace, binding, participant, session, first, second, warm = (str(uuid.uuid4()) for _ in range(10))
     native_root = '/srv/agent-relay/var/apps/agent-relay/sessions/' + session.replace('-', '')
     native_workspace = '/tmp/agent-relay-update-' + session.replace('-', '')
     result = {'baseVersion': old_version, 'baseSha256': digest, 'sessionId': session, 'initialRequest': first,
               'secondRequest': second, 'modelCalls': 0, 'stableChanged': False}
+    if candidate_release is not None:
+        candidate = output / 'candidate'
+        candidate_version, candidate_digest = extract_verified(candidate_release, candidate)
+        result['candidateSha256'] = candidate_digest
+    candidate_runtime = {'executable': str(candidate / 'app/AgentRelay.Windows.exe')}
 
     def wsl(script, payload):
         operation = subprocess.run(['wsl.exe', '-d', distribution, '-u', linux_user, '--exec', 'python3', '-B', '-c', script],
@@ -294,17 +302,16 @@ p=json.load(sys.stdin); root=pathlib.Path(p['path']); root.mkdir(mode=0o700)
                 assert reopened['id'] == session
                 current = wait_for(ready, 'Retained native session did not reopen')
                 assert current['nativeConversationId'] == initial['nativeId'], current
-                focused = verify_native_retry or verify_approval_resume
-                follow_up = 'confirm resumed conversation' if focused else 'check participant MCP'
-                call('send_session_message', {'session_id': session, 'request_id': second, 'text': follow_up})
+                call('send_session_message', {'session_id': session, 'request_id': second, 'text': 'check participant MCP'})
                 result.update(nativeConversationId=initial['nativeId'], firstRequestPreserved=True,
                               originalHistorySha256=hashlib.sha256(old_history.encode()).hexdigest())
-                if not focused:
-                    evidence = wait_for(lambda: native_read(native_workspace + '/participant-proof.json'), 'Session did not connect to relay_project', 80)
-                    proof = json.loads(evidence)
-                    result['participantMcp'] = proof
-                    assert proof.get('version') == state['version'] and proof['memberships'][0]['endpointId'] == agent, proof
-                    assert proof['memberships'][0]['projectId'] == project, proof
+                evidence = wait_for(lambda: native_read(native_workspace + '/participant-proof.json'), 'No relay_project result from the reopened session', 105)
+                proof = json.loads(evidence)
+                result['participantMcp'] = proof
+                write(output / 'participant-mcp.json', proof)
+                assert proof.get('version') == state['version'] and proof.get('projects') == [project], proof
+                assert {(item['endpointId'], item['projectId']) for item in proof['memberships']} == {(agent, project)}, proof
+                if candidate_release is not None: assert state['version'] == candidate_version, state
                 wait_for(lambda: completed(second), 'Reopened session did not reply')
                 history = native_read(history_file)
                 assert history.startswith(old_history) and second in history
@@ -386,8 +393,11 @@ shutil.rmtree(workspace)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    for option in ('baseline', 'candidate', 'output'):
+    for option in ('baseline', 'output'):
         parser.add_argument('--' + option, type=Path, required=True)
+    candidate = parser.add_mutually_exclusive_group(required=True)
+    candidate.add_argument('--candidate', type=Path, help='Use an extracted development payload')
+    candidate.add_argument('--candidate-release', type=Path, help='Extract the verified ZIP and retain its SHA-256')
     parser.add_argument('--distribution', required=True)
     parser.add_argument('--user', required=True)
     parser.add_argument('--verify-native-retry', action='store_true')
@@ -396,5 +406,5 @@ if __name__ == '__main__':
     target = args.output.resolve()
     if not target.is_relative_to(Path(__file__).resolve().parents[4] / 'local/apps/agent-relay/qualification') or target.exists():
         parser.error('Select a new owned local qualification directory.')
-    qualify(args.baseline.resolve(), args.candidate.resolve(), target, args.distribution, args.user,
-            args.verify_native_retry, args.verify_approval_resume)
+    qualify(args.baseline.resolve(), args.candidate.resolve() if args.candidate else None, target, args.distribution, args.user,
+            args.verify_native_retry, args.verify_approval_resume, args.candidate_release.resolve() if args.candidate_release else None)
