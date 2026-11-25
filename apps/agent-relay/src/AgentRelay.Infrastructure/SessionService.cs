@@ -239,9 +239,15 @@ public sealed class SessionService
         try
         {
             var proof = await bridge.CallAsync(profile, "verify_dormant_approval", new { requestId = request.Id, definition.Scope }, token);
-            return proof.TryGetProperty("dormant", out var dormant) && dormant.ValueKind == JsonValueKind.True;
+            if (proof.TryGetProperty("dormant", out var dormant) && dormant.ValueKind == JsonValueKind.True) return true;
+            if (proof.TryGetProperty("reason", out var reason) && reason.ValueKind == JsonValueKind.String)
+                throw new RelayException("session_awaiting_approval", "Dormant approval could not be verified: " + reason.GetString(), false);
+            return false;
         }
-        catch (RelayException error) when (error.Code == "cancellation_unconfirmed") { return false; }
+        catch (RelayException error) when (error.Code == "cancellation_unconfirmed")
+        {
+            throw new RelayException("session_awaiting_approval", error.Message, false);
+        }
     }
 
     internal async Task<bool> CloseApprovalSessionAsync(RelaySession session, WorkRequest request, CancellationToken token)

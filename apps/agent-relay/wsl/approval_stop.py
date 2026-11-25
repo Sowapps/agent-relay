@@ -112,10 +112,12 @@ def owned_dispatch(root, client, request, *, latest=False):
 
 def verify_dormant(root, client, request):
     if client != 'codex':
-        return {'dormant': False}
+        return {'dormant': False, 'reason': 'adapter_unsupported'}
     root, identifier, data, _, _, _, submitted = owned_dispatch(root, client, request, latest=True)
-    if not stop_has_not_started(data, identifier) or pane(root, client) is not None:
-        return {'dormant': False}
+    if not stop_has_not_started(data, identifier):
+        return {'dormant': False, 'reason': 'explicit_stop_started'}
+    if pane(root, client) is not None:
+        return {'dormant': False, 'reason': 'terminal_live'}
     from native_clients import demand_pinned_conversation
     demand_pinned_conversation(root / client, client, context(root, client))
     original = generation_identity(submitted.get('expectedNativeGeneration'))
@@ -123,10 +125,13 @@ def verify_dormant(root, client, request):
     current = process_stamp(1)
     observed = generation_identity(current['generation']) if current else None
     if not original or not initial or not observed or original[0] != initial[0] or initial[1] != 1 or original[1] <= 1:
-        return {'dormant': False}
-    if initial[0] == observed[0] and (initial != observed or tracked(owned_processes(), original[1])):
-        return {'dormant': False}
-    return {'dormant': pane(root, client) is None}
+        return {'dormant': False, 'reason': 'generation_unverified'}
+    if initial[0] == observed[0]:
+        if initial != observed:
+            return {'dormant': False, 'reason': 'distribution_changed'}
+        if tracked(owned_processes(), original[1]):
+            return {'dormant': False, 'reason': 'original_process_active'}
+    return {'dormant': False, 'reason': 'terminal_reappeared'} if pane(root, client) is not None else {'dormant': True}
 
 
 def recover(root, client, request, stop):

@@ -27,7 +27,8 @@ def exercise(base):
     layout = install / 'native-layout.json'
     layout.write_text(json.dumps(json.loads(layout.read_text()) | {'base': str(base)}))
     sys.path.insert(0, str(install))
-    from native_clients import tmux
+    from native_clients import process_stamp, tmux
+    from approval_stop import pane, verify_dormant
     from native_errors import NativeFailure
     from terminal_control import read, signal
 
@@ -35,7 +36,8 @@ def exercise(base):
     root = base / 'sessions' / session.replace('-', '')
     folder = root / 'codex'
     (folder / 'data').mkdir(parents=True)
-    (folder / 'context.json').write_text(json.dumps({'sessionId': session}))
+    scope = {key: str(uuid.uuid4()) for key in ('projectId', 'senderId', 'recipientId', 'workspaceId')}
+    (folder / 'context.json').write_text(json.dumps({'sessionId': session, **scope}))
     (root / 'provision-owner.json').write_text(json.dumps({
         'sessionId': session, 'user': pwd.getpwuid(os.getuid()).pw_name}))
     (root / 'tmux.conf').touch()
@@ -128,7 +130,23 @@ def exercise(base):
         assert bridge('signal_terminal', action='escape')['keySent']
         wait_for(lambda: seen.read_bytes() == b'y\x1b\x1byn\x1b')
         assert not other_keys.exists()
+        original = str(uuid.uuid4())
+        history = folder / 'config' / 'sessions'
+        history.mkdir(parents=True)
+        (history / (original + '.jsonl')).touch()
+        (folder / 'native-conversation.json').write_text(json.dumps({'id': original}))
+        expired = str(uuid.uuid4())
+        (folder / 'data' / f'dispatch-{expired}.json').write_text(json.dumps({'request': {
+            'id': expired, 'scope': scope, 'expectedNativeGeneration': pane(root, 'codex')[1],
+            'expectedDistributionGeneration': process_stamp(1)['generation']}}))
+        proof_request = {'requestId': expired, 'scope': scope}
+        assert verify_dormant(root, 'codex', proof_request)['reason'] == 'terminal_live'
+        tmux(root, 'kill-session', '-t', 'codex')
+        proof = verify_dormant(root, 'codex', proof_request)
+        assert proof['dormant'], proof
+        assert tmux(root, 'has-session', '-t', 'independent', check=False).returncode == 0
         print('NATIVE_TERMINAL_CONTROL=PASS (fresh one-time decision, stale/replay refusal, unknown prompt Escape, other pane untouched)')
+        print('NATIVE_DORMANT_APPROVAL=PASS (original terminal absent, pinned conversation retained)')
     finally:
         tmux(root, 'kill-server', check=False)
 

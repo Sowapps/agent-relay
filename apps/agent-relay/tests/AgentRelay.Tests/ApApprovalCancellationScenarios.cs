@@ -17,7 +17,9 @@ internal static class ApApprovalCancellationScenarios
              new(project, peer, "secondary", [RelayCapabilities.ReceiveMessage], [])]));
         var backend = new Fixture(session);
         await using var work = new WorkService(store, backend, () => [new(peer.ToString("D"), true, true)]);
-        var app = new RelayApplication(new(settings), work, backend, new ProjectJournal(database));
+        var router = new SessionAdapterRouter(backend, new Dictionary<string, IRelaySessions> { ["fixture"] = backend },
+            (_, _) => Task.FromResult("fixture"));
+        var app = new RelayApplication(new(settings), work, router, new ProjectJournal(database));
         var caller = new CallerIdentity(owner, [project]);
         var token = CancellationToken.None;
         var request = new WorkRequest(Guid.NewGuid(), peer.ToString("D"), "message", "Fixture", SessionId: session.Id, Scope: scope);
