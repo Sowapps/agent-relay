@@ -111,6 +111,7 @@ public sealed class ProjectCoordinator : IAsyncDisposable
                         using var admission = promotion.TryEnter();
                         if (admission is null) continue;
                         var now = DateTimeOffset.UtcNow;
+                        await Work.ResumeDueRetriesAsync(now, archiveStop.Token);
                         if (now >= nextApprovalSweep)
                         {
                             nextApprovalSweep = now.AddSeconds(30);

@@ -6,7 +6,7 @@ public interface IScopedWorkAdapter : IWorkExecutor, IWorkPreparation, IOperatio
 
 /// <summary>Route authorized work by technical endpoint capability while sharing the normal work lifecycle.</summary>
 internal sealed class ScopedWorkRouter(ProjectSettingsStore settings, IReadOnlyDictionary<string, IScopedWorkAdapter> installed,
-    IOperationRecovery transferReceipts) : IScopedWorkAdapter
+    IOperationRecovery transferReceipts) : IScopedWorkAdapter, IRetryPreparation
 {
     private IScopedWorkAdapter? Find(WorkRequest request)
     {
@@ -19,6 +19,10 @@ internal sealed class ScopedWorkRouter(ProjectSettingsStore settings, IReadOnlyD
 
     public Task<IPreparedWork> PrepareAsync(WorkRequest request, CancellationToken token) =>
         Select(request).PrepareAsync(request, token);
+
+    public Task<IPreparedWork> PrepareRetryAsync(WorkRecord record, CancellationToken token) =>
+        Select(record.Request) is IRetryPreparation retry ? retry.PrepareRetryAsync(record, token) :
+            throw new RelayException("adapter_unavailable", "The selected adapter cannot resume this retry.", false);
 
     public async Task<WorkResult> ExecuteAsync(WorkRequest request, CancellationToken token)
     {

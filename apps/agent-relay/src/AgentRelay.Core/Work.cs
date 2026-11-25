@@ -13,7 +13,10 @@ public sealed record WorkRecord(WorkRequest Request, string State, DateTimeOffse
     DateTimeOffset? ApprovalWaitingSince = null, DateTimeOffset? ApprovalExpiredAt = null,
     DateTimeOffset? SessionClosedAt = null, DateTimeOffset? TerminalRefusalSentAt = null, bool NativeTurnEnded = false,
     NativeAttempt[]? NativeAttempts = null, DateTimeOffset? TerminalEscapeSentAt = null,
-    DateTimeOffset? ApprovalResumeVerifiedAt = null);
+    DateTimeOffset? ApprovalResumeVerifiedAt = null, NativeRetry? Retry = null);
+
+public sealed record NativeRetry(DateTimeOffset DueAt, string NativeGeneration, string DistributionGeneration, string WorkspaceIdentity);
+public sealed class WorkDeferredException : Exception { }
 
 public sealed record NativeAttempt(int Number, DateTimeOffset StartedAt, DateTimeOffset? FinishedAt = null,
     bool? Dispatched = null, string? ErrorCode = null, DateTimeOffset? RetryAt = null);
@@ -63,6 +66,9 @@ public interface IWorkStore
         throw new RelayException("cancellation_unavailable", "This work store cannot retain the session closure.", false);
     Task RecordApprovalInterruptionAsync(Guid id, CancellationToken token) => Task.CompletedTask;
     Task RecordApprovalSignalAsync(Guid id, string action, CancellationToken token) => Task.CompletedTask;
+    Task<bool> SessionHasDeferredWorkAsync(Guid id, CancellationToken token) => Task.FromResult(false);
+    Task<IReadOnlyList<WorkRecord>> DueRetriesAsync(DateTimeOffset now, CancellationToken token) => Task.FromResult<IReadOnlyList<WorkRecord>>([]);
+    Task<bool> ClaimRetryAsync(Guid id, DateTimeOffset now, CancellationToken token) => Task.FromResult(false);
 }
 
 public interface IWorkExecutor
@@ -78,6 +84,11 @@ public interface IPreparedWork : IDisposable
 public interface IWorkPreparation
 {
     Task<IPreparedWork> PrepareAsync(WorkRequest request, CancellationToken token);
+}
+
+public interface IRetryPreparation
+{
+    Task<IPreparedWork> PrepareRetryAsync(WorkRecord record, CancellationToken token);
 }
 
 public sealed class WorkService : IAsyncDisposable
@@ -138,7 +149,12 @@ public sealed class WorkService : IAsyncDisposable
             }
             else
             {
-                if (request.SessionId is { } targetSession) await DemandSessionResolvedAsync(targetSession, token);
+                if (request.SessionId is { } targetSession)
+                {
+                    await DemandSessionResolvedAsync(targetSession, token);
+                    if (await store.SessionHasDeferredWorkAsync(targetSession, token))
+                        throw new RelayException("busy", "This session has a scheduled retry.", false);
+                }
                 if (preparing.Values.Any(item => item.Key == key) || running.TryGetValue(key, out var active) && !active.IsCompleted)
                     throw new RelayException("busy", "This session already has an active operation.", false);
                 if (preparing.Count + running.Values.Count(task => !task.IsCompleted) >= maximumConcurrency)
@@ -221,6 +237,31 @@ public sealed class WorkService : IAsyncDisposable
     public Task<IReadOnlyList<WorkRecord>> RetainedApprovalsAsync(Guid sessionId, CancellationToken token) =>
         store.RetainedApprovalsAsync(sessionId, token);
 
+    public async Task ResumeDueRetriesAsync(DateTimeOffset now, CancellationToken token)
+    {
+        if (executor is not IRetryPreparation) return;
+        foreach (var record in await store.DueRetriesAsync(now, token))
+        {
+            if (record.Request.SessionId is not { } sessionId) continue;
+            var key = "session:" + sessionId;
+            await admission.WaitAsync(token);
+            try
+            {
+                if (stop.IsCancellationRequested || preparing.Count + running.Values.Count(task => !task.IsCompleted) >= maximumConcurrency) return;
+                if (preparing.Values.Any(item => item.Key == key) || running.TryGetValue(key, out var active) && !active.IsCompleted) continue;
+                if (!await store.ClaimRetryAsync(record.Request.Id, now, token)) continue;
+                if (cancellations.Remove(key, out var previous)) previous.Dispose();
+                foreach (var id in operationKeys.Where(pair => pair.Value == key).Select(pair => pair.Key).ToArray()) operationKeys.Remove(id);
+                var cancellation = CancellationTokenSource.CreateLinkedTokenSource(stop.Token);
+                cancellations[key] = cancellation;
+                operationKeys[record.Request.Id] = key;
+                activeProjects[key] = record.Request.Scope?.ProjectId ?? Guid.Empty;
+                running[key] = Task.Run(() => ExecuteAsync(record, cancellation.Token, null, retry: true));
+            }
+            finally { admission.Release(); }
+        }
+    }
+
     internal async Task DemandSessionResolvedAsync(Guid sessionId, CancellationToken token, OperationScope? expectedScope = null)
     {
         var approvals = await RetainedApprovalsAsync(sessionId, token);
@@ -233,6 +274,7 @@ public sealed class WorkService : IAsyncDisposable
     {
         await store.RequestCancellationAsync(id, token);
         var record = await ReadAsync(id, token);
+        if (record is { ErrorCode: "native_retry_cancelled", CancellationRequestedAt: not null }) return record;
         if (record.State is "completed" or "failed" or "approval_expired" || record.CancellationConfirmedAt is not null)
             throw new RelayException("operation_already_finished", "The operation is already finished and cannot be cancelled.", false);
         if (record.State is not ("pending" or "running" or "awaiting_approval") || record.CancellationRequestedAt is null)
@@ -259,26 +301,28 @@ public sealed class WorkService : IAsyncDisposable
             await store.RecordApprovalInterruptionAsync(approval.Request.Id, token);
     }
 
-    private async Task ExecuteAsync(WorkRecord record, CancellationToken token, IPreparedWork? prepared)
+    private async Task ExecuteAsync(WorkRecord record, CancellationToken token, IPreparedWork? prepared, bool retry = false)
     {
-        using var reservation = prepared;
         try
         {
+            using var reservation = retry ? await ((IRetryPreparation)executor).PrepareRetryAsync(record, token) : prepared;
             if (token.IsCancellationRequested)
                 throw new RelayException("cancelled_before_dispatch", "The request was cancelled before dispatch.", false);
-            await store.SaveAsync(record with { State = "running", UpdatedAt = DateTimeOffset.UtcNow }, CancellationToken.None).ConfigureAwait(false);
-            var result = prepared is null ? await executor.ExecuteAsync(record.Request, token).ConfigureAwait(false) :
-                await prepared.ExecuteAsync(token).ConfigureAwait(false);
+            await store.SaveAsync(record with { State = "running", Error = null, ErrorCode = null, UpdatedAt = DateTimeOffset.UtcNow }, CancellationToken.None).ConfigureAwait(false);
+            var result = reservation is null ? await executor.ExecuteAsync(record.Request, token).ConfigureAwait(false) :
+                await reservation.ExecuteAsync(token).ConfigureAwait(false);
             await store.SaveAsync(record with { State = result.ExitCode is not (null or 0) ? "failed" : "completed", Result = result,
+                Retry = null, Error = null, ErrorCode = null,
                 UpdatedAt = DateTimeOffset.UtcNow }, CancellationToken.None).ConfigureAwait(false);
         }
+        catch (WorkDeferredException) { /* The store already retained the next native attempt. */ }
         catch (Exception error)
         {
             var state = error is RelayException { EffectsPossible: true } ? "unknown" : error is RelayException { Code: "approval_required" } ? "awaiting_approval" :
                 error is RelayException { EffectsPossible: false } ? "failed" :
                 error is RelayException { Code: "unavailable" or "command_denied" or "authentication_required" or "agent_authentication_required" or "credential_reference_unavailable" or "capability_denied" or "invalid_path" or "destination_exists" or "busy" } ? "failed" : "unknown";
             var observedAt = DateTimeOffset.UtcNow;
-            await store.SaveAsync(record with { State = state, Error = error.Message,
+            await store.SaveAsync(record with { State = state, Retry = null, Error = error.Message,
                 ErrorCode = error is RelayException relay ? relay.Code : error is TimeoutException ? "timeout" : "execution_unknown",
                 UpdatedAt = observedAt, ApprovalWaitingSince = state == "awaiting_approval" ? observedAt : null,
                 NativeTurnEnded = error is RelayException { NativeTurnEnded: true } }, CancellationToken.None).ConfigureAwait(false);

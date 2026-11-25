@@ -5,6 +5,8 @@ namespace AgentRelay.Infrastructure;
 public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
 {
     private const string ActiveState = "json_extract(payload,'$.state') IN ('pending','running')";
+    internal const string DeferredState = "json_extract(payload,'$.state')='retry_wait'";
+    internal const string RetryDue = "julianday(json_extract(payload,'$.retry.dueAt'))";
     private const string ResumeUnverified = "json_extract(payload,'$.approvalResumeVerifiedAt') IS NULL";
     internal const string PendingApprovalStop = "json_extract(payload,'$.approvalStopRequestedAt') IS NOT NULL AND json_extract(payload,'$.cancellationConfirmedAt') IS NULL AND " + ResumeUnverified;
     internal const string RetainedApproval = "((" + ResumeUnverified + ") AND (" +
@@ -150,10 +152,40 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
 
     public async Task RequestCancellationAsync(Guid id, CancellationToken token)
     {
+        if (await WriteAsync(id, record => record is { State: "retry_wait" } ? record with
+            {
+                State = "failed", Retry = null, CancellationRequestedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow,
+                ErrorCode = "native_retry_cancelled", Error = "The scheduled retry was cancelled before dispatch."
+            } : null, token)) return;
         using var connection = database.Open(); using var command = connection.CreateCommand();
         command.CommandText = $"UPDATE work SET payload=json_set(payload,'$.cancellationRequestedAt',$at) WHERE id=$id AND ({ActiveState} OR json_extract(payload,'$.state')='awaiting_approval') AND json_extract(payload,'$.cancellationRequestedAt') IS NULL";
         command.Parameters.AddWithValue("$id", id.ToString("D")); command.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O")); await command.ExecuteNonQueryAsync(token);
     }
+
+    public async Task<bool> SessionHasDeferredWorkAsync(Guid id, CancellationToken token)
+    {
+        using var connection = database.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT 1 FROM work WHERE {DeferredState} AND json_extract(payload,'$.request.sessionId')=$id LIMIT 1";
+        command.Parameters.AddWithValue("$id", id.ToString("D"));
+        return await command.ExecuteScalarAsync(token) is not null;
+    }
+
+    public async Task<IReadOnlyList<WorkRecord>> DueRetriesAsync(DateTimeOffset now, CancellationToken token)
+    {
+        using var connection = database.Open();
+        using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT payload FROM work WHERE {DeferredState} AND {RetryDue}<=julianday($now) ORDER BY {RetryDue},rowid LIMIT 16";
+        command.Parameters.AddWithValue("$now", now.ToString("O"));
+        using var reader = await command.ExecuteReaderAsync(token);
+        var results = new List<WorkRecord>();
+        while (await reader.ReadAsync(token)) results.Add(RelayJson.Deserialize<WorkRecord>(reader.GetString(0)));
+        return results;
+    }
+
+    public Task<bool> ClaimRetryAsync(Guid id, DateTimeOffset now, CancellationToken token) =>
+        WriteAsync(id, record => record is { State: "retry_wait", Retry: { } retry, CancellationRequestedAt: null } && retry.DueAt <= now
+            ? record with { State = "running", Error = null, ErrorCode = null, UpdatedAt = now } : null, token);
 
     public async Task<IReadOnlyList<WorkRecord>> RetainedApprovalsAsync(Guid sessionId, CancellationToken token)
     {
@@ -247,17 +279,23 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
                 Event: "native_attempt_started", EventAt: now);
         }, token);
 
-    internal Task FinishNativeAttemptAsync(Guid id, int number, bool? dispatched, string? errorCode,
-        DateTimeOffset? retryAt, CancellationToken token) =>
-        WriteTransitionAsync(id, record =>
+    internal async Task<bool> FinishNativeAttemptAsync(Guid id, int number, bool? dispatched, string? errorCode,
+        NativeRetry? retry, CancellationToken token)
+    {
+        var parked = false;
+        await WriteTransitionAsync(id, record =>
         {
             if (record?.NativeAttempts is not { Length: > 0 } attempts || attempts[^1].Number != number ||
                 attempts[^1].FinishedAt is not null) return null;
             var now = DateTimeOffset.UtcNow;
-            var completed = attempts[^1] with { FinishedAt = now, Dispatched = dispatched, ErrorCode = errorCode, RetryAt = retryAt };
-            return new(record with { NativeAttempts = [.. attempts[..^1], completed] }, Diagnostic: errorCode,
-                Event: retryAt is not null ? "native_retry_scheduled" : "native_attempt_finished", EventAt: now);
+            parked = retry is not null && record is { State: "running", CancellationRequestedAt: null };
+            var completed = attempts[^1] with { FinishedAt = now, Dispatched = dispatched, ErrorCode = errorCode, RetryAt = parked ? retry!.DueAt : null };
+            return new(record with { NativeAttempts = [.. attempts[..^1], completed], Retry = parked ? retry : null,
+                    State = parked ? "retry_wait" : record.State, ErrorCode = parked ? errorCode : record.ErrorCode, UpdatedAt = now },
+                Diagnostic: errorCode, Event: parked ? "native_retry_scheduled" : "native_attempt_finished", EventAt: now);
         }, token);
+        return parked;
+    }
 
     internal Task RecordApprovalTurnObservationAsync(Guid id, bool ready, CancellationToken token) =>
         WriteTransitionAsync(id, record =>
@@ -294,10 +332,10 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         {
             if (record is null || record.Request.Scope != scope || record.Request.SessionId != sessionId)
                 throw new InvalidDataException("Native reply does not belong to the selected task/project.");
-            if (record.State is not ("unknown" or "awaiting_approval" or "approval_expired")) return null;
+            if (record.State is not ("unknown" or "awaiting_approval" or "approval_expired" or "retry_wait")) return null;
             var observedAt = DateTimeOffset.UtcNow;
-            var completed = record with { State = "completed", Result = result, Error = null, ErrorCode = null, UpdatedAt = observedAt };
-            if (record.State == "unknown") return new(completed);
+            var completed = record with { State = "completed", Result = result, Error = null, ErrorCode = null, Retry = null, UpdatedAt = observedAt };
+            if (record.State is "unknown" or "retry_wait") return new(completed);
             var started = ApprovalExpiry.StartedAt(record);
             if (record.CreatedAt == default || started < record.CreatedAt || started > observedAt ||
                 started > DateTimeOffset.MaxValue - ApprovalExpiry.WaitingLimit ||
@@ -344,6 +382,7 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
                     State = beforeDispatch ? "failed" : "unknown",
                     Error = beforeDispatch ? "The host stopped before dispatch began." : "The host stopped before completion was confirmed. No automatic replay.",
                     ErrorCode = beforeDispatch ? "host_stopped_before_dispatch" : "host_stopped",
+                    Retry = null,
                     UpdatedAt = DateTimeOffset.UtcNow
                 }, token);
             }

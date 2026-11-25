@@ -55,7 +55,73 @@ internal static class WorkScenarios
             while (failed.State is "pending" or "running");
             Assert(failed.State == expected, error.GetType().Name + " maps to " + expected);
         }
+        await DurableRetryAsync(store, capability);
         Console.WriteLine("MVP_WORK_STATES=PASS");
+    }
+
+    private static async Task DurableRetryAsync(SqliteWorkStore store, WorkCapability capability)
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+        var token = deadline.Token;
+        var due = DateTimeOffset.UtcNow.AddHours(1);
+        var parked = new WorkRequest(Guid.NewGuid(), "fixture", "message", "park", SessionId: Guid.NewGuid());
+        var cancelled = parked with { Id = Guid.NewGuid(), SessionId = Guid.NewGuid() };
+        var ordinary = parked with { Id = Guid.NewGuid(), SessionId = Guid.NewGuid(), Text = "ordinary" };
+        var executor = new DeferredExecutor(store, due);
+        await using (var service = new WorkService(store, executor, () => [capability], maximumConcurrency: 1))
+        {
+            await service.SubmitAsync(parked, token);
+            await Idle(service);
+            var waiting = await service.ReadAsync(parked.Id, token);
+            Assert(waiting is { State: "retry_wait", NativeAttempts.Length: 1 } && waiting.Retry?.DueAt == due,
+                "parked attempt releases the only worker and retains its due time");
+            await Refuses("busy", () => service.SubmitAsync(parked with { Id = Guid.NewGuid() }, token));
+            await service.SubmitAsync(ordinary, token);
+            await Idle(service);
+            Assert((await service.ReadAsync(ordinary.Id, token)).State == "completed", "an independent session runs while a retry waits");
+            await service.SubmitAsync(cancelled, token);
+            await Idle(service);
+            Assert((await service.RequestCancellationAsync(cancelled.Id, token)).ErrorCode == "native_retry_cancelled",
+                "a parked attempt can be cancelled before dispatch");
+        }
+        await store.RecoverAsync(token);
+        await using var restarted = new WorkService(store, executor, () => [capability], maximumConcurrency: 1);
+        await restarted.ResumeDueRetriesAsync(due.AddSeconds(-1), token);
+        Assert(!restarted.IsActive && executor.Resumed == 0, "restart preserves the provider deadline");
+        await restarted.ResumeDueRetriesAsync(due, token);
+        await Idle(restarted);
+        await restarted.ResumeDueRetriesAsync(due.AddSeconds(1), token);
+        var result = await restarted.ReadAsync(parked.Id, token);
+        Assert(result is { State: "completed", Retry: null, NativeAttempts.Length: 2 } &&
+            result.Request.Id == parked.Id && executor.Resumed == 1 && !restarted.IsActive,
+            "the due retry resumes once with its original request ID and ignores the cancelled retry");
+
+        async Task Idle(WorkService service)
+        {
+            while (service.IsActive) await Task.Delay(10, token);
+        }
+    }
+
+    private sealed class DeferredExecutor(SqliteWorkStore store, DateTimeOffset due) : IWorkExecutor, IRetryPreparation
+    {
+        public int Resumed { get; private set; }
+
+        public async Task<WorkResult> ExecuteAsync(WorkRequest request, CancellationToken token)
+        {
+            if (request.Text != "park") return new("fixture", "ordinary");
+            Assert(await store.BeginNativeAttemptAsync(request.Id, 1, token), "initial native attempt admitted");
+            Assert(await store.FinishNativeAttemptAsync(request.Id, 1, true, "server_overloaded",
+                new(due, "process", "distribution", "workspace"), token), "native attempt parked");
+            throw new WorkDeferredException();
+        }
+
+        public Task<IPreparedWork> PrepareRetryAsync(WorkRecord record, CancellationToken token) =>
+            Task.FromResult<IPreparedWork>(new ScopedPreparedWork(async dispatchToken =>
+            {
+                Assert(await store.BeginNativeAttemptAsync(record.Request.Id, 2, dispatchToken), "resumed native attempt admitted");
+                Resumed++;
+                return new("fixture", "retried");
+            }));
     }
 
     private static void Assert(bool value, string name) { if (!value) throw new InvalidOperationException(name); Console.WriteLine("PASS: " + name); }

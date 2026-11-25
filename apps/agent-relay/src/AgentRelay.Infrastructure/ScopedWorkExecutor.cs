@@ -5,7 +5,7 @@ namespace AgentRelay.Infrastructure;
 // Owns scoped execution and recovery orchestration; concrete dependencies come from ProjectCoordinator.
 public sealed class ScopedWorkExecutor(RelayDatabase database, ProjectSettingsStore projects, SessionService sessions, WslBridge bridge,
     SqliteWorkStore store, FileTransferService files, ScopedFileRoutes fileRoutes, ScopedInbox inbox, ScopedCommands commands, ScopedSessionContext context)
-    : IScopedWorkAdapter
+    : IScopedWorkAdapter, IRetryPreparation
 {
     public async Task<WorkResult> ExecuteAsync(WorkRequest request, CancellationToken token)
     {
@@ -13,7 +13,14 @@ public sealed class ScopedWorkExecutor(RelayDatabase database, ProjectSettingsSt
         return await prepared.ExecuteAsync(token);
     }
 
-    public async Task<IPreparedWork> PrepareAsync(WorkRequest request, CancellationToken token)
+    public Task<IPreparedWork> PrepareAsync(WorkRequest request, CancellationToken token) => PrepareAsync(request, null, 1, token);
+
+    public Task<IPreparedWork> PrepareRetryAsync(WorkRecord work, CancellationToken token) =>
+        work is { Request.Kind: "message", Retry: { } retry, NativeAttempts.Length: >= 1 and <= 2 }
+            ? PrepareAsync(work.Request, retry, work.NativeAttempts.Length + 1, token)
+            : throw new RelayException("native_retry_unverified", "The retained retry lacks a verified native attempt.", false);
+
+    private async Task<IPreparedWork> PrepareAsync(WorkRequest request, NativeRetry? retry, int attempt, CancellationToken token)
     {
         var scope = request.Scope ?? throw new RelayException("legacy_unassigned", "Production work needs a project scope.");
         var policy = new ProjectPolicy(projects);
@@ -36,55 +43,55 @@ public sealed class ScopedWorkExecutor(RelayDatabase database, ProjectSettingsSt
                 policy.LocalWork(caller, scope.ProjectId, scope.WorkspaceId!.Value, scope.RecipientId);
         }
         DemandMessage();
-        var identity = await WorkspaceIdentity.VerifyNativeAsync(database, profile, record.Definition.Workspace, token);
-        var ready = await sessions.EnsureReadyAsync(record, profile, policy.CanControlSession(caller,
-            new(record.Id, record.Name, retainedScope, record.State), RelayCapabilities.ManageSession), token);
+        if (retry is null)
+        {
+            var identity = await WorkspaceIdentity.VerifyNativeAsync(database, profile, record.Definition.Workspace, token);
+            var ready = await sessions.EnsureReadyAsync(record, profile, policy.CanControlSession(caller,
+                new(record.Id, record.Name, retainedScope, record.State), RelayCapabilities.ManageSession), token);
+            retry = new(DateTimeOffset.MinValue, ready.NativeRuntime?.Generation ?? "", ready.DistributionRuntime?.Generation ?? "", identity);
+        }
         context.ValidateDefinition(record.Definition);
-        return new ScopedPreparedWork(dispatchToken => ExecuteMessageAsync(request, record, profile, DemandMessage,
-            (attempt, token) => bridge.CallAsync(profile, "message", new { request.Id, request.Text, profile.AllowLocalWork, Scope = retainedScope,
-                ExpectedNativeGeneration = ready.NativeRuntime?.Generation, ExpectedDistributionGeneration = ready.DistributionRuntime?.Generation,
-                ExpectedWorkspaceIdentity = identity, NativeAttempt = attempt }, token), dispatchToken));
+        return new ScopedPreparedWork(dispatchToken => ExecuteMessageAsync(request, record, profile, DemandMessage, retry, attempt,
+            token => bridge.CallAsync(profile, "message", new { request.Id, request.Text, profile.AllowLocalWork, Scope = retainedScope,
+                ExpectedNativeGeneration = retry.NativeGeneration, ExpectedDistributionGeneration = retry.DistributionGeneration,
+                ExpectedWorkspaceIdentity = retry.WorkspaceIdentity, NativeAttempt = attempt }, token), dispatchToken));
     }
 
     private async Task<WorkResult> ExecuteMessageAsync(WorkRequest request, RelaySession session, WslProfile profile,
-        Action demandMessage, Func<int, CancellationToken, Task<System.Text.Json.JsonElement>> send, CancellationToken token)
+        Action demandMessage, NativeRetry contextAtDispatch, int attempt, Func<CancellationToken, Task<System.Text.Json.JsonElement>> send, CancellationToken token)
     {
         var sender = request.Scope!.RecipientId.ToString("D");
-        for (var attempt = 1; ; attempt++)
+        token.ThrowIfCancellationRequested();
+        context.ValidateDefinition(session.Definition!);
+        demandMessage();
+        if (attempt > 1)
         {
-            token.ThrowIfCancellationRequested();
-            context.ValidateDefinition(session.Definition!);
-            demandMessage();
-            if (attempt > 1)
-            {
-                if (await store.FindBoundReplyAsync(request, token) is { } retained)
-                    return new(sender, retained.Text);
-                var recovery = await bridge.CallAsync(profile, "recover", new { request.Id }, token);
-                if (recovery.GetProperty("reply").ValueKind != System.Text.Json.JsonValueKind.Null)
-                    return await ImportReplyAsync(recovery);
-            }
-            if (!await store.BeginNativeAttemptAsync(request.Id, attempt, token))
-                throw new RelayException("native_retry_interrupted", "The request changed before another native attempt was admitted.");
-            System.Text.Json.JsonElement result;
-            try
-            {
-                result = await send(attempt, token);
-            }
-            catch (Exception error)
-            {
-                var delay = profile.Client == "codex" ? RetryDelay(attempt, error) : null;
-                var relay = error as RelayException;
-                DateTimeOffset? retryAt = delay is { } wait ? DateTimeOffset.UtcNow + wait : null;
-                await store.FinishNativeAttemptAsync(request.Id, attempt, relay?.NativeTurnEnded == true ? true : null,
-                    relay?.Code ?? "execution_unknown", retryAt, CancellationToken.None);
-                if (delay is null) throw;
-                await WaitForRetryAsync(delay.Value, token);
-                continue;
-            }
-            var reused = result.TryGetProperty("attemptDispatched", out var dispatched) && dispatched.ValueKind == System.Text.Json.JsonValueKind.False;
-            await store.FinishNativeAttemptAsync(request.Id, attempt, !reused, null, null, CancellationToken.None);
-            return await ImportReplyAsync(result);
+            if (await store.FindBoundReplyAsync(request, token) is { } retained)
+                return new(sender, retained.Text);
+            var recovery = await bridge.CallAsync(profile, "recover", new { request.Id }, token);
+            if (recovery.GetProperty("reply").ValueKind != System.Text.Json.JsonValueKind.Null)
+                return await ImportReplyAsync(recovery);
         }
+        if (!await store.BeginNativeAttemptAsync(request.Id, attempt, token))
+            throw new RelayException("native_retry_interrupted", "The request changed before another native attempt was admitted.");
+        System.Text.Json.JsonElement result;
+        try
+        {
+            result = await send(token);
+        }
+        catch (Exception error)
+        {
+            var delay = profile.Client == "codex" ? RetryDelay(attempt, error) : null;
+            var relay = error as RelayException;
+            var retry = delay is { } wait ? contextAtDispatch with { DueAt = DateTimeOffset.UtcNow + wait } : null;
+            if (await store.FinishNativeAttemptAsync(request.Id, attempt, relay?.NativeTurnEnded == true ? true : null,
+                relay?.Code ?? "execution_unknown", retry, CancellationToken.None))
+                throw new WorkDeferredException();
+            throw;
+        }
+        var reused = result.TryGetProperty("attemptDispatched", out var dispatched) && dispatched.ValueKind == System.Text.Json.JsonValueKind.False;
+        await store.FinishNativeAttemptAsync(request.Id, attempt, !reused, null, null, CancellationToken.None);
+        return await ImportReplyAsync(result);
 
         async Task<WorkResult> ImportReplyAsync(System.Text.Json.JsonElement response)
         {
@@ -104,16 +111,6 @@ public sealed class ScopedWorkExecutor(RelayDatabase database, ProjectSettingsSt
         return provider > local ? provider : local;
     }
 
-    private static async Task WaitForRetryAsync(TimeSpan remaining, CancellationToken token)
-    {
-        var slice = TimeSpan.FromHours(1);
-        while (remaining > slice)
-        {
-            await Task.Delay(slice, token);
-            remaining -= slice;
-        }
-        await Task.Delay(remaining, token);
-    }
     public async Task<WorkRecord> ReconcileAsync(WorkRecord record, CancellationToken token)
     {
         if (record.Request.Scope is null) return record;
