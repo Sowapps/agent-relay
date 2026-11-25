@@ -25,6 +25,8 @@ The optional WSL stdio entry keeps its Win32 process alive for the connection. T
 
 ## Packaging and checks
 
+Deployment checks read the complete retained presence inventory. The diagnostics window limits only its display and shows live transports first. A bundled gateway's process image is checked before Windows start-time access. A recycled PID owned by another executable cannot keep an obsolete presence active. A live transport whose identity remains uncertain still requires an acknowledgement.
+
 Publish Transport independently for win-x64 with its own runtime lock; it must contain no Core, Infrastructure, SQLite or WebView assembly. Self-contained runtime files are required because the transport outlives an application release; copying runtime files is not a second implementation of application policy. Its exact loaded bundle is distinct from the selected worker's release.
 
 Targeted test entry points are `minimal-mcp-transport <fresh-output> <transport-bundle>` and `stable-mcp-facade <fresh-data>`. The former uses real C# gateway/worker fixture processes, checks parent exit, pending/queued frames, precommit refusal/parent recovery and no replay after lost response. The latter uses an authenticated local test host, real policy and retained data, without native agents/models. An IPC sandbox refusal is an environment result; run the isolated host scenario only with the permission needed for its own named pipe, never by changing production pipe security.

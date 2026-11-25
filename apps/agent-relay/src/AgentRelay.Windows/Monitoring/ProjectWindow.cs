@@ -13,6 +13,7 @@ internal sealed partial class ProjectWindow : Form
     private readonly RelayPipeClient client;
     private readonly AttentionReviews reviews;
     private readonly IStartupPreference startupPreference;
+    private readonly ManualCleanup cleanup;
     internal readonly RelayWebView Presentation = new();
     private readonly Dictionary<Guid, ProjectObservation> observations = [];
     private readonly Dictionary<Guid, ProjectObservation> threads = [];
@@ -33,6 +34,7 @@ internal sealed partial class ProjectWindow : Form
     {
         this.data = Path.GetFullPath(data); source = new PipeMonitorSource(data); client = new(data); reviews = new(data);
         this.startupPreference = startupPreference ?? new WindowsStartupPreference(this.data);
+        cleanup = new(this.data);
         UiTheme.Apply(this); Text = "Agent Relay"; ClientSize = new Size(1120,728);
         MinimumSize = new Size(816, 590); StartPosition = FormStartPosition.CenterScreen;
         Controls.Add(Presentation);

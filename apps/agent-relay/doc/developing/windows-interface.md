@@ -85,6 +85,12 @@ The registered command names only the retained executable and startup mode; its 
 
 render-interface-check.ps1 with an explicit running data directory passively renders real General/Project/Settings/Diagnostics data through the same production host. These are separate test windows; no synthetic data enters the deployed application. WebView2 CapturePreview captures only its own content; desktop foreground capture is unnecessary. A control capture proves rendering, not tray gestures or user input. For interactive checks use Computer Use only against one exactly selected owned Agent Relay window. Stop on a locked desktop. Do not substitute unrelated foreground pixels for proof. Record automatic observations under application notes, awaiting operator validation.
 
+## Manual storage cleanup
+
+In General settings → Storage and cleanup, analyze dated MCP logs and diagnostics of explicitly closed MCP transports in this installation. The protected days are calculated in the installation's local timezone from actual file and connection activity. Today's files are always protected. Yesterday's files are also protected before 02:00.
+
+Confirmation consumes the exact preview once. The Windows adapter opens each file exclusively, checks the current path, file identity, timestamps and bytes, then removes only that verified file through its open handle. Changes, active use and newly protected dates keep the file. Deployment admission is checked at each removal. Outcomes are recorded in the installation's `logs/maintenance` directory. Space figures are apparent byte counts. History, credentials, transfers, caches, old versions and unidentified temporaries are outside the cleanup scope.
+
 ## MCP client monitoring
 
 Réglages généraux → Connexions MCP shows recent diagnostic broker leases: actual version, build/contract identity, catalog confirmation and current/outdated/closed state. It is separate from environment connections and conveys no authority. The retained broker, not the window, owns the lease. An explicit close creates a per-instance drain request; no credential is revoked, task replayed, or automatic client reconnect promised. Old facades without leases are not falsely shown as verified. Only the most recent256diagnostic records are loaded; stale heartbeats become offline. Detailed identities stay behind diagnostics.

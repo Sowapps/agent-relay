@@ -62,6 +62,7 @@ internal static class PresentationSnapshot
         var response = new
         {
             schemaVersion = 1,
+            manualCleanupAvailable = true,
             sessionNameMaximumLength = SessionNames.MaximumLength,
             relayVersion = McpIdentity.Current.Version,
             mcpConnections = mcpConnections ?? [],

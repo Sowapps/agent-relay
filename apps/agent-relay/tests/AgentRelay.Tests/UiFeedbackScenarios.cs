@@ -3,6 +3,38 @@ using AgentRelay.Windows.Presentation;
 
 internal static partial class UiRenderScenarios
 {
+    public static Task CleanupPreview(string assets, string fixture, string output) => OnWindow(async window =>
+    {
+        window.Text = "Agent Relay · Test de rendu du nettoyage";
+        Directory.CreateDirectory(output);
+        using var view = new RelayWebView();
+        window.Controls.Add(view);
+        await view.InitializeAsync(Path.Combine(output, "browser-data"), assets);
+        await view.EvaluateForVerificationAsync("const cleanupFixture=" + File.ReadAllText(fixture) +
+            ";cleanupFixture.manualCleanupAvailable=true;RelayUI.receive({type:'snapshot',data:cleanupFixture});RelayUI.route({view:'settings',scope:'storage'});");
+        await view.EvaluateForVerificationAsync("""
+            RelayUI.receive({type:'cleanup-analyze',data:{planId:'fixture',observedAt:'2026-11-02T01:59:00',
+              protectedFrom:'2026-11-01',observedBytes:6291456,protectedBytes:2097152,partial:false,
+              entries:[{path:'logs\\mcp\\20261030.log',bytes:4194304}],
+              protected:[{path:'logs\\mcp\\20261101.log',bytes:2097152,protection:'Journée protégée'}]}});
+            """);
+        foreach (var width in new[] { 1120, 816 })
+        {
+            window.ClientSize = new Size(width, 728);
+            await view.EvaluateForVerificationAsync("new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))");
+            if (await view.EvaluateForVerificationAsync("""
+                (()=>{const panel=document.querySelector('#app-content');return panel.scrollWidth<=panel.clientWidth+1&&
+                  panel.textContent.includes('01/11/2026')&&!panel.querySelector('[data-action=cleanup-confirm]').disabled})()
+                """) != "true")
+                throw new InvalidOperationException("Cleanup preview or responsive layout is invalid.");
+            await view.CaptureAsync(Path.Combine(output, $"nettoyage-{width}.png"));
+        }
+        await view.EvaluateForVerificationAsync("document.querySelector('[data-action=cleanup-confirm]').click();");
+        if (await view.EvaluateForVerificationAsync("document.querySelector('[role=dialog] [data-action=cleanup-execute]')!==null") != "true")
+            throw new InvalidOperationException("Cleanup confirmation did not display.");
+        Console.WriteLine("MANUAL_CLEANUP_WEBVIEW=PASS");
+    });
+
     // One bounded own-surface scenario; runs against the prototype draft before promotion and production afterwards.
     public static Task Feedback(string assets,string fixture,string output,string label) => OnWindow(async window =>
     {

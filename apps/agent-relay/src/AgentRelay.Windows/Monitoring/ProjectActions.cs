@@ -35,6 +35,26 @@ internal sealed partial class ProjectWindow
         {
             switch (action)
             {
+                case "cleanup-analyze":
+                case "cleanup-execute":
+                    try
+                    {
+                        object result;
+                        if (action == "cleanup-analyze")
+                        {
+                            bool Selected(string name) => message.TryGetProperty(name, out var property) && property.ValueKind == JsonValueKind.True;
+                            result = await Task.Run(() => cleanup.AnalyzeAsync(Selected("logs"), Selected("diagnostics"), lifetime.Token), lifetime.Token);
+                        }
+                        else
+                        {
+                            var plan = Guid.Parse(Value(message, "plan") ?? "");
+                            result = await Task.Run(() => cleanup.ApplyAsync(plan, lifetime.Token), lifetime.Token);
+                        }
+                        if (!released) Presentation.Send(new { type = action, data = result });
+                    }
+                    catch (Exception error) when (!released)
+                    { Presentation.Send(new { type = action, error = error.Message }); }
+                    break;
                 case "close-mcp":
                     if (!McpTransportMonitor.RequestClose(data,id)) McpConnections.RequestClose(data,id); Notice("Fermeture demandée après la requête en cours. Les permissions sont conservées. Sa reconnexion dépend du client."); await Reload(true); break;
                 case "project-state":

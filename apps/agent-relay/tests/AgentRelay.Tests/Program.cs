@@ -7,6 +7,7 @@ if (args.Length == 2 && args[0] == "project-transfer-scope") { await ProjectScen
 if (args.Length == 2 && args[0] == "ap-approval-cancellation") { await ApApprovalCancellationScenarios.RunAsync(Path.GetFullPath(args[1])); return; }
 if (args.Length == 2 && args[0] == "project-lifecycle") { await ProjectLifecycleScenarios.Run(Path.GetFullPath(args[1])); return; }
 if (args.Length == 2 && args[0] == "retry-scheduler-metrics") { await WorkScenarios.MeasureRetryAsync(Path.GetFullPath(args[1])); return; }
+if (args.Length == 2 && args[0] == "manual-cleanup") { await ManualCleanupScenarios.RunAsync(Path.GetFullPath(args[1])); return; }
 if (args.Length == 2 && args[0] == "mcp-connection-inspection") { McpConnectionInspectionScenarios.Run(Path.GetFullPath(args[1])); return; }
 if (args.Length == 2 && args[0] == "promotion-admission") { await VerifyPromotionAsync(Path.GetFullPath(args[1])); return; }
 if (args.Length == 2 && args[0] == "initial-stable-activation") { SelectedUpdateScenarios.Initial(Path.GetFullPath(args[1])); return; }
@@ -35,6 +36,7 @@ if (args.Length == 2 && args[0] == "design-fixture") { await DesignScenarios.See
 if (args.Length == 2 && args[0] == "design-error-fixture") { await DesignScenarios.Seed(Path.GetFullPath(args[1]), includeFailures: true); return; }
 
 if (args.Length == 4 && args[0] == "monitor-polish") { await UiRenderScenarios.Polish(Path.GetFullPath(args[1]),Path.GetFullPath(args[2]),Path.GetFullPath(args[3])); Console.WriteLine("NATIVE_UI_POLISH=PASS"); return; }
+if (args.Length == 4 && args[0] == "manual-cleanup-ui") { await UiRenderScenarios.CleanupPreview(Path.GetFullPath(args[1]), Path.GetFullPath(args[2]), Path.GetFullPath(args[3])); return; }
 
 if (args.Length == 5 && args[0] == "monitor-feedback") { await UiRenderScenarios.Feedback(Path.GetFullPath(args[1]),Path.GetFullPath(args[2]),Path.GetFullPath(args[3]),args[4]); Console.WriteLine("NATIVE_UI_FEEDBACK=PASS"); return; }
 
@@ -122,6 +124,7 @@ using (var busy = new ExchangeService(new SqliteExchangeStore(Path.Combine(data,
 Console.WriteLine("APPLICATION_INTEGRATION=PASS");
 await VerifyPromotionAsync(data + "-promotion");
 await WorkScenarios.Run(data);
+await ManualCleanupScenarios.RunAsync(Path.Combine(data, "manual-cleanup"));
 await SessionScenarios.Run(data + "-sessions");
 await ProjectScenarios.Run(data + "-projects");
 await ProjectApplicationScenarios.Run(data + "-application");

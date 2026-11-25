@@ -11,7 +11,7 @@ Default output is the operator's existing `local/apps/agent-relay/prototypes/int
 
 The targeted native `monitor-feedback` scenario accepts an asset directory and tests expansion, DOM identity, focus/selection, tabs, modal spacing and conflict drafts while capturing only its own WebView. A passed capture remains an observation, separate from operator visual acceptance.
 
-The cleanup tab is a design-only extension in cleanup-preview.js, embedded by the prototype builder but never copied to production assets. Exterior tools let the operator simulate local time around02:00. Analyze, confirm and recheck operate only on a small in-memory fictional list; they cannot inspect/delete real files or call native cleanup. Its design is recorded in the manual-cleanup proposal; implementing it requires a separate GO.
+The cleanup simulation in cleanup-preview.js is embedded by the prototype builder and never shipped as a production asset. Its exterior tools simulate local time around 02:00, item changes and a partial result on a fictional list. The production tab implements the narrower manual cleanup scope described in [the Windows interface guide](../doc/developing/windows-interface.md#manual-storage-cleanup).
 
 Storage review includes three volume summaries, selectable categories (old versions opt-in), frozen candidates, excluded/protected entries, the common details drawer, confirmation/revalidation and a per-item result. Exterior tools simulate a newly used runtime, an unverifiable dependency and partial failure. All runtime usage checks are fictional; no installed process is queried. The protected-day rule is never overridden (evidence `2026-11-02-cleanup-protected-days`).
 

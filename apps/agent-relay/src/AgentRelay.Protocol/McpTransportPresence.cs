@@ -17,13 +17,16 @@ public static class McpTransportPresences
 
     /// <summary>Requests closure at the next safe boundary; does not revoke credentials or replay work.</summary>
     /// <seealso cref="CloseRequested"/>
-    public static void RequestClose(string stateDirectory, Guid instance)
+    public static bool RequestClose(string stateDirectory, Guid instance)
     {
-        if (!Read(stateDirectory).Any(item => item.InstanceId == instance && item.State is not ("offline" or "closed")))
+        var target = Read(stateDirectory).FirstOrDefault(item => item.InstanceId == instance);
+        if (target is null) return false;
+        if (target.State is "offline" or "closed")
             throw new IOException("No active generic transport has that identity.");
         var path = Path.Combine(DirectoryFor(stateDirectory), instance.ToString("N") + ".close");
         McpPrivateFiles.Demand(path);
         File.WriteAllText(path, "Close at a safe boundary; preserve credentials and never replay work.");
+        return true;
     }
     public static void Write(string stateDirectory, McpTransportPresence value)
     {
@@ -40,7 +43,7 @@ public static class McpTransportPresences
         var directory = DirectoryFor(stateDirectory);
         if (!Directory.Exists(directory)) return [];
         var values = new List<McpTransportPresence>();
-        foreach (var path in Directory.EnumerateFiles(directory, "*.json").Order(StringComparer.Ordinal).Take(256))
+        foreach (var path in Directory.EnumerateFiles(directory, "*.json"))
         {
             McpPrivateFiles.Demand(path);
             if (new FileInfo(path).Length > 16384) throw new IOException("Transport presence exceeds its bound.");
@@ -54,7 +57,8 @@ public static class McpTransportPresences
                 try
                 {
                     using var process = Process.GetProcessById(value.ProcessId);
-                    if (process.HasExited || value.ProcessStartedAt is { } started && new DateTimeOffset(process.StartTime.ToUniversalTime()) != started) state = "offline";
+                    if (IsDifferentImage(value, process.ProcessName) || process.HasExited ||
+                        value.ProcessStartedAt is { } started && new DateTimeOffset(process.StartTime.ToUniversalTime()) != started) state = "offline";
                     else if (DateTimeOffset.UtcNow - value.SeenAt > TimeSpan.FromSeconds(5) || value.SeenAt > DateTimeOffset.UtcNow.AddMinutes(1)) state = "unresponsive";
                 }
                 catch (ArgumentException) { state = "offline"; }
@@ -64,4 +68,11 @@ public static class McpTransportPresences
         }
         return values;
     }
+
+    // A retained generic gateway belongs to AgentRelay.Transport. dotnet also hosts the assembly in dev.
+    // Compare the name before reading a recycled, potentially protected process handle.
+    private static bool IsDifferentImage(McpTransportPresence presence, string image) =>
+        presence.BundleDirectory is not null && presence.ProcessStartedAt is not null &&
+        !image.Equals("AgentRelay.Transport", StringComparison.OrdinalIgnoreCase) &&
+        !image.Equals("dotnet", StringComparison.OrdinalIgnoreCase);
 }

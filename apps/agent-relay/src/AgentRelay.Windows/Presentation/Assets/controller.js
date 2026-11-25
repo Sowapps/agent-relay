@@ -5,6 +5,7 @@
  let data=null,toastTimer;
  const fullOperations=new Map();
  const ui={view:'general',project:null,tab:'summary',filter:'all',period:'all',participant:'',kind:'',state:'',advanced:false,generalFeed:'tasks',taskLimit:15,query:'',messageFilter:'all',detail:null,settingScope:'general',projectChange:null,limit:5,sessionId:null,conversationLimit:30};
+ ui.cleanup={logs:true,diagnostics:true,busy:false,preview:null,result:null,error:null};
  const R=window.createRelayRenderer(()=>data,()=>ui);
  const host=(action,values={})=>{
   if(!window.chrome?.webview){if(action!=='ready')toast('Action native indisponible dans cet aperçu.');return;}
@@ -26,7 +27,7 @@
   const openDetails=[...document.querySelectorAll('details[open]')].map(el=>el.id).filter(Boolean);
   C.patch($('#app-nav'),R.nav());
   const current=ui.view==='project'?data.projects.find(p=>p.id===ui.project)?.name:ui.view==='diagnostics'?'Diagnostic du relais':ui.view==='settings'?'Réglages':'Vue générale';
-  const scope={general:'Général',projects:'Projets',mcp:'Connexions MCP'}[ui.settingScope];
+  const scope={general:'Général',projects:'Projets',mcp:'Connexions MCP',storage:'Stockage et nettoyage'}[ui.settingScope];
   const crumbs=ui.view==='project'?['Projets',current,{summary:'Synthèse',tasks:'Tâches',activity:'Activité',messages:'Messages',sessions:'Sessions',conversation:'Conversation',settings:'Réglages'}[ui.tab]]:ui.view==='settings'?['Réglages',scope]:[current];
   C.patch($('#app-topbar'),`<div class="breadcrumb">${crumbs.filter(Boolean).map((text,index)=>`${index?'<span>/</span>':''}<strong>${C.escape(text)}</strong>`).join('')}</div><div class="topbar-meta">Suivi local <i class="dot ${C.escape(data.relay)}"></i></div>`);
   C.patch(content,ui.view==='general'?R.general():ui.view==='project'?R.project():ui.view==='diagnostics'?R.diagnostics():R.settings(),changed);
@@ -81,6 +82,24 @@
   else if(action==='close-mcp'){modal('Fermer cette connexion MCP ?',"<p>La requête engagée pourra se terminer. Aucun travail ne sera rejoué et les permissions restent conservées.</p><p>La reconnexion dépend du client. Une ancienne connexion nécessite une migration initiale par le mainteneur.</p>",C.button('Fermer la connexion','confirm-close-mcp',`data-id="${C.escape(id)}"`,'primary'));}
   else if(action==='confirm-close-mcp'){$('#app-modal').innerHTML='';host('close-mcp',{id});}
   else if(action==='settings-scope'){ui.settingScope=value;render();}
+  else if(action==='cleanup-category'){
+   const c=ui.cleanup;if(c.busy||!['logs','diagnostics'].includes(value))return;
+   c[value]=!c[value];c.preview=null;c.error=null;render();
+  }
+  else if(action==='cleanup-analyze'){
+   const c=ui.cleanup;if(c.busy||!c.logs&&!c.diagnostics)return;
+   c.busy=true;c.preview=null;c.result=null;c.error=null;render();
+   host(action,{logs:c.logs,diagnostics:c.diagnostics});
+  }
+  else if(action==='cleanup-confirm'){
+   const c=ui.cleanup,p=c.preview;if(c.busy||!p?.entries.length)return;
+   modal('Confirmer le nettoyage',`<p>${p.entries.length} fichier(s) de cet aperçu seront revérifiés avant toute suppression.</p><p>Les fichiers utilisés, modifiés ou protégés seront conservés.</p>`,
+    C.button('Annuler','close-modal','','quiet')+C.button('Confirmer le nettoyage','cleanup-execute','','primary'));
+  }
+  else if(action==='cleanup-execute'){
+   const c=ui.cleanup,p=c.preview;if(c.busy||!p?.entries.length)return;
+   c.busy=true;c.preview=null;c.error=null;$('#app-modal').innerHTML='';render();host(action,{plan:p.planId});
+  }
   else if(action==='project-settings'){const project=el.dataset.project||ui.project;if(project)navigate('project',project,'settings');}
   else if(action==='manage-projects'){navigate('settings');ui.settingScope='projects';render();}
   else if(action==='project-state'){
@@ -126,6 +145,11 @@
  });
  function receive(message){
   if(!message||typeof message!=='object')return;
+  if(message.type==='cleanup-analyze'||message.type==='cleanup-execute'){
+   const c=ui.cleanup;c.busy=false;c.error=message.error||null;
+   if(message.type==='cleanup-analyze')c.preview=message.data||null;else c.result=message.data||null;
+   render();return;
+  }
   if(message.type==='snapshot'){
    if(message.data?.schemaVersion!==1)return;
    const next=message.data;
@@ -153,7 +177,7 @@
   Object.assign(ui,{generalFeed:parameters.feed||'tasks',advanced:false,messageFilter:'all'});
   if(parameters.project)navigate('project',parameters.project,parameters.tab||'summary');else if(parameters.view)navigate(parameters.view);else navigate('general');
   if(parameters.feed){ui.generalFeed=parameters.feed;render();}
-  if(parameters.scope&&['general','projects','mcp'].includes(parameters.scope)){ui.settingScope=parameters.scope;render();}
+  if(['general','projects','mcp'].includes(parameters.scope)||parameters.scope==='storage'&&data.manualCleanupAvailable){ui.settingScope=parameters.scope;render();}
   if(parameters.session){ui.sessionId=parameters.session;ui.tab='conversation';render();}
   if(parameters.detail)detail(parameters.detail,parameters.id);
  }};
