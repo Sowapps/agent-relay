@@ -35,6 +35,8 @@ def main():
         return terminal_control.signal(root, profile, request['sessionId'], request['action'], request.get('approvalRevision'))
     if action in ['prepare_approval_stop', 'confirm_approval_stop'] and profile != 'command':
         return approval_stop.recover(root, profile, request, action == 'confirm_approval_stop')
+    if action == 'verify_dormant_approval' and profile != 'command':
+        return approval_stop.verify_dormant(root, profile, request)
     if action == 'inbox':
         if profile=='command':return {'messages':[]}
         return message_page(root,profile,request.get('after',0),request.get('limit',50)) if context(root,profile) else {'messages':messages(root,profile)}

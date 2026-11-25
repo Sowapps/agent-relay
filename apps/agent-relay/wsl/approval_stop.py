@@ -9,6 +9,7 @@ import uuid
 
 from native_clients import _process_fields, generation_identity, owned_session_root, process_stamp, tmux
 from native_errors import NativeFailure
+from native_dispatch import NativeDispatch
 from native_layout import owned_socket_absent
 from relay_files import commit, context, find_reply
 
@@ -88,15 +89,15 @@ def pane(root, client):
     return leader, stamp['generation'], fields[2]
 
 
-def recover(root, client, request, stop):
+def owned_dispatch(root, client, request, *, latest=False):
     root, session = owned_session_root(root)
     identifier = str(uuid.UUID(request['requestId']))
     binding = context(root, client)
     scope = request['scope']
-    if binding.get('sessionId') != session or any(binding.get(key) != scope.get(key) for key in ('projectId', 'senderId', 'recipientId')):
+    if not binding or binding.get('sessionId') != session or any(binding.get(key) != scope.get(key) for key in ('projectId', 'senderId', 'recipientId')):
         raise refuse('The retained approval does not belong to this native session.')
     data = root / client / 'data'
-    dispatch = data / f'dispatch-{identifier}.json'
+    dispatch = NativeDispatch(data, identifier).latest() if latest else NativeDispatch(data, identifier).marker(1)
     if dispatch.is_symlink() or not dispatch.is_file():
         raise refuse('No matching native dispatch intent is available for this approval.')
     size = dispatch.stat()
@@ -106,6 +107,30 @@ def recover(root, client, request, stop):
     submitted = json.loads(raw)['request']
     if submitted.get('id') != identifier or submitted.get('scope') != scope:
         raise refuse('The native dispatch belongs to a different request or scope.')
+    return root, identifier, data, dispatch, size, raw, submitted
+
+
+def verify_dormant(root, client, request):
+    if client != 'codex':
+        return {'dormant': False}
+    root, identifier, data, _, _, _, submitted = owned_dispatch(root, client, request, latest=True)
+    if not stop_has_not_started(data, identifier) or pane(root, client) is not None:
+        return {'dormant': False}
+    from native_clients import demand_pinned_conversation
+    demand_pinned_conversation(root / client, client, context(root, client))
+    original = generation_identity(submitted.get('expectedNativeGeneration'))
+    initial = generation_identity(submitted.get('expectedDistributionGeneration'))
+    current = process_stamp(1)
+    observed = generation_identity(current['generation']) if current else None
+    if not original or not initial or not observed or original[0] != initial[0] or initial[1] != 1 or original[1] <= 1:
+        return {'dormant': False}
+    if initial[0] == observed[0] and (initial != observed or tracked(owned_processes(), original[1])):
+        return {'dormant': False}
+    return {'dormant': pane(root, client) is None}
+
+
+def recover(root, client, request, stop):
+    root, identifier, data, dispatch, size, raw, submitted = owned_dispatch(root, client, request)
     dispatch_hash = hashlib.sha256(raw).hexdigest()
     if any(path != dispatch and path.stat().st_mtime_ns >= size.st_mtime_ns for path in data.glob('dispatch-*.json')):
         raise refuse('A later native dispatch may own the terminal. No stop was attempted.')

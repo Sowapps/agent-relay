@@ -81,6 +81,19 @@ public sealed class ScopedSessions(SessionService sessions, AgentControl agents,
         context.ValidateDefinition(record.Definition!);
         return await sessions.CloseApprovalSessionAsync(record, request, token);
     }
+    public async Task<bool> VerifyDormantApprovalAsync(WorkRequest request, CancellationToken token)
+    {
+        var record = await context.RecordAsync(request.SessionId!.Value, token);
+        context.ValidateDefinition(record.Definition!);
+        return await sessions.VerifyDormantApprovalAsync(record, request, token);
+    }
+    public async Task<SessionSnapshot> ReopenPinnedAsync(Guid id, CancellationToken token)
+    {
+        var record = await context.RecordAsync(id, token);
+        context.ValidateDefinition(record.Definition!);
+        await sessions.ReopenAsync(id, token, requirePinnedConversation: true);
+        return await InspectAsync(id, token);
+    }
     public Task<IReadOnlyList<string>> RefreshMessagesAsync(Guid projectId, Guid recipientId, Guid? sessionId, CancellationToken token)
         => inbox.RefreshAsync(projectId, recipientId, sessionId, token);
 }

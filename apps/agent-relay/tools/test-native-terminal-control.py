@@ -106,12 +106,27 @@ def exercise(base):
         assert 'Allow relay_project.get_connection_status?' in mcp['text']
         assert bridge('signal_terminal', action='refuse', approvalRevision=mcp['revision'])['keySent']
         wait_for(lambda: seen.read_bytes() == b'y\x1b\x1b')
+        def discovery_screen(detail):
+            return ('relay_project needs your approval.\n'
+                    f'Confirm relay_project.discover_operations ({detail})\n'
+                    '› 1. Yes, provide the requested info (y)\n'
+                    '  2. No, but continue without it (n)\n'
+                    '  3. Cancel this request (esc)\n'
+                    'Press enter to confirm or esc to cancel\n')
+        for decision, expected in (('approve', b'y\x1b\x1by'), ('refuse', b'y\x1b\x1byn')):
+            screen.write_text(discovery_screen(decision))
+            tmux(root, 'send-keys', '-t', 'codex', 'r')
+            wait_for(lambda: f'({decision})' in read(root, 'codex', session)['text'])
+            snapshot = bridge('read_terminal')['approval']
+            assert 'relay_project.discover_operations' in snapshot['text']
+            assert bridge('signal_terminal', action=decision, approvalRevision=snapshot['revision'])['keySent']
+            wait_for(lambda: seen.read_bytes() == expected)
         screen.write_text('Unknown modal.\nWould you like to run the following command?\nHistorical heading only.\n')
         tmux(root, 'send-keys', '-t', 'codex', 'r')
         wait_for(lambda: 'Unknown modal.' in read(root, 'codex', session)['text'])
         assert read(root, 'codex', session)['approval'] is None
         assert bridge('signal_terminal', action='escape')['keySent']
-        wait_for(lambda: seen.read_bytes() == b'y\x1b\x1b\x1b')
+        wait_for(lambda: seen.read_bytes() == b'y\x1b\x1byn\x1b')
         assert not other_keys.exists()
         print('NATIVE_TERMINAL_CONTROL=PASS (fresh one-time decision, stale/replay refusal, unknown prompt Escape, other pane untouched)')
     finally:

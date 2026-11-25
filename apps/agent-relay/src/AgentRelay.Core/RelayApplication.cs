@@ -27,6 +27,9 @@ public interface IRelaySessions
     Task<SessionSnapshot> InspectForArchiveAsync(Guid id, CancellationToken token) => InspectAsync(id, token);
     Task<ReadPage<SessionSnapshot>> ListAsync(ReadQuery query, Guid ownerId, CancellationToken token);
     Task<SessionSnapshot> ControlAsync(Guid id, string action, CancellationToken token);
+    Task<bool> VerifyDormantApprovalAsync(WorkRequest request, CancellationToken token) => Task.FromResult(false);
+    Task<SessionSnapshot> ReopenPinnedAsync(Guid id, CancellationToken token) =>
+        throw new RelayException("adapter_unavailable", "The session adapter cannot verify a pinned reopen.", false);
     Task<SessionTerminal> ReadTerminalAsync(Guid id, CancellationToken token) =>
         throw new RelayException("adapter_unavailable", "This session adapter has no interactive terminal.", false);
     Task<TerminalSignalReceipt> SignalTerminalAsync(Guid id, string action, string? approvalRevision, CancellationToken token) =>
@@ -137,6 +140,17 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
             throw new RelayException("invalid_operation", "Unknown session action.");
         if (approvalRequestId is not null && action != "close")
             throw new RelayException("invalid_request", "An approval request can only guard a session close.", false);
+        if (action == "reopen" && !work.IsSessionActive(id))
+        {
+            var approvals = await work.RetainedApprovalsAsync(id, token);
+            if (approvals is [{ State: "approval_expired", SessionClosedAt: null } expired] &&
+                await sessions.VerifyDormantApprovalAsync(expired.Request, token))
+            {
+                await work.RecordDormantApprovalAsync(expired.Request.Id, token);
+                await work.DemandSessionResolvedAsync(id, token);
+                return await sessions.ReopenPinnedAsync(id, token);
+            }
+        }
         if (action is "start" or "reopen") await work.DemandSessionResolvedAsync(id, token);
         if (action.StartsWith("rename:", StringComparison.Ordinal)) action = "rename:" + SessionNames.Normalize(action[7..]);
         if (action == "close" && work.IsSessionActive(id))

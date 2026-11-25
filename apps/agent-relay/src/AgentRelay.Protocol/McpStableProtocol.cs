@@ -16,18 +16,19 @@ public static class McpStableProtocol
     private static readonly JsonSerializerOptions json = new(JsonSerializerDefaults.Web);
     private static object Id() => new { type = "string", format = "uuid" };
     private static object Text(int maximum) => new { type = "string", minLength = 1, maxLength = maximum };
-    private static JsonElement Tool(string name, string description, object properties, params string[] required) =>
-        JsonSerializer.SerializeToElement(new { name, description, inputSchema = new { type = "object", properties, required, additionalProperties = false } }, json);
+    private static JsonElement Tool(string name, string description, object properties, bool readOnly, params string[] required) =>
+        JsonSerializer.SerializeToElement(new { name, description, inputSchema = new { type = "object", properties, required, additionalProperties = false },
+            annotations = new { readOnlyHint = readOnly } }, json);
     private static readonly IReadOnlyList<JsonElement> tools = Array.AsReadOnly(new[]
     {
-        Tool("get_connection_status", "Read the bound relay's identity, transport compatibility and update state.", new { }),
+        Tool("get_connection_status", "Read the bound relay's identity, transport compatibility and update state.", new { }, true),
         Tool("discover_operations", "Read current public operation schemas and authorized project context. Discovery does not grant execution rights.",
-            new { project_id = Id(), cursor = new { type = "integer", minimum = 0 }, limit = new { type = "integer", minimum = 1, maximum = 100 }, registry_hash = Text(64) }),
+            new { project_id = Id(), cursor = new { type = "integer", minimum = 0 }, limit = new { type = "integer", minimum = 1, maximum = 100 }, registry_hash = Text(64) }, true),
         Tool("invoke_operation", "Invoke an explicit supported operation revision. Retain business request_id in arguments for submitted work; call_id is correlation, not permission or a replay guarantee.",
             new { call_id = Id(), operation_id = Text(100), revision = new { type = "integer", minimum = 1, maximum = int.MaxValue },
                 arguments = new { type = "object", properties = new { }, required = Array.Empty<string>(), additionalProperties = true } },
-            "call_id", "operation_id", "revision", "arguments"),
-        Tool("get_result", "Read a retained operation through the existing scoped policy; never replay it.", new { request_id = Id() }, "request_id")
+            false, "call_id", "operation_id", "revision", "arguments"),
+        Tool("get_result", "Read a retained operation through the existing scoped policy; never replay it.", new { request_id = Id() }, true, "request_id")
     });
 
     public static IReadOnlyList<JsonElement> Tools => tools;

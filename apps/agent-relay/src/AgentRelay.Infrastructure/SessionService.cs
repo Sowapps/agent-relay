@@ -181,14 +181,14 @@ public sealed class SessionService
         return status;
     }
 
-    public async Task<SessionDetail> ReopenAsync(Guid id, CancellationToken token)
+    public async Task<SessionDetail> ReopenAsync(Guid id, CancellationToken token, bool requirePinnedConversation = false)
     {
         var session = await FindAsync(id, token);
         DemandResumable(session);
         var profile = await ResolveAsync(id, session.ProfileId, token, allowClosed: true);
         session = session with { State = "created", UpdatedAt = DateTimeOffset.UtcNow };
         await store.SaveAsync(id, session, token);
-        return new(session, await StartNativeAsync(session, profile, token));
+        return new(session, await StartNativeAsync(session, profile, token, requirePinnedConversation));
     }
 
     private async Task<AgentStatus> StartNativeAsync(RelaySession session, WslProfile profile, CancellationToken token, bool requirePinnedConversation = false)
@@ -229,6 +229,19 @@ public sealed class SessionService
         var receipt = result.Deserialize<TerminalSignalReceipt>(RelayJson.Options);
         return receipt is { KeySent: true } && receipt.Action == action ? receipt :
             throw new RelayException("terminal_signal_unconfirmed", "The adapter did not confirm sending the key. Read the current terminal.", true);
+    }
+
+    internal async Task<bool> VerifyDormantApprovalAsync(RelaySession session, WorkRequest request, CancellationToken token)
+    {
+        if (session.RetiredForCancellationId is not null || session.Definition is not { } definition ||
+            !ProjectPolicy.IsSessionRequest(request, definition)) return false;
+        var profile = await ResolveAsync(session.Id, session.ProfileId, token, allowClosed: true);
+        try
+        {
+            var proof = await bridge.CallAsync(profile, "verify_dormant_approval", new { requestId = request.Id, definition.Scope }, token);
+            return proof.TryGetProperty("dormant", out var dormant) && dormant.ValueKind == JsonValueKind.True;
+        }
+        catch (RelayException error) when (error.Code == "cancellation_unconfirmed") { return false; }
     }
 
     internal async Task<bool> CloseApprovalSessionAsync(RelaySession session, WorkRequest request, CancellationToken token)

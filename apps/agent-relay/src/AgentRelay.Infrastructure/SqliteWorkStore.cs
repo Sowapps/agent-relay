@@ -351,6 +351,16 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
                 Event: canResume ? "approval_resume_verified" : "native_turn_ended", EventAt: now);
         }, token);
 
+    public Task RecordDormantApprovalAsync(Guid id, CancellationToken token) =>
+        WriteTransitionAsync(id, record =>
+        {
+            if (record is not { State: "approval_expired", SessionClosedAt: null,
+                ApprovalResumeVerifiedAt: null, CancellationConfirmedAt: null }) return null;
+            var now = DateTimeOffset.UtcNow;
+            return new(record with { ApprovalResumeVerifiedAt = now, ReplyDispatch = null, UpdatedAt = now },
+                Event: "approval_dormancy_verified", EventAt: now);
+        }, token);
+
     public Task RecordApprovalSessionClosureAsync(Guid id, bool stopped, CancellationToken token) => WriteAsync(id, record =>
     {
         if (record is null || !WorkExecution.ApprovalStopPending(record) || !stopped && record.SessionClosedAt is not null) return null;

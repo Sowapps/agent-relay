@@ -69,6 +69,7 @@ public interface IWorkStore
         throw new RelayException("cancellation_unavailable", "This work store cannot retain the session closure.", false);
     Task RecordApprovalInterruptionAsync(Guid id, CancellationToken token) => Task.CompletedTask;
     Task RecordApprovalSignalAsync(Guid id, string action, CancellationToken token) => Task.CompletedTask;
+    Task RecordDormantApprovalAsync(Guid id, CancellationToken token) => Task.CompletedTask;
     Task<bool> SessionHasDeferredWorkAsync(Guid id, CancellationToken token, bool includeReplies = false) => Task.FromResult(false);
     Task<IReadOnlyList<WorkRecord>> DueRetriesAsync(DateTimeOffset now, CancellationToken token) => Task.FromResult<IReadOnlyList<WorkRecord>>([]);
     Task<bool> ClaimRetryAsync(Guid id, DateTimeOffset now, CancellationToken token) => Task.FromResult(false);
@@ -239,6 +240,7 @@ public sealed class WorkService : IAsyncDisposable
 
     public Task<IReadOnlyList<WorkRecord>> RetainedApprovalsAsync(Guid sessionId, CancellationToken token) =>
         store.RetainedApprovalsAsync(sessionId, token);
+    internal Task RecordDormantApprovalAsync(Guid id, CancellationToken token) => store.RecordDormantApprovalAsync(id, token);
 
     public async Task ResumeDueRetriesAsync(DateTimeOffset now, CancellationToken token)
     {

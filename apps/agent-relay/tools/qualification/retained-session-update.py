@@ -112,11 +112,16 @@ while True:
             with (history/(native_id+'.jsonl')).open('a') as stream:
                 stream.write(json.dumps({'type':'event_msg','payload':dict(type=kind,turn_id=turn,**values)})+'\n')
         append_event('item_completed',item={'type':'UserMessage','content':[{'type':'text','text':prompt}]})
-        print("Allow relay_project.get_connection_status?\n1. Yes, proceed (y)\n2. No, continue without running it (esc)\nPress enter to confirm or esc to cancel",flush=True)
+        print("relay_project needs your approval.\nConfirm relay_project.discover_operations\n1. Yes, provide the requested info (y)\n2. No, but continue without it (n)\n3. Cancel this request (esc)\nPress enter to confirm or esc to cancel",flush=True)
         while os.read(0,1)!=b'\x1b': pass
         print('\033[2J\033[3J\033[H',end='',flush=True)
         append_event('task_complete')
         continue
+    if b'qualify dormant approval' in content:
+        print('Would you like to run the following command?',flush=True)
+        until=time.monotonic()+65
+        while not (work/'dormant-exit').exists() and time.monotonic()<until: time.sleep(.1)
+        sys.exit(0)
     if b'hold for update' in content:
         commit(work/'entered.json', {'requestId':identifier})
         end=time.monotonic()+100
@@ -165,7 +170,7 @@ def wait_for(check, description, seconds=35):
 
 
 def qualify(baseline, candidate, output, distribution, linux_user, verify_native_retry=False, verify_approval_resume=False,
-            candidate_release=None, verify_detached_reply=False):
+            candidate_release=None, verify_detached_reply=False, verify_dormant_approval=False):
     output.mkdir()
     installation = output / 'installation'
     data = installation / 'var/apps/agent-relay/default'
@@ -359,12 +364,20 @@ p=json.load(sys.stdin); root=pathlib.Path(p['path']); root.mkdir(mode=0o700)
                     call('send_session_message', {'session_id': session, 'request_id': request, 'text': 'qualify approval escape'})
                     wait_for(lambda: retained(request).get('state') == 'awaiting_approval', 'Native MCP approval was not detected')
                     approval = call('read_session_terminal', {'session_id': session})['terminal']['approval']
-                    assert 'Allow relay_project.get_connection_status?' in approval['text']
+                    assert 'relay_project.discover_operations' in approval['text']
+                    discovery = next(tool for tool in client.call('tools/list')['tools'] if tool['name'] == 'discover_operations')
+                    assert discovery['annotations']['readOnlyHint'] is True
                     # Set the clock outcome only in the isolated fixture, without waiting two hours.
                     with sqlite3.connect(data / 'relay.sqlite') as db:
                         payload = retained(request)
                         payload.update(state='approval_expired', approvalExpiredAt=payload['updatedAt'], errorCode='approval_expired')
                         db.execute('UPDATE work SET payload=? WHERE id=?', (json.dumps(payload), request))
+                    try:
+                        call('reopen_session', {'session_id': session})
+                    except McpRemoteError as refusal:
+                        assert refusal.error['code'] == 'session_awaiting_approval', refusal.error
+                    else:
+                        raise AssertionError('Relay reopened a live expired approval')
                     before = call('get_result', {'request_id': request})
                     assert before['cancellation']['sessionRequiresResolution']
                     escape_receipt = call('send_session_escape', {'session_id': session})
@@ -382,6 +395,31 @@ p=json.load(sys.stdin); root=pathlib.Path(p['path']); root.mkdir(mode=0o700)
                     wait_for(lambda: completed(resumed), 'The same verified session did not accept a new message')
                     result['expiredApprovalResume'] = {'requestId': request, 'nextRequestId': resumed,
                         'sessionId': session, 'sameNativeGeneration': True, 'proof': resolved['approval']}
+                if verify_dormant_approval:
+                    old = str(uuid.uuid4())
+                    call('send_session_message', {'session_id': session, 'request_id': old, 'text': 'qualify dormant approval'})
+                    wait_for(lambda: retained(old).get('state') == 'awaiting_approval', 'Fixture approval never became pending')
+                    with sqlite3.connect(data / 'relay.sqlite') as database:
+                        row = retained(old)
+                        row.update(state='approval_expired', approvalExpiredAt=row['updatedAt'], errorCode='approval_expired')
+                        database.execute('UPDATE work SET payload=? WHERE id=?', (json.dumps(row), old))
+                    wsl("import json,pathlib,sys; pathlib.Path(json.load(sys.stdin)).touch()", native_workspace + '/dormant-exit')
+                    def dormant():
+                        snapshot = call('get_session', {'session_id': session})['session']
+                        return snapshot if snapshot['state'] == 'not_started' and not snapshot['workActive'] else None
+                    wait_for(dormant, 'Original terminal did not stop')
+                    assert retained(old).get('approvalResumeVerifiedAt') is None
+                    call('reopen_session', {'session_id': session})
+                    reopened_dormant = wait_for(ready, 'The verified dormant session could not reopen')
+                    assert reopened_dormant['nativeConversationId'] == initial['nativeId']
+                    old_result = retained(old)
+                    assert old_result['state'] == 'approval_expired' and old_result.get('approvalResumeVerifiedAt')
+                    assert not old_result.get('nativeTurnEnded') and len(old_result['nativeAttempts']) == 1
+                    new = str(uuid.uuid4())
+                    call('send_session_message', {'session_id': session, 'request_id': new, 'text': 'new work after verified dormancy'})
+                    wait_for(lambda: completed(new), 'New message after verified dormancy did not return')
+                    result['dormantApprovalResume'] = {'requestId': old, 'sessionId': session, 'nextRequestId': new,
+                        'previousState': 'not_started', 'retainedExpiry': True, 'previousAttempts': 1, 'sameConversation': True}
                 if verify_detached_reply:
                     waiting = str(uuid.uuid4())
                     call('send_session_message', {'session_id': session, 'request_id': waiting, 'text': 'await reply across host restart'})
@@ -440,10 +478,11 @@ if __name__ == '__main__':
     parser.add_argument('--verify-native-retry', action='store_true')
     parser.add_argument('--verify-approval-resume', action='store_true')
     parser.add_argument('--verify-detached-reply', action='store_true')
+    parser.add_argument('--verify-dormant-approval', action='store_true')
     args = parser.parse_args()
     target = args.output.resolve()
     if not target.is_relative_to(Path(__file__).resolve().parents[4] / 'local/apps/agent-relay/qualification') or target.exists():
         parser.error('Select a new owned local qualification directory.')
     qualify(args.baseline.resolve(), args.candidate.resolve() if args.candidate else None, target, args.distribution, args.user,
             args.verify_native_retry, args.verify_approval_resume, args.candidate_release.resolve() if args.candidate_release else None,
-            args.verify_detached_reply)
+            args.verify_detached_reply, args.verify_dormant_approval)

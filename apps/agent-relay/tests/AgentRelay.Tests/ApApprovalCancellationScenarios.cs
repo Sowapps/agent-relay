@@ -27,6 +27,20 @@ internal static class ApApprovalCancellationScenarios
         await RefusesAsync("operation_already_finished", () => app.CancelAsync(caller, finished.Request.Id, token));
         Check(await store.FindAsync(finished.Request.Id, token) == finished, "Cancellation changed a finished result.");
 
+        var dormant = request with { Id = Guid.NewGuid() };
+        await store.SaveAsync(new(dormant, "approval_expired", now, now,
+            ErrorCode: "approval_expired", ApprovalExpiredAt: now, ApprovalStopRequestedAt: now), token);
+        await RefusesAsync("session_awaiting_approval", () => app.ControlSessionAsync(caller, session.Id, "reopen", token));
+        backend.DormancyVerified = true;
+        await app.ControlSessionAsync(caller, session.Id, "reopen", token);
+        backend.DormancyVerified = false;
+        Check(backend.PinnedReopens == 1 && await store.FindAsync(dormant.Id, token) is
+            { State: "approval_expired", ApprovalResumeVerifiedAt: not null, NativeTurnEnded: false, CancellationConfirmedAt: null },
+            "Verified dormancy keeps expired history and uncertainty, and reopens the pinned session without a replay.");
+        var dormantEvents = await new ProjectJournal(database).EventsAsync(new(project), token);
+        Check(dormantEvents.Items.Any(item => item.RequestId == dormant.Id && item.State == "approval_dormancy_verified"),
+            "Dormancy evidence is retained in the work journal.");
+
         var undisplayed = request with { Id = Guid.NewGuid() };
         await store.SaveAsync(new(undisplayed, "awaiting_approval", now, now), token);
         Check((await app.ReadSessionTerminalAsync(caller, session.Id, token)).Approval is null,
@@ -322,6 +336,14 @@ internal static class ApApprovalCancellationScenarios
             Task.FromResult(new SessionTerminal("fixture", "Prompt", RecognizedApproval ? new(new('a', 64), "Fixture approval") : null));
         public Task<TerminalSignalReceipt> SignalTerminalAsync(Guid id, string action, string? approvalRevision, CancellationToken token) =>
             Task.FromResult(new TerminalSignalReceipt(action, action == "escape" || action == "refuse" && RecognizedApproval));
+        public bool DormancyVerified { get; set; }
+        public int PinnedReopens { get; private set; }
+        public Task<bool> VerifyDormantApprovalAsync(WorkRequest request, CancellationToken token) => Task.FromResult(DormancyVerified);
+        public Task<SessionSnapshot> ReopenPinnedAsync(Guid id, CancellationToken token)
+        {
+            PinnedReopens++;
+            return GetAsync(id, token);
+        }
         public Task<SessionSnapshot> ControlAsync(Guid id, string action, CancellationToken token) => GetAsync(id, token);
         public Task<ReadPage<SessionSnapshot>> ListAsync(ReadQuery query, Guid ownerId, CancellationToken token) => Task.FromResult(new ReadPage<SessionSnapshot>([retained], null, false));
         public Task<IReadOnlyList<string>> RefreshMessagesAsync(Guid projectId, Guid recipientId, Guid? sessionId, CancellationToken token) => Task.FromResult<IReadOnlyList<string>>([]);

@@ -99,6 +99,19 @@ def submit_prompt(root, client, identifier, prompt, target=None):
     tmux(root, 'send-keys', '-t', target, 'Enter')
 
 
+def demand_pinned_conversation(folder, client, binding):
+    pinned = folder / 'native-conversation.json'
+    if not binding or not pinned.is_file():
+        raise NativeFailure('context_lost', 'The original conversation identity could not be verified.', False)
+    pinned_id = str(uuid.UUID(json.loads(pinned.read_text())['id']))
+    if client == 'codex':
+        has_history = any(path.name.endswith(pinned_id + '.jsonl') for path in conversation_logs(folder))
+    else:
+        has_history = pinned_id == binding['sessionId'] and any((folder / 'config/projects').rglob(pinned_id + '.jsonl'))
+    if not has_history:
+        raise NativeFailure('context_lost', 'The original native conversation history is unavailable.', False)
+
+
 def start(root, client, allow_work=False, resume=False, require_pinned=False, participant_mcp=None):
     """Start without a model; @see control for the complementary owned-runtime lifecycle."""
     folder = root / client
@@ -107,15 +120,9 @@ def start(root, client, allow_work=False, resume=False, require_pinned=False, pa
     pinned = folder / 'native-conversation.json'
     codex_logs = tuple(conversation_logs(folder)) if client == 'codex' and resume else ()
     if require_pinned:
-        if not binding or not resume or not pinned.is_file():
+        if not resume:
             raise NativeFailure('context_lost', 'The original conversation identity could not be verified.', False)
-        pinned_id = str(uuid.UUID(json.loads(pinned.read_text())['id']))
-        if client == 'codex':
-            has_history = any(path.name.endswith(pinned_id + '.jsonl') for path in codex_logs)
-        else:
-            has_history = pinned_id == binding['sessionId'] and any((folder / 'config/projects').rglob(pinned_id + '.jsonl'))
-        if not has_history:
-            raise NativeFailure('context_lost', 'The original native conversation history is unavailable.', False)
+        demand_pinned_conversation(folder, client, binding)
     if tmux(root, 'has-session', '-t', client, check=False).returncode == 0:
         dead = tmux(root, 'display-message', '-p', '-t', client, '#{pane_dead}').stdout.strip() == '1'
         if dead:
