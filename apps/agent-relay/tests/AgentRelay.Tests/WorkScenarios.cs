@@ -94,7 +94,8 @@ internal static class WorkScenarios
         await new ReplyMonitor(reopened, restarted, null).SweepAsync(token);
         var reply = await reopened.FindBoundReplyAsync(message, token);
         Assert(restarted.Dispatches == 0 && reply?.InReplyTo == message.Id && reply.RecipientEndpointId == scope.SenderId &&
-            (await reopened.FindAsync(message.Id, token))?.State == "completed",
+            (await reopened.FindAsync(message.Id, token)) is { State: "completed", Result.Origin: var origin } &&
+            origin == scope.RecipientId.ToString("D"),
             "restart delivers the correlated reply without sending a second prompt");
 
         var closed = message with { Id = Guid.NewGuid() };
@@ -145,8 +146,13 @@ internal static class WorkScenarios
             var stamp = DateTimeOffset.UtcNow;
             var reply = new InboxMessage(Guid.NewGuid(), scope.RecipientId.ToString("D"), "fixture", "sender", "reply",
                 request.Id, stamp, request.SessionId, scope.ProjectId, scope.RecipientId, scope.SenderId);
-            await store.AddInboxAsync(reply, token);
-            await store.AttachNativeReplyAsync(request.Id, scope, request.SessionId!.Value, new(reply.Sender, reply.Text), stamp, token);
+            var sessionId = request.SessionId!.Value;
+            var definition = new SessionDefinition(sessionId, "fixture", scope, new(scope.RecipientId, "fixture", "wsl-agent", "fixture"),
+                new(Guid.NewGuid(), scope.RecipientId, "fixture", "/fixture"), false);
+            var profile = new WslProfile("fixture", "fixture", "fixture", "fixture", "/fixture", "codex", []);
+            var session = new RelaySession(sessionId, "fixture", profile.Id, profile, profile.Root, "ready", stamp, stamp, Definition: definition);
+            var envelope = JsonSerializer.SerializeToElement(new { messages = new[] { reply } }, RelayJson.Options);
+            await new ScopedInbox(null!, null!, store, null!, null!, null!).ImportAsync(session, envelope, token);
         }
     }
 

@@ -59,7 +59,7 @@ public sealed class ScopedInbox(SessionService sessions, WslBridge bridge, Sqlit
                 message = message with { RecipientEndpointId = requested.SenderId };
                 // Retain the receipt first. A concurrently finishing dispatch can reconcile it even after the import cursor advances.
                 await store.AddInboxAsync(message, token);
-                await store.AttachNativeReplyAsync(replyId, requested, record.Id, new(message.Sender, message.Text), message.ReceivedAt, token);
+                await store.AttachNativeReplyAsync(replyId, requested, record.Id, new(message.ProfileId, message.Text), message.ReceivedAt, token);
                 continue;
             }
             await store.AddInboxAsync(message, token);
@@ -70,7 +70,7 @@ public sealed class ScopedInbox(SessionService sessions, WslBridge bridge, Sqlit
     {
         if (record.Request.Scope is not { } scope || record.Request.SessionId is not { } sessionId ||
             await store.FindBoundReplyAsync(record.Request, token) is not { } reply) return record;
-        await store.AttachNativeReplyAsync(record.Request.Id, scope, sessionId, new(reply.Sender, reply.Text), reply.ReceivedAt, token);
+        await store.AttachNativeReplyAsync(record.Request.Id, scope, sessionId, new(scope.RecipientId.ToString("D"), reply.Text), reply.ReceivedAt, token);
         return await store.FindAsync(record.Request.Id, token) ?? record;
     }
 }

@@ -29,7 +29,7 @@ execute_command requires project_id, endpoint_id, workspace_id and command_id. I
 | get_agent_status, start_agent, send_agent_message | Compatibility aliases requiring an explicit session_id |
 
 A session's real workspace is separate from its private runtime/configuration/history. Reopen uses a pinned native conversation UUID; missing identity is context-lost, never an implicit latest conversation. Linux distribution/user/native executable belong to the technical adapter binding.
-Separate sessions can run within maximumConcurrency (default4,1..64). Busy means refused, not queued. Shared workspace writes are serialized by the relay unless explicitly allowed. Avoid concurrent manual terminal input during relay work; tmux access remains available for human takeover and native approvals.
+Separate sessions share the relay's execution capacity (`maximumConcurrency`, default 4, range 1–64). Once a message is handed to the native session, waiting for and importing its reply use separate processing. A `busy` submission is refused and can be retried with its original request ID. Shared workspace writes are serialized by the relay unless explicitly allowed. Avoid concurrent manual terminal input during relay work; tmux access remains available for human takeover and native approvals.
 Check process, native authentication, message MCP and approval state separately. Authentication required means the native account needs login; a broken credential reference is a different failure. After changing Claude account credentials, reopen the idle relay session to refresh its launch environment. Do not retry a task automatically after an uncertain failure.
 
 ## Follow work and messages
