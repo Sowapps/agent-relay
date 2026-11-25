@@ -19,7 +19,7 @@ from complete_update import invoke, recovery_updater
 from deployment import launch
 from host_identity import identity, resolve_host
 from portable_fixture import extract_verified, run
-from relay_mcp import McpRpc
+from relay_mcp import McpRemoteError, McpRpc
 
 
 AGENT = r'''#!/usr/bin/python3
@@ -171,7 +171,7 @@ def qualify(baseline, candidate, output, distribution, linux_user, verify_native
     native_root = '/srv/agent-relay/var/apps/agent-relay/sessions/' + session.replace('-', '')
     native_workspace = '/tmp/agent-relay-update-' + session.replace('-', '')
     result = {'baseVersion': old_version, 'baseSha256': digest, 'sessionId': session, 'initialRequest': first,
-              'secondRequest': second, 'modelCalls': 0, 'stableChanged': False}
+              'secondRequest': second, 'modelCalls': 0, 'stableChanged': False, 'observationRetries': []}
     if candidate_release is not None:
         candidate = output / 'candidate'
         candidate_version, candidate_digest = extract_verified(candidate_release, candidate)
@@ -236,8 +236,19 @@ p=json.load(sys.stdin); root=pathlib.Path(p['path']); root.mkdir(mode=0o700)
         with (output / 'mcp.stderr.log').open('w', encoding='utf-8') as errors:
             with McpRpc([fragment['command'], *fragment['args']], installation, errors) as client:
                 def call(name, args=None, revision=1):
-                    return client.tool('invoke_operation', {'call_id': str(uuid.uuid4()), 'operation_id': name,
-                                       'revision': revision, 'arguments': args or {}}, timeout=60)
+                    invocation = {'call_id': str(uuid.uuid4()), 'operation_id': name,
+                                  'revision': revision, 'arguments': args or {}}
+                    for attempt in range(3):
+                        try:
+                            return client.tool('invoke_operation', invocation, timeout=60)
+                        except McpRemoteError as failure:
+                            if (name not in ('get_session', 'get_result') or attempt == 2 or
+                                    failure.error.get('code') != 'transport_unavailable' or
+                                    failure.error.get('execution') != 'not_started'):
+                                raise
+                            result['observationRetries'].append({'operation': name,
+                                'diagnosticId': failure.error.get('diagnosticId'), 'delaySeconds': attempt + 1})
+                            time.sleep(attempt + 1)
 
                 def ready():
                     observed = call('get_session', {'session_id': session})['session']
