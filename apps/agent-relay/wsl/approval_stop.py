@@ -134,7 +134,7 @@ def verify_dormant(root, client, request):
     return {'dormant': False, 'reason': 'terminal_reappeared'} if pane(root, client) is not None else {'dormant': True}
 
 
-def recover(root, client, request, stop):
+def recover(root, client, request, stop, *, verify_closed=False):
     root, identifier, data, dispatch, size, raw, submitted = owned_dispatch(root, client, request)
     dispatch_hash = hashlib.sha256(raw).hexdigest()
     if any(path != dispatch and path.stat().st_mtime_ns >= size.st_mtime_ns for path in data.glob('dispatch-*.json')):
@@ -162,6 +162,8 @@ def recover(root, client, request, stop):
                 identifier, dispatch_hash, generation, dispatched_distro, original[1]):
             raise refuse('The retained native stop proof belongs to a different dispatch.')
     else:
+        if verify_closed:
+            raise refuse('The closed terminal has no retained approval stop proof. Inspect the original request.')
         if find_reply(root, client, identifier):
             raise NativeFailure('approval_already_resolved', 'A final native reply exists. Read the inbox before closing.', False)
         if stop:
@@ -183,6 +185,13 @@ def recover(root, client, request, stop):
 
     if current is not None and current != (proof['leader'], generation, proof['terminal']):
         raise refuse('The terminal is now owned by another runtime. No stop was attempted.')
+    if verify_closed:
+        if not kernel_changed and distro != dispatched_distro:
+            raise refuse('The original WSL process namespace cannot be verified on the same kernel.')
+        remaining = {} if kernel_changed else tracked(owned_processes(), proof['leader'], proof['processes'])
+        if current is not None or remaining or pane(root, client) is not None:
+            raise NativeFailure('session_runtime_still_active', 'The old session runtime is still present. Inspect it and retry reopening after it exits.', False)
+        return {'requestId': identifier, 'released': True}
     if not proof.get('stopStarted') and find_reply(root, client, identifier):
         raise NativeFailure('approval_already_resolved', 'A final native reply exists. Read the inbox before closing.', False)
     if not stop:

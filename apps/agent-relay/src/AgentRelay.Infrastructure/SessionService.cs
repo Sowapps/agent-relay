@@ -5,7 +5,7 @@ namespace AgentRelay.Infrastructure;
 
 public sealed record RelaySession(Guid Id, string Name, string ProfileId, WslProfile Template, string Root,
     string State, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt, string? Diagnostic = null, string? WindowsWorkspace = null,
-    SessionDefinition? Definition = null, Guid? RetiredForCancellationId = null);
+    SessionDefinition? Definition = null, Guid? RetiredForCancellationId = null, Guid? ReleasedApprovalRequestId = null);
 public sealed record SessionDetail(RelaySession Session, AgentStatus? Agent = null, bool WorkActive = false);
 
 public sealed class SessionService
@@ -205,7 +205,8 @@ public sealed class SessionService
                 profile = profile with { ParticipantMcp = McpTransportInstallation.Launch(dataDirectory, binding, wslStdio: true) };
             }
         }
-        return await agents.StartAsync(profile, token, resume: true, requirePinnedConversation: requirePinnedConversation);
+        return await agents.StartAsync(profile, token, resume: true,
+            requirePinnedConversation: requirePinnedConversation || session.ReleasedApprovalRequestId is not null);
     }
 
     private static void DemandResumable(RelaySession session)
@@ -281,6 +282,17 @@ public sealed class SessionService
         if (session.State != "closed")
             await store.SaveAsync(session.Id, session with { State = "closed", UpdatedAt = DateTimeOffset.UtcNow }, CancellationToken.None);
         return stopped;
+    }
+
+    /// <seealso cref="CloseApprovalSessionAsync"/>
+    internal async Task VerifyClosedApprovalAsync(RelaySession session, WorkRequest request, CancellationToken token)
+    {
+        if (session.State != "closed" || session.RetiredForCancellationId != request.Id ||
+            session.Definition is not { } definition || !ProjectPolicy.IsSessionRequest(request, definition))
+            throw new RelayException("session_closure_changed", "The closed terminal does not match the retained approval. Inspect the original session and request.", false);
+        var profile = await ResolveAsync(session.Id, session.ProfileId, token, allowClosed: true);
+        var proof = await bridge.CallAsync(profile, "verify_closed_approval", new { requestId = request.Id, definition.Scope }, token);
+        DemandApprovalProof(proof, request.Id, "released");
     }
 
     private static void DemandApprovalProof(System.Text.Json.JsonElement proof, Guid requestId, string stage)

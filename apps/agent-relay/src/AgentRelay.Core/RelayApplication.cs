@@ -28,6 +28,8 @@ public interface IRelaySessions
     Task<ReadPage<SessionSnapshot>> ListAsync(ReadQuery query, Guid ownerId, CancellationToken token);
     Task<SessionSnapshot> ControlAsync(Guid id, string action, CancellationToken token);
     Task<bool> VerifyDormantApprovalAsync(WorkRequest request, CancellationToken token) => Task.FromResult(false);
+    Task VerifyClosedApprovalAsync(WorkRequest request, CancellationToken token) =>
+        throw new RelayException("adapter_unavailable", "The session adapter cannot verify the closed approval.", false);
     Task<SessionSnapshot> ReopenPinnedAsync(Guid id, CancellationToken token) =>
         throw new RelayException("adapter_unavailable", "The session adapter cannot verify a pinned reopen.", false);
     Task<SessionTerminal> ReadTerminalAsync(Guid id, CancellationToken token) =>
@@ -143,6 +145,14 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
         if (action == "reopen" && !work.IsSessionActive(id))
         {
             var approvals = await work.RetainedApprovalsAsync(id, token);
+            if (approvals is [{ SessionClosedAt: not null, CancellationConfirmedAt: null } closed] &&
+                session.State == "closed" && WorkExecution.ApprovalStopPending(closed))
+            {
+                await sessions.VerifyClosedApprovalAsync(closed.Request, token);
+                if (!await work.RecordApprovalClosureReleaseAsync(closed.Request.Id, token))
+                    throw new RelayException("session_closure_changed", "The retained closure changed. Inspect the original session and request before retrying.", false);
+                return await sessions.ReopenPinnedAsync(id, token);
+            }
             if (approvals is [{ State: "approval_expired", SessionClosedAt: null } expired] &&
                 await sessions.VerifyDormantApprovalAsync(expired.Request, token))
             {

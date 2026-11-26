@@ -41,6 +41,8 @@ internal sealed class SessionAdapterRouter(IRelaySessions retained, IReadOnlyDic
         await (await SelectAsync(request.SessionId!.Value, token)).VerifyDormantApprovalAsync(request, token);
     public async Task<SessionSnapshot> ReopenPinnedAsync(Guid id, CancellationToken token) =>
         await (await SelectAsync(id, token)).ReopenPinnedAsync(id, token);
+    public async Task VerifyClosedApprovalAsync(WorkRequest request, CancellationToken token) =>
+        await (await SelectAsync(request.SessionId!.Value, token)).VerifyClosedApprovalAsync(request, token);
 
     public async Task<IReadOnlyList<string>> RefreshMessagesAsync(Guid projectId, Guid recipientId, Guid? sessionId, CancellationToken token)
     {

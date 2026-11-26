@@ -105,6 +105,13 @@ def exercise(base, adapter):
         raw = marker.read_bytes()
         boot = dispatch['expectedDistributionGeneration'].split(':', 1)[0]
         assert not parked_approval_stop(data, marker, identifier, raw, dispatch, boot)
+        from native_errors import NativeFailure
+        try:
+            recover(root, 'codex', request, False, verify_closed=True)
+        except NativeFailure as error:
+            assert error.code == 'session_runtime_still_active' and not error.effects_possible
+        else:
+            raise AssertionError('A tracked old runtime did not block reuse')
         os.kill(child, signal.SIGTERM)
         assert recover(root, 'codex', request, True) == {'requestId': identifier, 'stopped': True}
         assert recover(root, 'codex', request, True) == {'requestId': identifier, 'stopped': True}
@@ -149,6 +156,12 @@ def exercise(base, adapter):
             'requestId': writable['requestId'], 'terminalClosed': True, 'stopped': False}
         assert pane(root, 'codex') is None and process_stamp(child) == child_stamp
         os.kill(child, signal.SIGTERM)
+        proof_path = data / f"approval-stop-{writable['requestId']}.json"
+        saved_proof = proof_path.read_bytes()
+        assert recover(root, 'codex', writable, False, verify_closed=True) == {
+            'requestId': writable['requestId'], 'released': True}
+        assert proof_path.read_bytes() == saved_proof
+        assert pane(root, 'independent') is not None
 
         # Encode a prior boot in an isolated copy. The local WSL kernel never restarts.
         previous_boot = str(uuid.uuid4())

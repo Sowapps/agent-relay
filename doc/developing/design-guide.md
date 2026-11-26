@@ -42,6 +42,8 @@ An adapter can coordinate closely related steps. Extract substantial independent
 
 ## Lifecycle, effects and recovery
 
+Use the [Agent Relay failure-isolation target](../../apps/agent-relay/doc/target-spec/functional/system-io.md#failure-isolation-and-recovery). Handle each failure at its owning boundary, preserve evidence and report the precise failure with its recovery path. Model a terminal request result, an uncertain side effect and a reusable session separately.
+
 Design complementary operations together: open/close, acquire/release, stage/publish, enable/disable, migrate/rollback and dispatch/reconcile. Specify shared identity, invariants, effects, durable checkpoints and uncertain outcomes. Acknowledgement is not confirmed completion; interruption is not rollback. Never retry uncertain external work automatically.
 
 Use typed expected failures at boundaries, with stable code and recovery meaning; do not infer authority or execution state from human prose. Retain bounded technical diagnostics separately. Define UTF-8 ownership, serialization and timestamps at process/protocol boundaries rather than relying on machine defaults.

@@ -24,6 +24,10 @@ at Windows sign-out (evidence `2026-10-16-relay-runtime-is-manual-and-durable`).
 Tasks, messages, states, results and errors survive WSL shutdown and relay application restart. These data remain independent of a live terminal session
 (evidence `2026-10-16-relay-runtime-is-manual-and-durable`).
 
+## Failure isolation and recovery
+
+Relay handles and retains errors with an identifiable cause and a recovery path. A failure affects the operation that depends on the failed condition, while unrelated sessions and operations remain available. A verified terminal closure must allow the original conversation to reopen when its prior runtime no longer owns it. The previous request keeps its outcome and any uncertainty about effects, and reopening never replays it (evidence `2026-11-26-relay-failure-isolation-and-recovery`).
+
 ## Worker availability
 
 The product accommodates a stopped worker and a stopped or unstable WSL environment. Worker restart is available on demand or according to an explicit policy. A restart does not implicitly grant

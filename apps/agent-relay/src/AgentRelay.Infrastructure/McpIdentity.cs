@@ -82,7 +82,8 @@ public static class McpErrors
             "cancellation_unconfirmed" => "inspect_native_cancellation",
             "session_retired_for_cancellation" => "open_new_session",
             "workspace_unavailable" or "workspace_identity_changed" => "verify_workspace_assignment",
-            "session_not_ready" or "session_generation_changed" or "session_awaiting_approval" or "context_lost" => "inspect_session",
+            "session_not_ready" or "session_generation_changed" or "session_awaiting_approval" or "context_lost" or
+                "session_runtime_still_active" or "session_closure_changed" => "inspect_session",
             _ => "inspect_before_retry"
         };
         return new { isError = true, structuredContent = new McpFailureEnvelope(new(code, message, recovery, error is RelayException { EffectsPossible: false } ? "not_started" : "unconfirmed", diagnosticId)), content = new[] { new { type = "text", text = message + " [" + code + "]" } } };

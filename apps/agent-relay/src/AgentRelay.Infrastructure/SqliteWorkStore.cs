@@ -10,13 +10,13 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
     internal const string RetryDue = "julianday(json_extract(payload,'$.retry.dueAt'))";
     private const string ResumeUnverified = "json_extract(payload,'$.approvalResumeVerifiedAt') IS NULL";
     internal const string PendingApprovalStop = "json_extract(payload,'$.approvalStopRequestedAt') IS NOT NULL AND json_extract(payload,'$.cancellationConfirmedAt') IS NULL AND " + ResumeUnverified;
-    internal const string RetainedApproval = "((" + ResumeUnverified + ") AND (" +
+    internal const string RetainedApproval = "(json_extract(payload,'$.approvalClosureReleasedAt') IS NULL AND (((" + ResumeUnverified + ") AND (" +
         "json_extract(payload,'$.state')='awaiting_approval' OR (" +
         "json_extract(payload,'$.state')='approval_expired' AND json_extract(payload,'$.cancellationConfirmedAt') IS NULL) OR (" +
         "json_extract(payload,'$.state')='unknown' AND json_extract(payload,'$.sessionClosedAt') IS NULL AND " +
         "json_extract(payload,'$.cancellationConfirmedAt') IS NULL AND " +
         "(json_extract(payload,'$.terminalEscapeSentAt') IS NOT NULL OR json_extract(payload,'$.terminalRefusalSentAt') IS NOT NULL)))) OR (" +
-        PendingApprovalStop + ")";
+        PendingApprovalStop + ")))";
     internal const string RetainedApprovalsQuery =
         "SELECT payload FROM work WHERE json_extract(payload,'$.request.sessionId')=$id AND (" + RetainedApproval + ") LIMIT 2";
     private const string WaitingSince = "coalesce(json_extract(payload,'$.approvalWaitingSince'),json_extract(payload,'$.updatedAt'))";
@@ -100,7 +100,7 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         }, token);
 
     private sealed record Transition(WorkRecord Record, DateTimeOffset? JournalExpiry = null, bool ClearExpiry = false,
-        string? Diagnostic = null, string? Event = null, DateTimeOffset? EventAt = null);
+        string? Diagnostic = null, string? Event = null, DateTimeOffset? EventAt = null, Guid? ReleaseClosedSession = null);
 
     private Task<bool> WriteAsync(Guid id, Func<WorkRecord?, WorkRecord?> change, CancellationToken token) =>
         WriteTransitionAsync(id, existing => change(existing) is { } record ? new(record) : null, token);
@@ -115,12 +115,25 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         var transition = change(existing);
         if (transition is null) return false;
         var record = transition.Record;
+        if (transition.ReleaseClosedSession is { } session)
+        {
+            using var release = connection.CreateCommand(); release.Transaction = transaction;
+            release.CommandText = """
+                UPDATE sessions SET payload = json_set(payload,'$.retiredForCancellationId',NULL,'$.releasedApprovalRequestId',$request)
+                WHERE id=$session AND json_extract(payload,'$.state')='closed'
+                  AND json_extract(payload,'$.retiredForCancellationId')=$request
+                """;
+            release.Parameters.AddWithValue("$session", session.ToString("D"));
+            release.Parameters.AddWithValue("$request", id.ToString("D"));
+            if (await release.ExecuteNonQueryAsync(token) != 1) return false;
+        }
         record = record with { CancellationRequestedAt = record.CancellationRequestedAt ?? existing?.CancellationRequestedAt,
             CancellationConfirmedAt = record.CancellationConfirmedAt ?? existing?.CancellationConfirmedAt,
             SessionClosedAt = record.SessionClosedAt ?? existing?.SessionClosedAt,
             TerminalRefusalSentAt = existing?.TerminalRefusalSentAt ?? record.TerminalRefusalSentAt,
             TerminalEscapeSentAt = existing?.TerminalEscapeSentAt ?? record.TerminalEscapeSentAt,
             ApprovalResumeVerifiedAt = existing?.ApprovalResumeVerifiedAt ?? record.ApprovalResumeVerifiedAt,
+            ApprovalClosureReleasedAt = existing?.ApprovalClosureReleasedAt ?? record.ApprovalClosureReleasedAt,
             NativeTurnEnded = record.NativeTurnEnded || existing?.NativeTurnEnded == true,
             ApprovalWaitingSince = existing?.ApprovalWaitingSince ?? record.ApprovalWaitingSince,
             ApprovalExpiredAt = transition.ClearExpiry ? null : existing?.ApprovalExpiredAt ?? record.ApprovalExpiredAt,
@@ -359,6 +372,16 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
             var now = DateTimeOffset.UtcNow;
             return new(record with { ApprovalResumeVerifiedAt = now, ReplyDispatch = null, UpdatedAt = now },
                 Event: "approval_dormancy_verified", EventAt: now);
+        }, token);
+
+    public Task<bool> RecordApprovalClosureReleaseAsync(Guid id, CancellationToken token) =>
+        WriteTransitionAsync(id, record =>
+        {
+            if (record is not { SessionClosedAt: not null, ApprovalClosureReleasedAt: null, Request.SessionId: { } session } ||
+                !WorkExecution.ApprovalStopPending(record)) return null;
+            var now = DateTimeOffset.UtcNow;
+            return new(record with { ApprovalClosureReleasedAt = now, ReplyDispatch = null },
+                Event: "approval_terminal_release_verified", EventAt: now, ReleaseClosedSession: session);
         }, token);
 
     public Task RecordApprovalSessionClosureAsync(Guid id, bool stopped, CancellationToken token) => WriteAsync(id, record =>

@@ -214,7 +214,46 @@ internal static class ApApprovalCancellationScenarios
                 ApprovalStopRequestedAt: not null, CancellationConfirmedAt: null, TerminalEscapeSentAt: not null } &&
             ProjectReply.WithCancellation(canReuse).Cancellation is { State: "turn_finished", SessionRequiresResolution: false },
             "Reusing the verified session discarded history or claimed a confirmed stop.");
-        Console.WriteLine("AP_APPROVAL_CANCELLATION=PASS (active cancellation, terminal closure without stop proof, late reply, expiry, retained index)");
+        await VerifyClosedApprovalReopenAsync(database, store, settings, scope, caller, token);
+        Console.WriteLine("AP_APPROVAL_CANCELLATION=PASS (active cancellation, verified closed-session reopen, late reply, expiry, retained index)");
+    }
+
+    private static async Task VerifyClosedApprovalReopenAsync(RelayDatabase database, SqliteWorkStore store, ProjectSettingsStore settings,
+        OperationScope scope, CallerIdentity caller, CancellationToken token)
+    {
+        var session = Guid.NewGuid();
+        var request = Guid.NewGuid();
+        var conversation = Guid.NewGuid().ToString("D");
+        var now = DateTimeOffset.UtcNow;
+        var profile = new WslProfile("closed-fixture", "Closed fixture", "unused", "unused", "/fixture", "codex", []);
+        var sessions = new SqliteDocuments<RelaySession>(database, "sessions");
+        await sessions.SaveAsync(session, new(session, "Closed fixture", profile.Id, profile, profile.Root, "closed",
+            now, now, RetiredForCancellationId: request), token);
+        await store.SaveAsync(new(new(request, scope.RecipientId.ToString("D"), "message", SessionId: session, Scope: scope),
+            "failed", now, now, ErrorCode: "session_closed_before_reply", CancellationRequestedAt: now,
+            ApprovalStopRequestedAt: now, SessionClosedAt: now), token);
+        var backend = new Fixture(new(session, "Closed fixture", scope, "closed", conversation));
+        await using var work = new WorkService(store, backend, () => []);
+        var router = new SessionAdapterRouter(backend, new Dictionary<string, IRelaySessions> { ["fixture"] = backend },
+            (_, _) => Task.FromResult("fixture"));
+        var app = new RelayApplication(new(settings), work, router, new ProjectJournal(database));
+        await RefusesAsync("session_runtime_still_active", () => app.ControlSessionAsync(caller, session, "reopen", token));
+        Check((await sessions.FindAsync(session, token))?.RetiredForCancellationId == request && backend.PinnedReopens == 0,
+            "A live old runtime released the session.");
+        backend.ClosureVerified = true;
+        var reopened = await app.ControlSessionAsync(caller, session, "reopen", token);
+        Check(reopened.Id == session && reopened.NativeConversationId == conversation && backend.PinnedReopens == 1,
+            "Verified closure did not reopen the same conversation.");
+        Check(await sessions.FindAsync(session, token) is { RetiredForCancellationId: null, ReleasedApprovalRequestId: var released } && released == request &&
+              await work.ReadAsync(request, token) is { State: "failed", ErrorCode: "session_closed_before_reply",
+                  CancellationConfirmedAt: null, ApprovalClosureReleasedAt: not null } &&
+              (await work.RetainedApprovalsAsync(session, token)).Count == 0,
+            "Reopen lost the outcome or failed to clear both session gates.");
+        await app.ControlSessionAsync(caller, session, "reopen", token);
+        var history = await new ProjectJournal(database).EventsAsync(new(scope.ProjectId, SessionId: session), token);
+        Check(history.Items.Count(item => item.State == "approval_terminal_release_verified") == 1 &&
+              backend.PinnedReopens == 1 && !backend.ActiveMessage.Task.IsCompleted,
+            "Reopening reprocessed the closed approval or replayed the request.");
     }
 
     private static async Task VerifyRetainedReplyAsync(RelayDatabase database, SqliteWorkStore store, WorkRequest template, CancellationToken token)
@@ -339,8 +378,11 @@ internal static class ApApprovalCancellationScenarios
         public Task<TerminalSignalReceipt> SignalTerminalAsync(Guid id, string action, string? approvalRevision, CancellationToken token) =>
             Task.FromResult(new TerminalSignalReceipt(action, action == "escape" || action == "refuse" && RecognizedApproval));
         public bool DormancyVerified { get; set; }
+        public bool ClosureVerified { get; set; }
         public int PinnedReopens { get; private set; }
         public Task<bool> VerifyDormantApprovalAsync(WorkRequest request, CancellationToken token) => Task.FromResult(DormancyVerified);
+        public Task VerifyClosedApprovalAsync(WorkRequest request, CancellationToken token) => ClosureVerified ? Task.CompletedTask :
+            throw new RelayException("session_runtime_still_active", "Fixture old runtime remains.", false);
         public Task<SessionSnapshot> ReopenPinnedAsync(Guid id, CancellationToken token)
         {
             PinnedReopens++;
