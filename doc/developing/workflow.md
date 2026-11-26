@@ -38,6 +38,14 @@ Before operating, find the current procedure in the application documentation an
 
 Add unresolved blockers, errors, defects and process gaps to that register as they are encountered. Reuse the existing ID for a recurrence and update its last observation and occurrence count. Record the observed impact, a proof reference and the next action. After a correction, require a check that reproduces the original scenario before closing the item. Preserve the result in its workstream or observation.
 
+## Requirements traceability and completion
+
+Use the existing workstream checkpoint to account for each explicit operator requirement and constraint, including later corrections. For each item, retain its source or evidence ID, the owning target section where applicable, the agreed scope, the verification criterion, and its current delivery status. Record agreed scope changes explicitly. Apply the same check to authorization limits, deliverables and deployment conditions (evidence `2026-11-26-operator-requirement-completion-check`).
+
+At each lot boundary and after a correction from the operator, reconcile the checkpoint against the request and the current code, delivery state and retained evidence. Keep the working checklist and diagnostic artifacts outside Git. Persist validated requirements in the owning target specification with a named evidence ID.
+
+Before reporting completion, verify every item against evidence that demonstrates its stated result. A documented requirement, an implementation, a successful check and a deployment are separate milestones. Report each unmet requirement with the specific remaining work or dependency. Keep the original requirement visible across turns and handoffs.
+
 ## Tracked objective procedure
 
 Investigation tools must return results relevant to the caller's question by default, rather than raw material for manual model-side filtering. Provide proportionate options for scope, filters, selected fields, grouping, ordering and limits where useful. Indicate applied scope, truncation and unavailable information so a compact result cannot silently imply completeness. Keep detailed output opt-in and retain it in an ignored artifact when needed. Improve an existing tool when this need recurs; do not create duplicate investigative logic or an oversized generic framework.

@@ -28,6 +28,8 @@ Within an authorized workstream, use a dedicated `codex/<scope>` branch and comm
 `TR` invokes the [on-demand technical review procedure](doc/developing/technical-review.md), general or scoped. It authorizes analysis/proposals only: no implementation, commit, push, deployment or data change without separate approval. Registering the shortcut does not run a review.
 
 Start each authorized implementation workstream with a tracked objective. Use its consumption and timing data in the result. Keep user-facing plans and reports short; keep technical detail in the appropriate files.
+
+Apply the [requirements traceability and completion check](doc/developing/workflow.md#requirements-traceability-and-completion) before implementation, after new operator feedback and before reporting completion.
 (evidence `2026-10-28-a-go-authorizes-only-the-one-response-poc`)
 
 ## Recovery across compaction
