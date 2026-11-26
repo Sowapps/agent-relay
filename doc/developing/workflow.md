@@ -5,7 +5,9 @@
 
 ## Authorization and design
 
-Present a concise scope and wait for explicit GO. Information does not authorize execution
+Analyze feedback from the operator or a project agent immediately, without asking for GO. Read the relevant code, documentation and existing traces within the available access boundary. Establish the cause where evidence allows, identify the supported recovery or propose a fix, and retain the findings locally. Separate analysis from changes to code, services, sessions, data and permissions (evidence `2026-11-26-autonomous-feedback-analysis`).
+
+Before implementation or operational changes, present a concise scope and wait for explicit GO. Information does not authorize execution
 (evidence `2026-10-28-work-starts-only-after-explicit-go`). Start a tracked objective and report its final consumption and duration.
 For work that can span compaction, retain the scoped GO, decisions, artifact locations and current checkpoint in a dated workstream record under `notes/workstreams/`.
 Update the checkpoint after material progress so a resumed agent can continue without repeating paid calls or expanding the authorization.
@@ -14,7 +16,7 @@ On an explicit “pause” or “save”, stop starting new work. Preserve the c
 
 Windows qualification must not trigger a Computer Use authorization prompt. Use existing non-interactive qualification methods that respect the approved access boundary. Record visual acceptance as pending if it requires that prompt.
 
-Start each authorized workstream with a functioning tracked objective matching its scope. Resolve an unfinished historical objective before beginning another workstream. A dated note supports recovery but does not replace this prerequisite (evidence `2026-11-12-functional-objective-required`). Follow the objective procedure below.
+Start each authorized implementation workstream with a functioning tracked objective matching its scope. Resolve an unfinished historical objective before beginning another implementation workstream. An existing objective does not delay read-only feedback analysis. A dated note supports recovery but does not replace the tracked objective for implementation (evidence `2026-11-12-functional-objective-required`). Follow the objective procedure below.
 
 The handoff checkpoint contains authorization/limits, objective, branch and last delivered commit, decisions and their owners, completed checks with retained output locations, unresolved risks and the exact next action. Before resuming, read AGENTS, the design guide and the relevant application decision/workstream, then inspect repository and objective state. An old GO or old test is not new authorization or fresh evidence.
 

@@ -11,7 +11,9 @@ For an agent consuming the relay (rather than changing its source), start with t
 
 ## Authorization
 
-Information, prerequisites, availability and acceptance of a proposal are not permission to start work. Present the concrete scope, ask for an explicit GO and wait before starting any workstream.
+Start read-only analysis as soon as the operator or a project agent reports an issue. The [development workflow](doc/developing/workflow.md#authorization-and-design) defines the scope of that analysis.
+
+Information, prerequisites, availability and acceptance of a proposal are not permission to implement it. Present the concrete scope, ask for an explicit GO and wait before implementation or operational changes.
 Request GO directly, without a numbered question label. Numbered questions remain available for actual clarification.
 (evidence `2026-11-01-go-request-format`)
 
@@ -25,7 +27,7 @@ Within an authorized workstream, use a dedicated `codex/<scope>` branch and comm
 
 `TR` invokes the [on-demand technical review procedure](doc/developing/technical-review.md), general or scoped. It authorizes analysis/proposals only: no implementation, commit, push, deployment or data change without separate approval. Registering the shortcut does not run a review.
 
-Start an authorized workstream with a tracked objective. Use its consumption and timing data in the result. Keep user-facing plans and reports short; keep technical detail in the appropriate files.
+Start each authorized implementation workstream with a tracked objective. Use its consumption and timing data in the result. Keep user-facing plans and reports short; keep technical detail in the appropriate files.
 (evidence `2026-10-28-a-go-authorizes-only-the-one-response-poc`)
 
 ## Recovery across compaction
