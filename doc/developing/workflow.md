@@ -42,6 +42,14 @@ Add unresolved blockers, errors, defects and process gaps to that register as th
 
 Use the existing workstream checkpoint to account for each explicit operator requirement and constraint, including later corrections. For each item, retain its source or evidence ID, the owning target section where applicable, the agreed scope, the verification criterion, and its current delivery status. Record agreed scope changes explicitly. Apply the same check to authorization limits, deliverables and deployment conditions (evidence `2026-11-26-operator-requirement-completion-check`).
 
+Give each subject five sections in that checkpoint (evidence `2026-11-26-required-subject-record`):
+
+1. **Operator request and evidence** — record the operator's words or reference the named evidence, and link to the owning target requirement.
+2. **Deductions** — state what follows from the request and current evidence. Identify assumptions and uncertainties explicitly.
+3. **Design** — describe the intended behavior, ownership and scope of the proposed solution.
+4. **Questions and answers** — record each material question and its answer, with its source. Mark open questions as unanswered and write “None” when no question was needed.
+5. **Acceptance criteria** — list the observable conditions for accepting the subject, including relevant failure or recovery behavior. Record the result and its proof against each criterion when checked.
+
 At each lot boundary and after a correction from the operator, reconcile the checkpoint against the request and the current code, delivery state and retained evidence. Keep the working checklist and diagnostic artifacts outside Git. Persist validated requirements in the owning target specification with a named evidence ID.
 
 Before reporting completion, verify every item against evidence that demonstrates its stated result. A documented requirement, an implementation, a successful check and a deployment are separate milestones. Report each unmet requirement with the specific remaining work or dependency. Keep the original requirement visible across turns and handoffs.
