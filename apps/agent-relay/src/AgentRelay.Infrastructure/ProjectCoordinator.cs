@@ -6,7 +6,7 @@ public sealed record ProjectAction(string Name, Guid? ProjectId = null, Guid? En
     Guid? SessionId = null, Guid? RequestId = null, string? Text = null, string? DisplayName = null, string? CommandId = null,
     string? Control = null, ReadQuery? Query = null, ArtifactTransfer? Transfer = null, Guid? TaskId = null, Guid? ActorId = null,
     string? State = null, string? ExpectedState = null, string? ApprovalRevision = null, ProjectAccessChange? Access = null,
-    ProjectReactions? Reactions = null, Guid? AfterRequestId = null);
+    ProjectReactions? Reactions = null, Guid? AfterRequestId = null, RequestChange? RequestChange = null);
 public sealed record ProjectReply(ProjectConfiguration? Configuration = null, SessionSnapshot? Session = null, WorkRecord? Operation = null,
     ReadPage<SessionSnapshot>? Sessions = null, ReadPage<WorkRecord>? Operations = null, ReadPage<InboxMessage>? Messages = null, HostReport? Host = null, ReadPage<WorkEvent>? Events = null, TransferPartial? Partial = null, RelayProject? Project = null,
     CancellationProgress? Cancellation = null, SessionTerminal? Terminal = null, TerminalSignalReceipt? TerminalSignal = null,
@@ -275,6 +275,10 @@ public sealed class ProjectCoordinator : IAsyncDisposable
             "transfer_file" => new(Operation: await Application.TransferAsync(caller, Required(action.SessionId, "sessionId"), action.Transfer ?? throw new RelayException("invalid_request", "Source and destination artifacts are required."), identifier, token)),
             "get_result" => ProjectReply.WithCancellation(await Application.ResultAsync(caller, Required(action.RequestId, "requestId"), token)),
             "cancel_operation" => ProjectReply.WithCancellation(await Application.CancelAsync(caller, Required(action.RequestId, "requestId"), token)),
+            "change_project_request" => ProjectReply.WithCancellation(await Application.ChangeRequestAsync(caller,
+                Required(action.RequestId, "requestId"), action.RequestChange ?? throw new RelayException("invalid_request", "Request change is required.", false), token)),
+            "reschedule_project_request" => new(Operation: await Application.RescheduleRequestAsync(caller,
+                Required(action.RequestId, "requestId"), Required(action.AfterRequestId, "newRequestId"), action.SessionId, action.Text, token)),
             "inspect_transfer" or "cleanup_transfer" => new(Partial: await Application.TransferPartialAsync(caller, Required(action.RequestId, "requestId"), action.Name == "cleanup_transfer", token)),
             "list_results" => new(Operations: await Application.ResultsAsync(caller, action.Query ?? new(Required(action.ProjectId, "projectId")), token)),
             "list_events" => new(Events: await Application.EventsAsync(caller, action.Query ?? new(Required(action.ProjectId, "projectId")), token)),

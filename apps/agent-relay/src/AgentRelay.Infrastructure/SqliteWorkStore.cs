@@ -100,7 +100,8 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         }, token);
 
     private sealed record Transition(WorkRecord Record, DateTimeOffset? JournalExpiry = null, bool ClearExpiry = false,
-        string? Diagnostic = null, string? Event = null, DateTimeOffset? EventAt = null, Guid? ReleaseClosedSession = null);
+        string? Diagnostic = null, string? Event = null, DateTimeOffset? EventAt = null, Guid? ReleaseClosedSession = null,
+        bool ReplaceAdministration = false);
 
     private Task<bool> WriteAsync(Guid id, Func<WorkRecord?, WorkRecord?> change, CancellationToken token) =>
         WriteTransitionAsync(id, existing => change(existing) is { } record ? new(record) : null, token);
@@ -137,7 +138,8 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
             NativeTurnEnded = record.NativeTurnEnded || existing?.NativeTurnEnded == true,
             ApprovalWaitingSince = existing?.ApprovalWaitingSince ?? record.ApprovalWaitingSince,
             ApprovalExpiredAt = transition.ClearExpiry ? null : existing?.ApprovalExpiredAt ?? record.ApprovalExpiredAt,
-            Progress = record.Progress ?? existing?.Progress };
+            Progress = record.Progress ?? existing?.Progress, Administration = transition.ReplaceAdministration
+                ? record.Administration : existing?.Administration ?? record.Administration };
         if (record.State == "completed" && record.Progress is { } progress) record = record with { Progress = progress with { Phase = "completed", Bytes = progress.TotalBytes } };
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -171,14 +173,40 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         {
             if (record is not { CancellationRequestedAt: null }) return null;
             var now = DateTimeOffset.UtcNow;
-            // BeginNativeAttemptAsync uses the same transaction boundary. A claim alone never needs a terminal signal.
-            if (record.State == "retry_wait" || record is { State: "running", Retry: not null, NativeAttempts: [.., { FinishedAt: not null }] })
-                return record with { State = "failed", Retry = null, CancellationRequestedAt = now, UpdatedAt = now,
-                    ErrorCode = WorkExecution.RetryCancelled, Error = "The scheduled retry was cancelled before dispatch." };
+            if (CancelScheduledRetry(record, now) is { } cancelled) return cancelled;
             return (record.State is "pending" or "running" or "awaiting_approval" or "awaiting_reply" ||
                 record is { State: "unknown", ReplyDispatch: not null })
                 ? record with { CancellationRequestedAt = now } : null;
         }, token);
+
+    // A claimed retry remains cancellable until BeginNativeAttemptAsync crosses the same transaction boundary.
+    private static WorkRecord? CancelScheduledRetry(WorkRecord record, DateTimeOffset now) =>
+        record.State == "retry_wait" || record is { State: "running", Retry: not null, NativeAttempts: [.., { FinishedAt: not null }] }
+            ? record with { State = "failed", Retry = null, CancellationRequestedAt = record.CancellationRequestedAt ?? now, UpdatedAt = now,
+                ErrorCode = WorkExecution.RetryCancelled, Error = "The scheduled retry was cancelled before dispatch." }
+            : null;
+
+    public async Task<WorkRecord> ChangeRequestAsync(Guid id, Guid actor, RequestChange change, CancellationToken token)
+    {
+        await WriteTransitionAsync(id, record =>
+        {
+            if (record is null) throw new RelayException("not_found", "Unknown request.", false);
+            var prior = record.Administration;
+            if ((prior?.Revision ?? 0) != change.ExpectedRevision)
+                throw new RelayException("state_conflict", "The request changed. Read its current revision before editing.", false);
+            var disposition = change.Action switch
+            {
+                "disable" => "disabled", "delete" => "deleted", "restore" => "active",
+                _ => prior?.Disposition ?? "active"
+            };
+            var now = DateTimeOffset.UtcNow;
+            var edited = record with { Administration = new(change.ExpectedRevision + 1, disposition, change.Label ?? prior?.Label,
+                change.Note ?? prior?.Note, change.Status ?? prior?.Status, actor, now) };
+            if (disposition is "disabled" or "deleted") edited = CancelScheduledRetry(edited, now) ?? edited;
+            return new(edited, Event: "request_" + change.Action, EventAt: now, ReplaceAdministration: true);
+        }, token);
+        return (await FindAsync(id, token))!;
+    }
 
     public async Task<bool> SessionHasDeferredWorkAsync(Guid id, CancellationToken token, bool includeReplies = false)
     {
@@ -292,6 +320,7 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
         WriteTransitionAsync(id, record =>
         {
             if (record is not { State: "running", CancellationRequestedAt: null } ||
+                record.Administration?.Disposition is "disabled" or "deleted" ||
                 number != (record.NativeAttempts?.Length ?? 0) + 1) return null;
             var now = DateTimeOffset.UtcNow;
             return new(record with { NativeAttempts = [.. record.NativeAttempts ?? [], new(number, now)], ReplyDispatch = dispatch },
@@ -309,6 +338,7 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
             var now = DateTimeOffset.UtcNow;
             if (observation is not null && !IsAwaitingReply(record)) return null;
             parked = retry is not null && record.CancellationRequestedAt is null &&
+                record.Administration?.Disposition is not ("disabled" or "deleted") &&
                 (observation is not null || record.State == "running");
             var state = parked ? "retry_wait" : observation?.Code switch
             {

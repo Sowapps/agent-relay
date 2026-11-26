@@ -60,6 +60,10 @@ internal static class ApApprovalCancellationScenarios
             var active = Guid.NewGuid();
             await app.MessageAsync(caller, session.Id, active, "Active fixture", null, deadline.Token);
             await backend.ActiveMessage.Task.WaitAsync(deadline.Token);
+            await RefusesAsync("approval_stop_mismatch",
+                () => app.ControlSessionAsync(caller, session.Id, "close", deadline.Token, finished.Request.Id));
+            Check(work.IsSessionActive(session.Id) && (await work.ReadAsync(active, deadline.Token)).CancellationRequestedAt is null,
+                "A targeted close for a finished request interrupted another operation.");
             await RefusesAsync("busy", () => app.ControlSessionAsync(caller, session.Id, "close", deadline.Token));
             while (work.IsSessionActive(session.Id))
                 await Task.Delay(10, deadline.Token);

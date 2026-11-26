@@ -10,7 +10,7 @@ public sealed record SessionSnapshot(Guid Id, string Name, OperationScope Scope,
     string? Diagnostic = null, bool WorkActive = false, SessionRuntimeObservation? Runtime = null);
 public sealed record ReadQuery(Guid ProjectId, Guid? EndpointId = null, Guid? SessionId = null, Guid? TaskId = null,
     string? Kind = null, string? State = null, string? Search = null, DateTimeOffset? Since = null, DateTimeOffset? Until = null,
-    long? Cursor = null, int Limit = 50);
+    long? Cursor = null, int Limit = 50, bool IncludeDeleted = false);
 public sealed record ReadPage<T>(IReadOnlyList<T> Items, long? NextCursor, bool HasMore, IReadOnlyList<string>? Warnings = null);
 public sealed record HostReport(Guid EndpointId, IReadOnlyDictionary<string, string> Facts);
 public interface IHostInspector { Task<HostReport> InspectAsync(RelayEndpoint endpoint, CancellationToken token); }
@@ -135,7 +135,9 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
         using var projectLease = Admission.Enter((await sessions.GetAsync(id, token)).Scope.ProjectId);
         using var policySnapshot = policy.Pin();
         using var lease = await Gate(id, token);
-        var session = await OwnedAsync(caller, id, RelayCapabilities.ManageSession, token);
+        var observed = await sessions.GetAsync(id, token);
+        var managesTarget = action == "close" && approvalRequestId is not null && policy.CanManageRequests(caller, observed.Scope.ProjectId);
+        var session = managesTarget ? observed : await OwnedAsync(caller, id, RelayCapabilities.ManageSession, token);
         if (policy.Configuration().Projects.Single(project => project.Id == session.Scope.ProjectId).ArchiveRequested && action is not ("close" or "interrupt"))
             throw new RelayException("project_draining", "New session changes are suspended during archival; closing or interrupting existing work remains available.");
         if (action is not ("start" or "reopen" or "close" or "interrupt") && !action.StartsWith("rename:", StringComparison.Ordinal))
@@ -165,7 +167,15 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
         if (action.StartsWith("rename:", StringComparison.Ordinal)) action = "rename:" + SessionNames.Normalize(action[7..]);
         if (action == "close" && work.IsSessionActive(id))
         {
-            await work.InterruptSessionAsync(id, token);
+            if (approvalRequestId is { } guarded)
+            {
+                var target = await work.ReadAsync(guarded, token);
+                if (!BelongsToSession(target.Request, session) || !await work.IsOperationActiveAsync(guarded, token))
+                    throw new RelayException("approval_stop_mismatch", "A different operation is active. The targeted close did not interrupt it.", false);
+                await work.RequestCancellationAsync(guarded, token);
+                await work.InterruptOperationAsync(guarded, token);
+            }
+            else await work.InterruptSessionAsync(id, token);
             throw new RelayException("busy", "Cancellation requested. Retry closing after the running operation settles.", false);
         }
         if (action == "close")
@@ -178,7 +188,7 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
                 var original = await work.ReadAsync(expected, token);
                 if (original.Request.SessionId == id && original.Request.Scope is { } originalScope &&
                     ProjectPolicy.IsSameSessionContext(originalScope, session.Scope) &&
-                    (originalScope.SenderId == caller.EndpointId || session.Scope.SenderId == caller.EndpointId) &&
+                    (managesTarget || originalScope.SenderId == caller.EndpointId || session.Scope.SenderId == caller.EndpointId) &&
                     original.CancellationConfirmedAt is not null)
                     return await sessions.InspectAsync(id, token);
                 throw new RelayException("approval_stop_mismatch", "This request no longer owns a pending stop in the selected session. Inspect its retained result.", false);
@@ -207,7 +217,8 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
         return result;
     }
 
-    public async Task<WorkRecord> MessageAsync(CallerIdentity caller, Guid sessionId, Guid requestId, string text, Guid? taskId, CancellationToken token)
+    public async Task<WorkRecord> MessageAsync(CallerIdentity caller, Guid sessionId, Guid requestId, string text, Guid? taskId, CancellationToken token,
+        Guid? previousRequestId = null)
     {
         using var projectLease = Admission.EnterWork((await sessions.GetAsync(sessionId, token)).Scope.ProjectId);
         using var policySnapshot = policy.Pin();
@@ -215,12 +226,13 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
         var session = await OwnedAsync(caller, sessionId, RelayCapabilities.SendMessage, token);
         var scope = policy.Message(caller, session.Scope.ProjectId, session.Scope.RecipientId, session.Scope.WorkspaceId);
         return await work.SubmitAsync(new(requestId, scope.RecipientId.ToString("D"), "message", text, SessionId: sessionId,
-            Scope: scope, TaskId: taskId ?? requestId, AttemptId: requestId, SessionOwnerId: DelegatingOwner(session, caller)), token,
+            Scope: scope, TaskId: taskId ?? requestId, AttemptId: requestId, SessionOwnerId: DelegatingOwner(session, caller),
+            PreviousRequestId: previousRequestId), token,
             new("Message · " + session.Name, Workspace(scope).Location));
     }
 
     public async Task<WorkRecord> CommandAsync(CallerIdentity caller, Guid projectId, Guid endpointId, Guid workspaceId,
-        string commandId, Guid requestId, CancellationToken token)
+        string commandId, Guid requestId, CancellationToken token, Guid? previousRequestId = null, Guid? taskId = null)
     {
         using var projectLease = Admission.EnterWork(projectId);
         using var policySnapshot = policy.Pin();
@@ -228,11 +240,13 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
         if (!(member.CommandIds ?? []).Contains(commandId, StringComparer.Ordinal)) throw new RelayException("command_denied", "The project does not authorize this command identifier.");
         var workspace = policy.Workspace(caller, projectId, workspaceId, false, endpointId);
         var scope = new OperationScope(projectId, caller.EndpointId, endpointId, workspaceId);
-        return await work.SubmitAsync(new(requestId, endpointId.ToString("D"), "command", CommandId: commandId, Scope: scope, TaskId: requestId, AttemptId: requestId),
+        return await work.SubmitAsync(new(requestId, endpointId.ToString("D"), "command", CommandId: commandId, Scope: scope,
+            TaskId: taskId ?? requestId, AttemptId: requestId, PreviousRequestId: previousRequestId),
             token, new("Command · " + commandId, workspace.Location));
     }
 
-    public async Task<WorkRecord> TransferAsync(CallerIdentity caller, Guid sessionId, ArtifactTransfer transfer, Guid requestId, CancellationToken token)
+    public async Task<WorkRecord> TransferAsync(CallerIdentity caller, Guid sessionId, ArtifactTransfer transfer, Guid requestId, CancellationToken token,
+        Guid? previousRequestId = null, Guid? taskId = null)
     {
         using var projectLease = Admission.EnterWork((await sessions.GetAsync(sessionId, token)).Scope.ProjectId);
         using var policySnapshot = policy.Pin();
@@ -243,7 +257,8 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
             throw new RelayException("capability_denied", "The selected session is not a participant in this transfer.");
         var scope = session.Scope with { SenderId = caller.EndpointId };
         return await work.SubmitAsync(new(requestId, scope.RecipientId.ToString("D"), "transfer", SessionId: sessionId,
-            Scope: scope, TaskId: requestId, AttemptId: requestId, Artifact: transfer, SessionOwnerId: DelegatingOwner(session, caller)), token,
+            Scope: scope, TaskId: taskId ?? requestId, AttemptId: requestId, Artifact: transfer, SessionOwnerId: DelegatingOwner(session, caller),
+            PreviousRequestId: previousRequestId), token,
             new("Transfer · " + transfer.Source.RelativePath, policy.Configuration().Workspaces.Single(item => item.Id == transfer.Destination.WorkspaceId).Location));
     }
 
@@ -259,32 +274,59 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
         using var policySnapshot = policy.Pin();
         var result = await work.ReadAsync(requestId, token);
         if (result.Request.Scope is not { } scope) throw new RelayException("legacy_unassigned", "This legacy operation has no authorized project assignment.");
-        policy.Demand(caller, scope.ProjectId, RelayCapabilities.ReadHistory);
+        DemandRequestRead(caller, scope.ProjectId);
         if (recovery is null || !policy.Configuration().Projects.Single(project => project.Id == scope.ProjectId).Enabled) return result;
         if (WorkExecution.NeedsApprovalObservation(result) && result.Request.SessionId is { } id)
         {
-            using var sessionLease = await Gate(id, token);
-            result = await work.ReadAsync(requestId, token);
-            return work.IsSessionActive(id) ? result : await recovery.ReconcileAsync(result, token);
+            try
+            {
+                using var sessionLease = await Gate(id, token);
+                result = await work.ReadAsync(requestId, token);
+                return work.IsSessionActive(id) ? result : await ReconcileRetainedResultAsync(result, token);
+            }
+            catch (RelayException error) when (error.Code == "busy") { return result with { ReadRecoveryError = error.Code }; }
         }
-        return result.State == "unknown" ? await recovery.ReconcileAsync(result, token) : result;
+        return result.State == "unknown" ? await ReconcileRetainedResultAsync(result, token) : result;
+    }
+
+    private async Task<WorkRecord> ReconcileRetainedResultAsync(WorkRecord result, CancellationToken token)
+    {
+        try { return await recovery!.ReconcileAsync(result, token); }
+        catch (RelayException error) { return result with { ReadRecoveryError = error.Code }; }
+        catch (TimeoutException) { return result with { ReadRecoveryError = "timeout" }; }
+        catch (IOException) { return result with { ReadRecoveryError = "storage_unavailable" }; }
     }
 
     public async Task<WorkRecord> CancelAsync(CallerIdentity caller, Guid requestId, CancellationToken token)
     {
         var retained = await work.ReadAsync(requestId, token);
-        using var projectLease = Admission.Enter(retained.Request.Scope?.ProjectId ?? Guid.Empty);
+        using var projectLease = Admission.EnterWork(retained.Request.Scope?.ProjectId ?? Guid.Empty);
         using var policySnapshot = policy.Pin();
-        var record = await ResultCore(caller, requestId, token);
-        if (record.Request.SessionId is not { } id) throw new RelayException("capability_denied", "Only session operations support targeted cancellation.");
+        var record = await work.ReadAsync(requestId, token);
+        var scope = record.Request.Scope ?? throw new RelayException("legacy_unassigned", "The request has no retained project.", false);
+        DemandRequestRead(caller, scope.ProjectId);
+        var managesProject = policy.CanManageRequests(caller, scope.ProjectId);
+        if (record.Request.SessionId is not { } id)
+        {
+            if (!managesProject && scope.SenderId != caller.EndpointId)
+                throw new RelayException("capability_denied", "Only the sender or project request administrator can cancel this operation.", false);
+            await work.RequestCancellationAsync(requestId, token);
+            await work.InterruptOperationAsync(requestId, token);
+            return await work.ReadAsync(requestId, token);
+        }
         using var lease = await Gate(id, token);
-        await OwnedAsync(caller, id, RelayCapabilities.ManageSession, token);
+        if (managesProject)
+        {
+            if (!BelongsToSession(record.Request, await sessions.GetAsync(id, token)))
+                throw new RelayException("capability_denied", "The retained request and session contexts differ.", false);
+        }
+        else await OwnedAsync(caller, id, RelayCapabilities.ManageSession, token);
         record = await work.RequestCancellationAsync(requestId, token);
         if (record.State is not ("awaiting_approval" or "failed") &&
             (record.ReplyDispatch is not null || await work.IsOperationActiveAsync(requestId, token)))
         {
-            if (record.Request.Kind == "message") await sessions.ControlAsync(id, "interrupt", token);
-            await work.InterruptSessionAsync(id, token);
+            try { if (record.Request.Kind == "message") await sessions.ControlAsync(id, "interrupt", token); }
+            finally { await work.InterruptOperationAsync(requestId, CancellationToken.None); }
         }
         return await work.ReadAsync(requestId, token);
     }
@@ -305,9 +347,9 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
     }
 
     public Task<ReadPage<WorkRecord>> ResultsAsync(CallerIdentity caller, ReadQuery query, CancellationToken token)
-    { using var policySnapshot = policy.Pin(); policy.Demand(caller, query.ProjectId, RelayCapabilities.ReadHistory); return journal.OperationsAsync(query, token); }
+    { using var policySnapshot = policy.Pin(); DemandRequestRead(caller, query.ProjectId); return journal.OperationsAsync(query, token); }
     public Task<ReadPage<WorkEvent>> EventsAsync(CallerIdentity caller, ReadQuery query, CancellationToken token)
-    { using var policySnapshot = policy.Pin(); policy.Demand(caller, query.ProjectId, RelayCapabilities.ReadHistory); return journal.EventsAsync(query, token); }
+    { using var policySnapshot = policy.Pin(); DemandRequestRead(caller, query.ProjectId); return journal.EventsAsync(query, token); }
 
     public async Task<ReadPage<InboxMessage>> InboxAsync(CallerIdentity caller, ReadQuery query, CancellationToken token)
     {
@@ -327,6 +369,9 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
     private RelayWorkspace Workspace(OperationScope scope) => policy.Configuration().Workspaces.Single(item => item.Id == scope.WorkspaceId);
     private static Guid? DelegatingOwner(SessionSnapshot session, CallerIdentity caller) =>
         session.Scope.SenderId == caller.EndpointId ? null : session.Scope.SenderId;
+    private static bool BelongsToSession(WorkRequest request, SessionSnapshot session) =>
+        request.SessionId == session.Id && request.Scope is { } scope && ProjectPolicy.IsSameSessionContext(scope, session.Scope) &&
+        (request.SessionOwnerId ?? scope.SenderId) == session.Scope.SenderId;
     private async Task<SessionSnapshot> OwnedAsync(CallerIdentity caller, Guid id, string capability, CancellationToken token)
     {
         var session = await sessions.GetAsync(id, token);

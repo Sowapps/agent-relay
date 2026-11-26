@@ -16,7 +16,8 @@ internal static class McpStableFacadeScenarios
         var binding = Guid.NewGuid();
         new ProjectSettingsStore(data).Save(new(1, [new(project, "Visible"), new(Guid.NewGuid(), "Hidden")],
             [new(endpoint, "Caller", "external", "fixture"), peer], [workspace],
-            [new(project, endpoint, "main", [RelayCapabilities.ReadHistory, RelayCapabilities.ManageSession, RelayCapabilities.ManageProjectReactions], []),
+            [new(project, endpoint, "main", [RelayCapabilities.ReadHistory, RelayCapabilities.ManageSession, RelayCapabilities.ManageProjectReactions,
+                RelayCapabilities.ManageProjectRequests], []),
              new(project, peer.Id, "secondary", [], [])]));
         var connections = new ConnectionStore(data);
         await connections.CreateAsync(binding, endpoint, [project], false, CancellationToken.None);
@@ -69,6 +70,15 @@ internal static class McpStableFacadeScenarios
         Check((await Invoke("set_project_reactions", replacement)).GetProperty("reactions").GetProperty("revision").GetInt64() == 1,
             "Stable facade retains the reaction configuration revision");
         Check(Error(await Invoke("set_project_reactions", replacement)) == "state_conflict", "MCP reaction settings accepted a stale revision");
+        var edited = await Invoke("change_project_request", new { request_id = request, expected_revision = 0, action = "edit", status = "reviewed" });
+        Check(edited.GetProperty("operation").GetProperty("administration").GetProperty("status").GetString() == "reviewed",
+            "MCP did not expose the edited request status.");
+        var deleted = await Invoke("change_project_request", new { request_id = request, expected_revision = 1, action = "delete" });
+        Check(deleted.GetProperty("operation").GetProperty("state").GetString() == "completed", "Deletion rewrote the execution outcome.");
+        var retained = await Call("invoke_operation", new { call_id = Guid.NewGuid(), operation_id = "list_results", revision = 2,
+            arguments = new { project_id = project, include_deleted = true } });
+        Check(retained.GetProperty("operations").GetProperty("items").EnumerateArray().Any(item =>
+            item.GetProperty("request").GetProperty("id").GetGuid() == request), "MCP cannot retrieve a deleted request explicitly.");
         Check(Error(await Invoke("decide_session_approval", new { session_id = session, decision = "approve", revision = new string('a', 64) })) ==
               "capability_denied", "Session management alone approved a native request");
         Check(Error(await Invoke("send_session_escape", new { session_id = Guid.NewGuid() })) == "not_found",

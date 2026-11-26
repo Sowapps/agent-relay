@@ -45,7 +45,11 @@ public sealed class ProjectJournal(RelayDatabase database) : IRelayJournal
         else Equal("recipient", table == "sessions" ? "definition.scope.senderId" : "recipientEndpointId", recipient?.ToString("D"));
         Equal("endpoint", table == "work" ? "request.scope.recipientId" : table == "sessions" ? "definition.scope.recipientId" : table == "work_events" ? "endpointId" : "senderEndpointId", query.EndpointId?.ToString("D"));
         Equal("session", table == "sessions" ? "id" : fields + "sessionId", query.SessionId?.ToString("D"));
-        if (table == "work") { Equal("task", "request.taskId", query.TaskId?.ToString("D")); Equal("kind", "request.kind", query.Kind); Equal("state", "state", query.State); }
+        if (table == "work")
+        {
+            if (!query.IncludeDeleted) clauses.Add("coalesce(json_extract(payload,'$.administration.disposition'),'active') <> 'deleted'");
+            Equal("task", "request.taskId", query.TaskId?.ToString("D")); Equal("kind", "request.kind", query.Kind); Equal("state", "state", query.State);
+        }
         if (table == "sessions") Equal("state", "state", query.State);
         if (table == "work_events") { Equal("task", "taskId", query.TaskId?.ToString("D")); Equal("state", "state", query.State); }
         var date = table is "work" or "sessions" ? "createdAt" : table == "work_events" ? "occurredAt" : "receivedAt";

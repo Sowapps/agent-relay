@@ -5,9 +5,9 @@ public static class RelayCapabilities
     public const string SendMessage = "message.send", ReceiveMessage = "message.receive", ReadHistory = "history.read",
         ManageSession = "session.manage", DecideApproval = "session.approval", RunCommand = "command.execute", InspectHost = "host.inspect",
         ReadFile = "file.read", WriteFile = "file.write", ReplaceFile = "file.replace", LocalWork = "agent.local-work", ManageProject = "project.manage",
-        ManageProjectAccess = "project.access.manage", ManageProjectReactions = "project.reactions.manage";
+        ManageProjectAccess = "project.access.manage", ManageProjectReactions = "project.reactions.manage", ManageProjectRequests = "project.requests.manage";
     public static readonly IReadOnlySet<string> All = new HashSet<string>(StringComparer.Ordinal)
-    { SendMessage, ReceiveMessage, ReadHistory, ManageSession, DecideApproval, RunCommand, InspectHost, ReadFile, WriteFile, ReplaceFile, LocalWork, ManageProject, ManageProjectAccess, ManageProjectReactions };
+    { SendMessage, ReceiveMessage, ReadHistory, ManageSession, DecideApproval, RunCommand, InspectHost, ReadFile, WriteFile, ReplaceFile, LocalWork, ManageProject, ManageProjectAccess, ManageProjectReactions, ManageProjectRequests };
 }
 
 public sealed record RelayProject(Guid Id, string Name, bool Enabled = true, bool ArchiveRequested = false, string? ArchiveDiagnostic = null)
@@ -107,6 +107,15 @@ public sealed class ProjectPolicy(IProjectConfigurationStore configuration)
         var member = value.Memberships.SingleOrDefault(item => item.ProjectId == projectId && item.EndpointId == caller.EndpointId);
         if (member is null || !member.Capabilities.Contains(capability, StringComparer.Ordinal)) Denied();
         return member!;
+    }
+
+    public bool CanManageRequests(CallerIdentity caller, Guid projectId) => caller.ProjectIds.Contains(projectId) &&
+        Configuration().Memberships.Any(member => member.ProjectId == projectId && member.EndpointId == caller.EndpointId &&
+            member.Capabilities.Contains(RelayCapabilities.ManageProjectRequests));
+
+    public void DemandRequestManagement(CallerIdentity caller, Guid projectId)
+    {
+        if (!CanManageRequests(caller, projectId)) Denied();
     }
 
     public OperationScope Message(CallerIdentity caller, Guid projectId, Guid recipientId, Guid? workspaceId = null)

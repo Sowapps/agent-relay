@@ -3,7 +3,7 @@ namespace AgentRelay.Core;
 public sealed record TransferRequest(string Direction, string SourcePath, string DestinationPath, bool Overwrite = false);
 public sealed record WorkRequest(Guid Id, string ProfileId, string Kind, string Text = "", string? CommandId = null, Guid? SessionId = null,
     TransferRequest? Transfer = null, OperationScope? Scope = null, Guid? TaskId = null, Guid? AttemptId = null,
-    ArtifactTransfer? Artifact = null, Guid? SessionOwnerId = null, string? ExecutionBinding = null);
+    ArtifactTransfer? Artifact = null, Guid? SessionOwnerId = null, string? ExecutionBinding = null, Guid? PreviousRequestId = null);
 public sealed record WorkResult(string Origin, string Output, string ErrorOutput = "", int? ExitCode = null,
     IReadOnlyDictionary<string, string>? Details = null);
 public sealed record WorkRecord(WorkRequest Request, string State, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,
@@ -14,7 +14,8 @@ public sealed record WorkRecord(WorkRequest Request, string State, DateTimeOffse
     DateTimeOffset? SessionClosedAt = null, DateTimeOffset? TerminalRefusalSentAt = null, bool NativeTurnEnded = false,
     NativeAttempt[]? NativeAttempts = null, DateTimeOffset? TerminalEscapeSentAt = null,
     DateTimeOffset? ApprovalResumeVerifiedAt = null, NativeRetry? Retry = null, NativeReplyDispatch? ReplyDispatch = null,
-    DateTimeOffset? ApprovalClosureReleasedAt = null);
+    DateTimeOffset? ApprovalClosureReleasedAt = null, RequestAdministration? Administration = null,
+    string? ReadRecoveryError = null);
 
 public sealed record NativeRetry(DateTimeOffset DueAt, string NativeGeneration, string DistributionGeneration, string WorkspaceIdentity);
 public sealed record NativeReplyDispatch(string NativeGeneration, string DistributionGeneration, string WorkspaceIdentity);
@@ -49,6 +50,9 @@ public sealed record WorkProgress(long Bytes, long TotalBytes, string Phase, Dat
 public sealed record WorkEvent(Guid Id, Guid RequestId, Guid? ProjectId, Guid? TaskId, Guid? AttemptId, Guid? SessionId,
     Guid? EndpointId, string State, DateTimeOffset OccurredAt, string? ErrorCode = null);
 public sealed record WorkMetadata(string Label, string Context);
+public sealed record RequestAdministration(long Revision, string Disposition, string? Label, string? Note,
+    string? Status, Guid ActorId, DateTimeOffset UpdatedAt);
+public sealed record RequestChange(long ExpectedRevision, string Action, string? Label = null, string? Note = null, string? Status = null);
 public sealed record InboxMessage(Guid Id, string ProfileId, string Sender, string Recipient, string Text, Guid? InReplyTo, DateTimeOffset ReceivedAt, Guid? SessionId = null,
     Guid? ProjectId = null, Guid? SenderEndpointId = null, Guid? RecipientEndpointId = null);
 public sealed record WorkCapability(string ProfileId, bool Commands, bool Messages, bool Files = false);
@@ -75,6 +79,8 @@ public interface IWorkStore
     Task<bool> SessionHasDeferredWorkAsync(Guid id, CancellationToken token, bool includeReplies = false) => Task.FromResult(false);
     Task<IReadOnlyList<WorkRecord>> DueRetriesAsync(DateTimeOffset now, CancellationToken token) => Task.FromResult<IReadOnlyList<WorkRecord>>([]);
     Task<bool> ClaimRetryAsync(Guid id, DateTimeOffset now, CancellationToken token) => Task.FromResult(false);
+    Task<WorkRecord> ChangeRequestAsync(Guid id, Guid actor, RequestChange change, CancellationToken token) =>
+        throw new RelayException("adapter_unavailable", "This work store cannot administer requests.", false);
 }
 
 public interface IWorkExecutor
@@ -240,6 +246,20 @@ public sealed class WorkService : IAsyncDisposable
         finally { admission.Release(); }
     }
 
+    internal async Task InterruptOperationAsync(Guid id, CancellationToken token)
+    {
+        await admission.WaitAsync(token);
+        try
+        {
+            if (operationKeys.TryGetValue(id, out var key) && cancellations.TryGetValue(key, out var cancellation))
+                cancellation.Cancel();
+        }
+        finally { admission.Release(); }
+    }
+
+    internal Task<WorkRecord> ChangeRequestAsync(Guid id, Guid actor, RequestChange change, CancellationToken token) =>
+        store.ChangeRequestAsync(id, actor, change, token);
+
     public Task<IReadOnlyList<WorkRecord>> RetainedApprovalsAsync(Guid sessionId, CancellationToken token) =>
         store.RetainedApprovalsAsync(sessionId, token);
     internal Task RecordDormantApprovalAsync(Guid id, CancellationToken token) => store.RecordDormantApprovalAsync(id, token);
@@ -321,6 +341,8 @@ public sealed class WorkService : IAsyncDisposable
                 throw new RelayException("cancelled_before_dispatch", "The request was cancelled before dispatch.", false);
             if (!retry)
                 await store.SaveAsync(record with { State = "running", UpdatedAt = DateTimeOffset.UtcNow }, CancellationToken.None).ConfigureAwait(false);
+            if ((await store.FindAsync(record.Request.Id, token))?.Administration?.Disposition is "disabled" or "deleted")
+                throw new RelayException("request_disabled_before_dispatch", "The request was disabled or deleted before dispatch.", false);
             var result = reservation is null ? await executor.ExecuteAsync(record.Request, token).ConfigureAwait(false) :
                 await reservation.ExecuteAsync(token).ConfigureAwait(false);
             await store.SaveAsync(record with { State = result.ExitCode is not (null or 0) ? "failed" : "completed", Result = result,

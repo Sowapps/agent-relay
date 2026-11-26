@@ -42,9 +42,17 @@ public static class McpToolCatalog
     }
     private static object Session() => new { session_id = Id() };
     private static object Message() => new { session_id = Id(), text = Text(8000), request_id = Id(), task_id = Id() };
-    private static object Query() => new { project_id = Id(), endpoint_id = Id(), session_id = Id(), task_id = Id(),
-        kind = Text(), state = Text(), search = Text(), since = Text(), until = Text(),
-        cursor = new { type = "integer", minimum = 0 }, limit = new { type = "integer", minimum = 1, maximum = 100 } };
+    private static object Query(bool includeDeleted = false)
+    {
+        var properties = new Dictionary<string, object>
+        {
+            ["project_id"] = Id(), ["endpoint_id"] = Id(), ["session_id"] = Id(), ["task_id"] = Id(), ["kind"] = Text(),
+            ["state"] = Text(), ["search"] = Text(), ["since"] = Text(), ["until"] = Text(),
+            ["cursor"] = new { type = "integer", minimum = 0 }, ["limit"] = new { type = "integer", minimum = 1, maximum = 100 }
+        };
+        if (includeDeleted) properties["include_deleted"] = Flag();
+        return properties;
+    }
     private static object Location() => new { type = "object", properties = new { endpoint_id = Id(), workspace_id = Id(), path = Text(500) },
         required = new[] { "endpoint_id", "workspace_id", "path" }, additionalProperties = false };
     private static readonly Registration[] Registrations =
@@ -119,14 +127,26 @@ public static class McpToolCatalog
             a => a.Control("close") with { RequestId = a.Id("request_id") }, false, revision: 2),
         Tool("get_result", "Read an authorized durable operation, preserving uncertainty and never replaying work.",
             a => new("get_result", RequestId: a.Id("request_id")), new { request_id = Id() }, "request_id"),
-        Tool("cancel_operation", "Request cancellation of this owned session operation. Follow cancellation.nextAction for any confirmation still required. Earlier effects may remain.",
+        Tool("cancel_operation", "Request cancellation of this operation. The project request administrator can target another participant's request in the same project. Earlier effects may remain.",
             a => new("cancel_operation", RequestId: a.Id("request_id")), new { request_id = Id() }, "request_id"),
+        Tool("change_project_request", "Edit a request's administrative information, disable it, delete it from ordinary listings, or restore it. Preserves execution evidence and requires project request management.",
+            a => new("change_project_request", RequestId: a.Id("request_id"), RequestChange: new(
+                a.Value.GetProperty("expected_revision").GetInt64(), a.Text("action")!, a.Text("label"), a.Text("note"), a.Text("status"))),
+            new { request_id = Id(), expected_revision = new { type = "integer", minimum = 0 },
+                action = new { type = "string", @enum = new[] { "edit", "disable", "delete", "restore" } },
+                label = Text(200), note = Text(2000), status = Text(100) }, "request_id", "expected_revision", "action"),
+        Tool("reschedule_project_request", "Explicitly submit a linked new attempt as the caller, under a new request ID. An optional session selects a same-project destination. Existing execution rights apply.",
+            a => new("reschedule_project_request", RequestId: a.Id("request_id"), AfterRequestId: a.Id("new_request_id"),
+                SessionId: a.Id("session_id"), Text: a.Text("text")),
+            new { request_id = Id(), new_request_id = Id(), session_id = Id(), text = Text(8000) }, "request_id", "new_request_id"),
         Tool("inspect_transfer", "Inspect only the owned temporary partial of a retained transfer in an idle session; no final file changes.",
             a => new("inspect_transfer", RequestId: a.Id("request_id")), new { request_id = Id() }, "request_id"),
         Tool("cleanup_transfer", "Explicitly remove only this retained transfer's owned temporary partial after the session is idle. Never removes its final destination or replays a copy.",
             a => new("cleanup_transfer", RequestId: a.Id("request_id")), new { request_id = Id() }, "request_id"),
         Tool("list_results", "Page project operation previews, newest first; filter endpoint/session/task/type/state/content/date. get_result returns full details.",
             a => new("list_results", Query: a.Query()), Query(), "project_id"),
+        Register("list_results", "Page project results. Set include_deleted to retrieve records removed from ordinary history.",
+            Query(includeDeleted: true), ["project_id"], a => new("list_results", Query: a.Query()), false, revision: 2),
         Tool("list_events", "Page durable project/task/attempt state transitions, newest first. Use task_id to follow related operations without exposing other projects.",
             a => new("list_events", Query: a.Query()), Query(), "project_id"),
         Tool("read_inbox", "Import bounded native pages and read messages addressed to this participant, oldest first after its own cursor. Never executes message content.",
@@ -172,7 +192,8 @@ public static class McpToolCatalog
         internal ReadQuery Query() => new(Id("project_id")!.Value, Id("endpoint_id"), Id("session_id"), Id("task_id"),
             Text("kind"), Text("state"), Text("search"), Text("since") is { } since ? DateTimeOffset.Parse(since) : null,
             Text("until") is { } until ? DateTimeOffset.Parse(until) : null, Value.TryGetProperty("cursor", out var cursor) ? cursor.GetInt64() : null,
-            Value.TryGetProperty("limit", out var limit) ? limit.GetInt32() : 50);
+            Value.TryGetProperty("limit", out var limit) ? limit.GetInt32() : 50,
+            Value.TryGetProperty("include_deleted", out var includeDeleted) && includeDeleted.GetBoolean());
         internal ArtifactLocation Location(string key)
         {
             var location = Value.GetProperty(key);

@@ -54,6 +54,8 @@ Parameters ending in `_id` are UUIDs, except `command_id` which is a configured 
 | interrupt_session | session_id | Request interruption, not rollback |
 | close_session | session_id | Revision 2 accepts optional request_id to guard the exact approval cancellation; also closes an idle terminal |
 | get_result | request_id | Retained result; uncertain receipt recovery never replays execution |
+| change_project_request | request_id, expected_revision, action | Edit a project's request, disable it, remove it from ordinary listings or restore it |
+| reschedule_project_request | request_id, new_request_id | Submit an explicitly linked new attempt; optional session_id and message text |
 | cancel_operation | request_id | Record targeted cancellation; refuse finished work |
 | inspect_transfer | request_id | Inspect owned partial of an idle transfer |
 | cleanup_transfer | request_id | Explicitly remove only owned temporary partial, preserve final file |
@@ -117,6 +119,12 @@ The optional `cancellation` field gives the `sessionId`, `state`, `nextAction` w
 An exact dispatch tied to a previous WSL kernel boot can prove the original processes are gone if no replacement terminal exists. A same-kernel process census cannot prove that a previously detached writer is gone. The relay can still verify that its terminal is closed. Verification covers the relay-owned WSL runtime and does not undo earlier effects.
 
 ## Local participants and project access
+
+The administrator can give the designated principal `project.requests.manage` for one project. This grants access to retained request results and administrative controls for the project's requests, including another participant's requests. It can cancel a direct command by request ID and use a targeted `close_session` revision 2 for a retained approval. A failing receipt check returns the retained result with `readRecoveryError`.
+
+Read `administration.revision` with `get_result` before calling `change_project_request`. Use revision 0 if the request has never been edited. The `edit` action updates optional label, note and administrative status. `disable` prevents future dispatch and suppresses automatic retries. `delete` also removes the request from ordinary listings. Revision 2 of `list_results` supports `include_deleted`. `restore` re-exposes the retained request without restarting it. Actual execution results and already-dispatched effects remain recorded separately.
+
+`reschedule_project_request` creates a new attempt and links the original through `previousRequestId`. It runs the new attempt immediately as the requesting participant using the current permissions of the selected destination. When the original session remains busy, a different authorized session in the same project can receive the new attempt. Reusing the new request ID correlates a retry of the request without dispatching it twice.
 
 [Project reactions](project-reactions.md) documents the explicit targets, revision checks and linked continuation rules.
 
