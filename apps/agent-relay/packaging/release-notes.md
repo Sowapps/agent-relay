@@ -1,4 +1,6 @@
-# Agent Relay v1.2.9
+# Agent Relay v1.2.10
+
+Verified terminal closure can release a retained conversation even when cancellation effects remain uncertain. Project principals with the request management grant can inspect, edit, cancel, disable, remove, restore and reschedule their project's requests. A targeted close preserves unrelated active work.
 
 Existing projects can configure reactions to a correlated reply followed by native turn release. Reactions use declared Windows or WSL commands. Only exit code 2 from a blocking rule rejects an explicitly linked continuation.
 
