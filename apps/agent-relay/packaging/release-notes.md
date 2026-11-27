@@ -1,4 +1,6 @@
-# Agent Relay v1.2.10
+# Agent Relay v1.2.11
+
+Pending actions show progress and prevent repeat activation for the same target, including in the technical console. Refresh and navigation preserve this state.
 
 Verified terminal closure can release a retained conversation even when cancellation effects remain uncertain. Project principals with the request management grant can inspect, edit, cancel, disable, remove, restore and reschedule their project's requests. A targeted close preserves unrelated active work.
 
