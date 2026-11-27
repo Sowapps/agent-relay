@@ -17,6 +17,37 @@ def conversation_logs(folder):
     return (folder / 'config/sessions').rglob('*.jsonl')
 
 
+def observed_activity(folder, conversation_id):
+    """Read the latest complete turn boundary of the pinned conversation."""
+    if not conversation_id:
+        return 'unknown'
+    try:
+        suffix = str(uuid.UUID(conversation_id)) + '.jsonl'
+        (log,) = (path for path in conversation_logs(folder) if path.name.endswith(suffix))
+        if not stat.S_ISREG(log.lstat().st_mode) or not log.resolve().is_relative_to(folder.resolve()):
+            return 'unknown'
+        with log.open('rb') as stream:
+            end = stream.seek(0, os.SEEK_END)
+            stream.seek(max(0, end - 65536))
+            if end > 65536:
+                stream.readline()
+            tail = stream.read(65536)
+        if not tail.endswith(b'\n'):
+            return 'unknown'
+        for line in reversed(tail.splitlines()):
+            entry = json.loads(line)
+            event = entry.get('payload')
+            if entry.get('type') != 'event_msg' or not isinstance(event, dict):
+                continue
+            if event.get('type') == 'task_started':
+                return 'working'
+            if event.get('type') == 'task_complete':
+                return 'waiting_for_input'
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return 'unknown'
+
+
 class TurnObservation:
     MAX_RECORD = 256 * 1024
     MAX_POLL_BYTES = 1024 * 1024

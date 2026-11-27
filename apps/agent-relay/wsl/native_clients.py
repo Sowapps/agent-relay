@@ -288,10 +288,14 @@ def status(root, client, *, inspect_auth=True):
     require_marker = json.loads(launch_file.read_text()).get('requireNativeMarker', False) if launch_file.is_file() else False
     marker = json.loads(initialized.read_text()) if initialized.is_file() else {}
     marker_matches = process is not None and process['generation'] in marker.get('nativeAncestors', [])
+    conversation = json.loads(pinned.read_text())['id'] if pinned.exists() else None
+    approval = approval_pending(pane) if client == 'codex' else any(value in pane.lower() for value in APPROVAL_ATTENTION)
+    from codex_turn import observed_activity
+    activity = ('awaiting_approval' if approval else observed_activity(folder, conversation)
+                if available and client == 'codex' else 'unknown')
     return {'available': available, 'mcpInitialized': bool(marker.get('initialized')) and (marker_matches or not require_marker), 'pane': pane[-2800:],
             'authenticated':auth['authenticated'],'authenticationChecked':bool(binding),
-            'awaitingApproval': approval_pending(pane) if client == 'codex' else any(value in pane.lower() for value in APPROVAL_ATTENTION),
-            'nativeConversationId':json.loads(pinned.read_text())['id'] if pinned.exists() else None,
+            'awaitingApproval': approval, 'activity': activity, 'nativeConversationId': conversation,
             'distributionRuntime': process_stamp(1), 'nativeRuntime': process, 'paneId': pane_id}
 
 

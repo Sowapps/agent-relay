@@ -11,7 +11,7 @@ public sealed record ProjectReply(ProjectConfiguration? Configuration = null, Se
     ReadPage<SessionSnapshot>? Sessions = null, ReadPage<WorkRecord>? Operations = null, ReadPage<InboxMessage>? Messages = null, HostReport? Host = null, ReadPage<WorkEvent>? Events = null, TransferPartial? Partial = null, RelayProject? Project = null,
     CancellationProgress? Cancellation = null, SessionTerminal? Terminal = null, TerminalSignalReceipt? TerminalSignal = null,
     ProjectAccessEntry? ProjectAccess = null, ApprovalProgress? Approval = null, ProjectReactions? Reactions = null,
-    ReactionTarget[]? ReactionTargets = null, ReactionRun[]? ReactionRuns = null)
+    ReactionTarget[]? ReactionTargets = null, ReactionRun[]? ReactionRuns = null, SessionActivityObservation? SessionActivity = null)
 {
     internal static ProjectReply WithCancellation(WorkRecord operation) => new(Operation: operation,
         Cancellation: CancellationProgress.From(operation), Approval: ApprovalProgress.From(operation));
@@ -89,6 +89,7 @@ public sealed class ProjectCoordinator : IAsyncDisposable
     private readonly Task archiveLoop;
     private readonly Task replyLoop;
     private readonly Task reactionLoop;
+    private readonly Task followUpLoop;
     private readonly ProjectReactionService reactions;
     private readonly SettingsStore technical;
 
@@ -109,8 +110,10 @@ public sealed class ProjectCoordinator : IAsyncDisposable
         Application = new(new(Settings), Work, adapter, new ProjectJournal(database), new EndpointDiagnostics(technical), executor, executor, Settings);
         reactions = new(new SqliteProjectReactions(database), new(Settings), Work, native.ReactionRelease,
             (endpoint, rule) => ScopedCommands.ValidateTarget(technical.Load(), endpoint, rule), Application.Admission.EnterWork, executor);
-        reactionLoop = RunReactionMonitorAsync(promotion, reportError);
+        reactionLoop = RunBackgroundSweepAsync(promotion, token => reactions.SweepAsync(DateTimeOffset.UtcNow, token), reportError);
         var replies = new ReplyMonitor(store, (IReplyObservation)executor, reportError);
+        var followUps = new CancellationFollowUpMonitor(store, Application, reportError);
+        followUpLoop = RunBackgroundSweepAsync(promotion, followUps.SweepAsync, reportError);
         replyLoop = Task.Run(async () =>
         {
             using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
@@ -154,7 +157,7 @@ public sealed class ProjectCoordinator : IAsyncDisposable
         });
     }
 
-    private async Task RunReactionMonitorAsync(PromotionAdmission promotion, Action<Exception>? reportError)
+    private async Task RunBackgroundSweepAsync(PromotionAdmission promotion, Func<CancellationToken, Task> sweep, Action<Exception>? reportError)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromSeconds(2));
         try
@@ -163,7 +166,7 @@ public sealed class ProjectCoordinator : IAsyncDisposable
             {
                 using var admission = promotion.TryEnter();
                 if (admission is null) continue;
-                try { await reactions.SweepAsync(DateTimeOffset.UtcNow, archiveStop.Token); }
+                try { await sweep(archiveStop.Token); }
                 catch (Exception error) when (!archiveStop.IsCancellationRequested) { reportError?.Invoke(error); }
             }
         }
@@ -273,8 +276,7 @@ public sealed class ProjectCoordinator : IAsyncDisposable
             "send_message" => new(Operation: await Application.MessageAsync(caller, Required(action.SessionId, "sessionId"), identifier, action.Text ?? "", action.TaskId, token)),
             "execute_command" => new(Operation: await Application.CommandAsync(caller, Required(action.ProjectId, "projectId"), Required(action.EndpointId, "endpointId"), Required(action.WorkspaceId, "workspaceId"), action.CommandId ?? "", identifier, token)),
             "transfer_file" => new(Operation: await Application.TransferAsync(caller, Required(action.SessionId, "sessionId"), action.Transfer ?? throw new RelayException("invalid_request", "Source and destination artifacts are required."), identifier, token)),
-            "get_result" => ProjectReply.WithCancellation(await Application.ResultAsync(caller, Required(action.RequestId, "requestId"), token)),
-            "cancel_operation" => ProjectReply.WithCancellation(await Application.CancelAsync(caller, Required(action.RequestId, "requestId"), token)),
+            "get_result" or "cancel_operation" => await DescribeOperationAsync(caller, action, Required(action.RequestId, "requestId"), token),
             "change_project_request" => ProjectReply.WithCancellation(await Application.ChangeRequestAsync(caller,
                 Required(action.RequestId, "requestId"), action.RequestChange ?? throw new RelayException("invalid_request", "Request change is required.", false), token)),
             "reschedule_project_request" => new(Operation: await Application.RescheduleRequestAsync(caller,
@@ -285,6 +287,14 @@ public sealed class ProjectCoordinator : IAsyncDisposable
             "read_inbox" => new(Messages: await Application.InboxAsync(caller, action.Query ?? new(Required(action.ProjectId, "projectId")), token)),
             _ => throw new RelayException("invalid_operation", "Unsupported project operation.")
         };
+    }
+
+    private async Task<ProjectReply> DescribeOperationAsync(CallerIdentity caller, ProjectAction action, Guid request, CancellationToken token)
+    {
+        var operation = action.Name == "get_result" ? await Application.ResultAsync(caller, request, token)
+            : await Application.CancelAsync(caller, request, token, action.Text);
+        return ProjectReply.WithCancellation(operation) with
+        { SessionActivity = await Application.RequestActivityAsync(caller, operation, token) };
     }
 
     private static void DemandReactionSource(Guid project, WorkRecord source)
@@ -318,7 +328,7 @@ public sealed class ProjectCoordinator : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         archiveStop.Cancel();
-        try { await Task.WhenAll(archiveLoop, replyLoop, reactionLoop); }
+        try { await Task.WhenAll(archiveLoop, replyLoop, reactionLoop, followUpLoop); }
         finally { archiveStop.Dispose(); await Work.DisposeAsync(); }
     }
 }

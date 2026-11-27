@@ -219,7 +219,52 @@ internal static class ApApprovalCancellationScenarios
             ProjectReply.WithCancellation(canReuse).Cancellation is { State: "turn_finished", SessionRequiresResolution: false },
             "Reusing the verified session discarded history or claimed a confirmed stop.");
         await VerifyClosedApprovalReopenAsync(database, store, settings, scope, caller, token);
+        await VerifyCancellationFollowUpAsync(database, store, settings, scope, caller, token);
         Console.WriteLine("AP_APPROVAL_CANCELLATION=PASS (active cancellation, verified closed-session reopen, late reply, expiry, retained index)");
+    }
+
+    private static async Task VerifyCancellationFollowUpAsync(RelayDatabase database, SqliteWorkStore store, ProjectSettingsStore settings,
+        OperationScope scope, CallerIdentity caller, CancellationToken token)
+    {
+        var session = Guid.NewGuid();
+        var source = Guid.NewGuid();
+        var now = DateTimeOffset.UtcNow;
+        var backend = new Fixture(new(session, "Follow-up fixture", scope, "ready")) { Activity = "waiting_for_input" };
+        await store.SaveAsync(new(new(source, scope.RecipientId.ToString("D"), "message", "first", SessionId: session, Scope: scope),
+            "awaiting_approval", now, now, ReplyDispatch: new("test", "test", "test")), token);
+        await using var work = new WorkService(store, backend, () => [new(scope.RecipientId.ToString("D"), false, true)]);
+        var app = new RelayApplication(new(settings), work, backend, new ProjectJournal(database));
+        var pending = await app.CancelAsync(caller, source, token, "Follow-up");
+        var followUp = pending.FollowUp!;
+        var activity = await app.RequestActivityAsync(caller, pending, token);
+        Check(pending.CancellationConfirmedAt is null && pending.State == "awaiting_approval" && activity is
+            { State: "waiting_for_input", RequestId: var observed, SessionId: var observedSession } && observed == source && observedSession == session,
+            "Ready terminal masked the retained cancellation state.");
+        var errors = new List<Exception>();
+        var monitor = new CancellationFollowUpMonitor(store, app, errors.Add);
+        await monitor.SweepAsync(token);
+        Check(await store.FindAsync(followUp.RequestId, token) is null, "Terminal readiness alone sent the instruction.");
+        await RefusesAsync("id_conflict", () => app.CancelAsync(caller, source, token, "Different"));
+        await store.RecordApprovalTurnObservationAsync(source, true, token);
+        backend.Activity = "unknown";
+        await new CancellationFollowUpMonitor(store, app, errors.Add).SweepAsync(token);
+        Check(await store.FindAsync(followUp.RequestId, token) is null, "Confirmed stop sent to an unavailable terminal.");
+        backend.Activity = "waiting_for_input";
+        await new CancellationFollowUpMonitor(store, app, errors.Add).SweepAsync(token);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var sent = await work.ReadAsync(followUp.RequestId, deadline.Token);
+        while (sent.State is "pending" or "running")
+        {
+            await Task.Delay(10, deadline.Token);
+            sent = await work.ReadAsync(followUp.RequestId, deadline.Token);
+        }
+        Check(sent is { State: "completed", Result.Output: "received" } && sent.Request is
+            { SingleDispatch: true, PreviousRequestId: var previous, SessionId: var destination } && previous == source && destination == session,
+            "The follow-up was not delivered and correlated in the original session.");
+        Check((await app.CancelAsync(caller, source, token, "Follow-up")).FollowUp is { State: "submitted", RequestId: var repeated } &&
+            repeated == followUp.RequestId, "Repeated cancellation assigned another follow-up ID.");
+        await new CancellationFollowUpMonitor(store, app, errors.Add).SweepAsync(token);
+        Check(backend.FollowUps == 1 && errors.Count == 0, "Repeated scans or requester retries resent the instruction.");
     }
 
     private static async Task VerifyClosedApprovalReopenAsync(RelayDatabase database, SqliteWorkStore store, ProjectSettingsStore settings,
@@ -368,6 +413,8 @@ internal static class ApApprovalCancellationScenarios
         public bool OwnedStopVerified { get; set; }
         public bool TerminalClosed { get; set; }
         public bool RecognizedApproval { get; set; }
+        public string? Activity { get; set; }
+        public int FollowUps { get; private set; }
         public int CloseAttempts { get; private set; }
         public int Stops { get; private set; }
         private int commands;
@@ -376,7 +423,8 @@ internal static class ApApprovalCancellationScenarios
         public TaskCompletionSource ActiveMessage { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public Task<SessionSnapshot> OpenAsync(SessionDefinition definition, CancellationToken token) => Task.FromResult(retained);
         public Task<SessionSnapshot> GetAsync(Guid id, CancellationToken token) => Task.FromResult(retained);
-        public Task<SessionSnapshot> InspectAsync(Guid id, CancellationToken token) => GetAsync(id, token);
+        public Task<SessionSnapshot> InspectAsync(Guid id, CancellationToken token) => Task.FromResult(Activity is { } activity
+            ? retained with { Activity = new(id, activity, DateTimeOffset.UtcNow) } : retained);
         public Task<SessionTerminal> ReadTerminalAsync(Guid id, CancellationToken token) =>
             Task.FromResult(new SessionTerminal("fixture", "Prompt", RecognizedApproval ? new(new('a', 64), "Fixture approval") : null));
         public Task<TerminalSignalReceipt> SignalTerminalAsync(Guid id, string action, string? approvalRevision, CancellationToken token) =>
@@ -400,6 +448,11 @@ internal static class ApApprovalCancellationScenarios
             if (request.Scope != retained.Scope) throw new InvalidOperationException("Unexpected fixture scope.");
             if (request.Kind == "message")
             {
+                if (request.SingleDispatch)
+                {
+                    FollowUps++;
+                    return new("fixture", "received");
+                }
                 ActiveMessage.TrySetResult();
                 await Task.Delay(Timeout.InfiniteTimeSpan, token);
                 throw new InvalidOperationException("Fixture message was not cancelled.");

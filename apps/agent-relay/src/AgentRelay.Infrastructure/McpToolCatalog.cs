@@ -129,6 +129,9 @@ public static class McpToolCatalog
             a => new("get_result", RequestId: a.Id("request_id")), new { request_id = Id() }, "request_id"),
         Tool("cancel_operation", "Request cancellation of this operation. The project request administrator can target another participant's request in the same project. Earlier effects may remain.",
             a => new("cancel_operation", RequestId: a.Id("request_id")), new { request_id = Id() }, "request_id"),
+        Register("cancel_operation", "Request cancellation with an optional durable follow-up for the same session. Relay sends it once after verifying the stop and session readiness.",
+            new { request_id = Id(), text = Text(8000) }, ["request_id"],
+            a => new("cancel_operation", RequestId: a.Id("request_id"), Text: a.Text("text")), false, revision: 2),
         Tool("change_project_request", "Edit a request's administrative information, disable it, delete it from ordinary listings, or restore it. Preserves execution evidence and requires project request management.",
             a => new("change_project_request", RequestId: a.Id("request_id"), RequestChange: new(
                 a.Value.GetProperty("expected_revision").GetInt64(), a.Text("action")!, a.Text("label"), a.Text("note"), a.Text("status"))),

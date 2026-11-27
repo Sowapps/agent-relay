@@ -41,6 +41,10 @@ are owned by the [system I/O target](system-io.md#durable-storage) (evidence `20
 
 The designated principal agent can recover any request in its own project, including requests submitted by another participant. It can inspect the result and failure details, correct request information and administrative status, reschedule it, cancel it, disable it or delete it. A Relay failure must leave the applicable control available. Administrative changes are distinguishable from observed native outcomes. A reschedule is an explicit new attempt with its own identity and a link to the prior request (evidence `2026-11-26-project-principal-request-recovery`).
 
+## Cancellation follow-up and observed activity
+
+Cancellation of a session message can retain an optional instruction. Relay delivers it once, in the same session, after verifying the original request stopped and the session is available. The follow-up remains traceable through its own result. Repeating the cancellation must not resend it. Relay exposes the request state separately from time-stamped observed session activity, associating the two when queried for a specific request. Unverified activity remains unknown (evidence `2026-11-27-cancellation-follow-up-and-activity`).
+
 ## Human control
 
 The operator can take over the WSL worker manually. Human tmux access is preserved. tmux is an acceptable first communication adapter; it is not a requirement for all endpoint technologies

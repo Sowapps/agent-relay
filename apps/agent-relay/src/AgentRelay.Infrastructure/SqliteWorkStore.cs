@@ -101,7 +101,7 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
 
     private sealed record Transition(WorkRecord Record, DateTimeOffset? JournalExpiry = null, bool ClearExpiry = false,
         string? Diagnostic = null, string? Event = null, DateTimeOffset? EventAt = null, Guid? ReleaseClosedSession = null,
-        bool ReplaceAdministration = false);
+        bool ReplaceAdministration = false, bool ReplaceFollowUp = false);
 
     private Task<bool> WriteAsync(Guid id, Func<WorkRecord?, WorkRecord?> change, CancellationToken token) =>
         WriteTransitionAsync(id, existing => change(existing) is { } record ? new(record) : null, token);
@@ -139,7 +139,8 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
             ApprovalWaitingSince = existing?.ApprovalWaitingSince ?? record.ApprovalWaitingSince,
             ApprovalExpiredAt = transition.ClearExpiry ? null : existing?.ApprovalExpiredAt ?? record.ApprovalExpiredAt,
             Progress = record.Progress ?? existing?.Progress, Administration = transition.ReplaceAdministration
-                ? record.Administration : existing?.Administration ?? record.Administration };
+                ? record.Administration : existing?.Administration ?? record.Administration,
+            FollowUp = transition.ReplaceFollowUp ? record.FollowUp : existing?.FollowUp ?? record.FollowUp };
         if (record.State == "completed" && record.Progress is { } progress) record = record with { Progress = progress with { Phase = "completed", Bytes = progress.TotalBytes } };
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
@@ -169,15 +170,56 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
     }
 
     public Task RequestCancellationAsync(Guid id, CancellationToken token) =>
-        WriteAsync(id, record =>
+        WriteAsync(id, record => RequestCancellation(record, DateTimeOffset.UtcNow), token);
+
+    private static WorkRecord? RequestCancellation(WorkRecord? record, DateTimeOffset now)
+    {
+        if (record is not { CancellationRequestedAt: null }) return null;
+        if (CancelScheduledRetry(record, now) is { } cancelled) return cancelled;
+        return CanCancel(record) ? record with { CancellationRequestedAt = now } : null;
+    }
+
+    private static bool CanCancel(WorkRecord record) =>
+        record.State is "pending" or "running" or "awaiting_approval" or "awaiting_reply" or "retry_wait" ||
+        record is { State: "unknown", ReplyDispatch: not null };
+
+    public Task<bool> RequestCancellationWithFollowUpAsync(Guid id, Guid sender, string text, CancellationToken token) =>
+        WriteTransitionAsync(id, record =>
         {
-            if (record is not { CancellationRequestedAt: null }) return null;
+            if (record is null) throw new RelayException("not_found", "Unknown cancellation target.", false);
+            if (record.FollowUp is { } retained)
+            {
+                if (retained.Text != text || retained.SenderId != sender)
+                    throw new RelayException("id_conflict", "This cancellation already has a different follow-up.", false);
+                return null;
+            }
             var now = DateTimeOffset.UtcNow;
-            if (CancelScheduledRetry(record, now) is { } cancelled) return cancelled;
-            return (record.State is "pending" or "running" or "awaiting_approval" or "awaiting_reply" ||
-                record is { State: "unknown", ReplyDispatch: not null })
-                ? record with { CancellationRequestedAt = now } : null;
+            if (record.CancellationConfirmedAt is not null || !CanCancel(record))
+                throw new RelayException("operation_already_finished", "This request is no longer cancellable.", false);
+            var cancelled = RequestCancellation(record, now) ?? record;
+            return new(cancelled with { FollowUp = new(Guid.NewGuid(), sender, text) },
+                Event: "cancellation_follow_up_retained", EventAt: now, ReplaceFollowUp: true);
         }, token);
+
+    internal async Task<IReadOnlyList<(long Cursor, WorkRecord Record)>> PendingCancellationFollowUpsAsync(long after, CancellationToken token)
+    {
+        using var connection = database.Open(); using var query = connection.CreateCommand();
+        query.CommandText = $"SELECT rowid,payload FROM work WHERE rowid>$after AND {PendingFollowUp} ORDER BY rowid LIMIT 8";
+        query.Parameters.AddWithValue("$after", after);
+        using var reader = await query.ExecuteReaderAsync(token);
+        var items = new List<(long, WorkRecord)>();
+        while (await reader.ReadAsync(token))
+            items.Add((reader.GetInt64(0), RelayJson.Deserialize<WorkRecord>(reader.GetString(1))));
+        return items;
+    }
+
+    internal const string PendingFollowUp = "json_extract(payload,'$.followUp.state')='pending'";
+
+    internal Task RecordFollowUpStateAsync(Guid source, Guid request, string state, string? diagnostic, CancellationToken token) =>
+        WriteTransitionAsync(source, record => record?.FollowUp is { State: "pending" } followUp && followUp.RequestId == request
+            ? new(record with { FollowUp = followUp with { State = state, Diagnostic = diagnostic } },
+                Event: "cancellation_follow_up_" + state, EventAt: DateTimeOffset.UtcNow, Diagnostic: diagnostic, ReplaceFollowUp: true)
+            : null, token);
 
     // A claimed retry remains cancellable until BeginNativeAttemptAsync crosses the same transaction boundary.
     private static WorkRecord? CancelScheduledRetry(WorkRecord record, DateTimeOffset now) =>
@@ -337,7 +379,7 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
                 attempts[^1].FinishedAt is not null) return null;
             var now = DateTimeOffset.UtcNow;
             if (observation is not null && !IsAwaitingReply(record)) return null;
-            parked = retry is not null && record.CancellationRequestedAt is null &&
+            parked = retry is not null && !record.Request.SingleDispatch && record.CancellationRequestedAt is null &&
                 record.Administration?.Disposition is not ("disabled" or "deleted") &&
                 (observation is not null || record.State == "running");
             var state = parked ? "retry_wait" : observation?.Code switch
@@ -390,6 +432,9 @@ public sealed class SqliteWorkStore(RelayDatabase database) : IWorkStore
             var canResume = ready && record.SessionClosedAt is null;
             if (!canResume && record.NativeTurnEnded) return null;
             var now = DateTimeOffset.UtcNow;
+            if (canResume && record.FollowUp is { State: "pending" } && record.State is "awaiting_approval" or "awaiting_reply")
+                record = record with { State = "unknown", ReplyDispatch = null, ErrorCode = "cancelled_effects_unconfirmed",
+                    Error = "The native turn ended. Earlier effects remain unconfirmed.", UpdatedAt = now };
             return new(record with { NativeTurnEnded = true, ApprovalResumeVerifiedAt = canResume ? now : null },
                 Event: canResume ? "approval_resume_verified" : "native_turn_ended", EventAt: now);
         }, token);

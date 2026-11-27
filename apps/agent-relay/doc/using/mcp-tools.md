@@ -56,7 +56,7 @@ Parameters ending in `_id` are UUIDs, except `command_id` which is a configured 
 | get_result | request_id | Retained result; uncertain receipt recovery never replays execution |
 | change_project_request | request_id, expected_revision, action | Edit a project's request, disable it, remove it from ordinary listings or restore it |
 | reschedule_project_request | request_id, new_request_id | Submit an explicitly linked new attempt; optional session_id and message text |
-| cancel_operation | request_id | Record targeted cancellation; refuse finished work |
+| cancel_operation | request_id | Record targeted cancellation; optional text in revision 2 |
 | inspect_transfer | request_id | Inspect owned partial of an idle transfer |
 | cleanup_transfer | request_id | Explicitly remove only owned temporary partial, preserve final file |
 | list_results | project_id | Query fields below; newest-first previews |
@@ -93,6 +93,10 @@ Use `read_inbox` for the original project and session, then `get_result` with th
 Codex can still request permission on the first `relay_project.discover_operations` call. Relay advertises discovery as read-only; Codex decides whether its approval policy requires a prompt. Read the owned terminal and use its current revision for an explicit one-time decision when the choices are recognized. For an incomplete or unsupported prompt, read the returned text and use the existing Escape operation to cancel the native interaction if needed. A Codex policy override belongs to that one named read-only tool; the generic `invoke_operation` tool can mutate state and must keep its existing approval policy.
 
 For an expired approval with an explicitly stopped or retired session, follow the retained stop result. For a non-retired session reported `not_started`, an explicit `reopen_session` verifies that the original native process and its tracked children are absent and reopens the pinned conversation. The prior request remains expired, with its effects unconfirmed. An existing prompt, missing original history, or an unverified process keeps the guard in place.
+
+In revision 2, an optional `text` retains a follow-up to a cancelled session message. Relay sends it only after verifying the original turn stopped and that the same session is waiting for input. Retrying the same cancellation with the same text returns the retained follow-up. Different text returns `id_conflict`. Read the source's `followUp` for pending, submitted, failed or not-sent state, and query its `requestId` with `get_result` for the actual new outcome. A failed or uncertain submission is never sent again automatically.
+
+`get_result` on a cancelled session message exposes `sessionActivity` separately from the retained operation, with session ID, request ID and observation time. `get_session` exposes the latest session observation. Activity can be `working`, `waiting_for_input`, `awaiting_approval` or `unknown`. Unavailable or unsupported native evidence produces `unknown`. Terminal readiness alone does not confirm that the cancelled request stopped.
 
 If a targeted closure returned `closed` with an unconfirmed request stop, use `reopen_session`. Relay verifies the prior runtime is gone, keeps the original request and its uncertainty, and resumes the pinned conversation. `session_runtime_still_active` identifies an old runtime that has not exited yet. Inspect the session before retrying. No request is replayed.
 

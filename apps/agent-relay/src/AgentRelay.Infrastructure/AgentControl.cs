@@ -6,7 +6,8 @@ namespace AgentRelay.Infrastructure;
 
 public sealed record AgentStatus(string ProfileId, string Client, string State, string Message, string Distribution,
     string User, string Workspace, bool ModelPromptSent = false, string? Details = null, string? NativeConversationId = null,
-    RuntimeStamp? DistributionRuntime = null, RuntimeStamp? NativeRuntime = null, bool? NativePresent = null);
+    RuntimeStamp? DistributionRuntime = null, RuntimeStamp? NativeRuntime = null, bool? NativePresent = null,
+    string Activity = "unknown");
 public sealed record ProfileContext(string Id, string Name, string Client, string Distribution, string User,
     string Workspace, bool AllowLocalWork, IReadOnlyList<CommandRule> Commands);
 
@@ -83,9 +84,12 @@ public sealed class AgentControl(SettingsStore settings, WslBridge bridge) : ISe
             attention ? Result(profile, "attention_required", "The native agent requires attention in its dedicated terminal.", pane) :
             !initialized ? Result(profile, "starting", "The agent session is running; its relay MCP is still initializing.") :
             Result(profile, "ready", "The native session and relay MCP are ready.");
+        var activity = native.TryGetProperty("activity", out var observed) && observed.ValueKind == JsonValueKind.String ? observed.GetString() : null;
         return result with {
             NativeConversationId = native.TryGetProperty("nativeConversationId", out var conversation) && conversation.ValueKind == JsonValueKind.String ? conversation.GetString() : null,
-            DistributionRuntime = ReadStamp(native, "distributionRuntime"), NativeRuntime = ReadStamp(native, "nativeRuntime"), NativePresent = available
+            DistributionRuntime = ReadStamp(native, "distributionRuntime"), NativeRuntime = ReadStamp(native, "nativeRuntime"), NativePresent = available,
+            Activity = result.State == "awaiting_approval" ? "awaiting_approval" :
+                result.State == "ready" && activity is "working" or "waiting_for_input" ? activity : "unknown"
         };
     }
 

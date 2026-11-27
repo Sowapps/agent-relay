@@ -7,7 +7,8 @@ public sealed record SessionRuntimeObservation(RuntimeStamp Host, RuntimeStamp? 
 public sealed record SessionDefinition(Guid Id, string Name, OperationScope Scope, RelayEndpoint Endpoint,
     RelayWorkspace Workspace, bool AllowLocalWork);
 public sealed record SessionSnapshot(Guid Id, string Name, OperationScope Scope, string State, string? NativeConversationId = null,
-    string? Diagnostic = null, bool WorkActive = false, SessionRuntimeObservation? Runtime = null);
+    string? Diagnostic = null, bool WorkActive = false, SessionRuntimeObservation? Runtime = null, SessionActivityObservation? Activity = null);
+public sealed record SessionActivityObservation(Guid SessionId, string State, DateTimeOffset ObservedAt, Guid? RequestId = null);
 public sealed record ReadQuery(Guid ProjectId, Guid? EndpointId = null, Guid? SessionId = null, Guid? TaskId = null,
     string? Kind = null, string? State = null, string? Search = null, DateTimeOffset? Since = null, DateTimeOffset? Until = null,
     long? Cursor = null, int Limit = 50, bool IncludeDeleted = false);
@@ -218,7 +219,7 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
     }
 
     public async Task<WorkRecord> MessageAsync(CallerIdentity caller, Guid sessionId, Guid requestId, string text, Guid? taskId, CancellationToken token,
-        Guid? previousRequestId = null)
+        Guid? previousRequestId = null, bool singleDispatch = false)
     {
         using var projectLease = Admission.EnterWork((await sessions.GetAsync(sessionId, token)).Scope.ProjectId);
         using var policySnapshot = policy.Pin();
@@ -227,7 +228,7 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
         var scope = policy.Message(caller, session.Scope.ProjectId, session.Scope.RecipientId, session.Scope.WorkspaceId);
         return await work.SubmitAsync(new(requestId, scope.RecipientId.ToString("D"), "message", text, SessionId: sessionId,
             Scope: scope, TaskId: taskId ?? requestId, AttemptId: requestId, SessionOwnerId: DelegatingOwner(session, caller),
-            PreviousRequestId: previousRequestId), token,
+            PreviousRequestId: previousRequestId, SingleDispatch: singleDispatch), token,
             new("Message · " + session.Name, Workspace(scope).Location));
     }
 
@@ -297,7 +298,7 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
         catch (IOException) { return result with { ReadRecoveryError = "storage_unavailable" }; }
     }
 
-    public async Task<WorkRecord> CancelAsync(CallerIdentity caller, Guid requestId, CancellationToken token)
+    public async Task<WorkRecord> CancelAsync(CallerIdentity caller, Guid requestId, CancellationToken token, string? text = null)
     {
         var retained = await work.ReadAsync(requestId, token);
         using var projectLease = Admission.EnterWork(retained.Request.Scope?.ProjectId ?? Guid.Empty);
@@ -306,6 +307,9 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
         var scope = record.Request.Scope ?? throw new RelayException("legacy_unassigned", "The request has no retained project.", false);
         DemandRequestRead(caller, scope.ProjectId);
         var managesProject = policy.CanManageRequests(caller, scope.ProjectId);
+        if (text is not null && (record.Request.Kind != "message" || record.Request.SessionId is null || string.IsNullOrWhiteSpace(text)
+            || text.Length > 8000 || text.Any(value => char.IsControl(value) && value is not ('\r' or '\n' or '\t'))))
+            throw new RelayException("invalid_request", "A follow-up requires a session message and 1–8000 characters of text.", false);
         if (record.Request.SessionId is not { } id)
         {
             if (!managesProject && scope.SenderId != caller.EndpointId)
@@ -321,14 +325,40 @@ public sealed partial class RelayApplication(ProjectPolicy policy, WorkService w
                 throw new RelayException("capability_denied", "The retained request and session contexts differ.", false);
         }
         else await OwnedAsync(caller, id, RelayCapabilities.ManageSession, token);
-        record = await work.RequestCancellationAsync(requestId, token);
+        if (text is not null)
+        {
+            var destination = await OwnedAsync(caller, id, RelayCapabilities.SendMessage, token);
+            policy.Message(caller, destination.Scope.ProjectId, destination.Scope.RecipientId, destination.Scope.WorkspaceId);
+        }
+        var priorFollowUp = record.FollowUp;
+        record = await work.RequestCancellationAsync(requestId, token, caller.EndpointId, text);
+        if (text is not null && priorFollowUp is not null) return record;
         if (record.State is not ("awaiting_approval" or "failed") &&
             (record.ReplyDispatch is not null || await work.IsOperationActiveAsync(requestId, token)))
         {
-            try { if (record.Request.Kind == "message") await sessions.ControlAsync(id, "interrupt", token); }
+            try { if (record.Request.Kind == "message" && record.ReplyDispatch is not null) await sessions.ControlAsync(id, "interrupt", token); }
             finally { await work.InterruptOperationAsync(requestId, CancellationToken.None); }
         }
         return await work.ReadAsync(requestId, token);
+    }
+
+    public async Task<SessionActivityObservation?> RequestActivityAsync(CallerIdentity caller, WorkRecord record, CancellationToken token)
+    {
+        if (record.Request.SessionId is not { } id || (record.CancellationRequestedAt is null && record.FollowUp is null)) return null;
+        if (record.Request.Scope is not { } scope) return null;
+        DemandRequestRead(caller, scope.ProjectId);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
+        deadline.CancelAfter(TimeSpan.FromSeconds(3));
+        try
+        {
+            var session = await sessions.GetAsync(id, deadline.Token);
+            if (!BelongsToSession(record.Request, session)) return null;
+            var observed = (await sessions.InspectAsync(id, deadline.Token)).Activity;
+            if (observed is not null) return observed with { RequestId = record.Request.Id };
+        }
+        catch (OperationCanceledException) when (!token.IsCancellationRequested) { }
+        catch (Exception error) when (error is RelayException or IOException or TimeoutException) { }
+        return new(id, "unknown", DateTimeOffset.UtcNow, record.Request.Id);
     }
 
     public async Task<TransferPartial> TransferPartialAsync(CallerIdentity caller, Guid requestId, bool remove, CancellationToken token)

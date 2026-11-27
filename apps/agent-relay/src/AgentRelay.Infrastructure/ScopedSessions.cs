@@ -22,10 +22,13 @@ public sealed class ScopedSessions(SessionService sessions, AgentControl agents,
     {
         var record = await context.RecordAsync(id, token);
         context.ValidateDefinition(record.Definition!);
-        if (record.State is "closed" or "preparing" or "setup_failed") return Snapshot(record);
+        if (record.State is "closed" or "preparing" or "setup_failed")
+            return Snapshot(record) with { Activity = new(id, "unknown", DateTimeOffset.UtcNow) };
         var agent = await agents.StatusAsync(await sessions.ResolveAsync(id, record.ProfileId, token, allowClosed: true), token);
         var observation = await sessions.ObserveAsync(id, agent, token);
-        return Snapshot(record) with { State = agent.State, Diagnostic = agent.Message, NativeConversationId = agent.NativeConversationId, Runtime = observation };
+        var activity = active(id) && agent.Activity == "waiting_for_input" ? "unknown" : agent.Activity;
+        return Snapshot(record) with { State = agent.State, Diagnostic = agent.Message, NativeConversationId = agent.NativeConversationId,
+            Runtime = observation, Activity = new(id, activity, observation.ObservedAt) };
     }
 
     public async Task<SessionSnapshot> InspectForArchiveAsync(Guid id, CancellationToken token)

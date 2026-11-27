@@ -90,6 +90,11 @@ internal static class McpStableFacadeScenarios
             operation_id = "cancel_operation", revision = 1, arguments = new { request_id = id } });
         Check(Error(await Cancel(request)) == "operation_already_finished", "Finished cancellation refusal survives MCP");
         var cancellation = await Cancel(awaiting);
+        var revisedCancellation = await Call("invoke_operation", new { call_id = Guid.NewGuid(), operation_id = "cancel_operation",
+            revision = 2, arguments = new { request_id = awaiting } });
+        Check(revisedCancellation.GetProperty("operation").GetProperty("cancellationRequestedAt").GetString() ==
+            cancellation.GetProperty("operation").GetProperty("cancellationRequestedAt").GetString(),
+            "The new cancellation revision without text changed the original cancellation.");
         var progress = cancellation.GetProperty("cancellation");
         Check(cancellation.GetProperty("operation").GetProperty("state").GetString() == "awaiting_approval" &&
             progress.GetProperty("sessionId").GetGuid() == session && progress.GetProperty("state").GetString() == "close_required" &&

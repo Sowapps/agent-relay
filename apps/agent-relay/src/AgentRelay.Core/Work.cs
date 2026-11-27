@@ -3,7 +3,8 @@ namespace AgentRelay.Core;
 public sealed record TransferRequest(string Direction, string SourcePath, string DestinationPath, bool Overwrite = false);
 public sealed record WorkRequest(Guid Id, string ProfileId, string Kind, string Text = "", string? CommandId = null, Guid? SessionId = null,
     TransferRequest? Transfer = null, OperationScope? Scope = null, Guid? TaskId = null, Guid? AttemptId = null,
-    ArtifactTransfer? Artifact = null, Guid? SessionOwnerId = null, string? ExecutionBinding = null, Guid? PreviousRequestId = null);
+    ArtifactTransfer? Artifact = null, Guid? SessionOwnerId = null, string? ExecutionBinding = null, Guid? PreviousRequestId = null,
+    bool SingleDispatch = false);
 public sealed record WorkResult(string Origin, string Output, string ErrorOutput = "", int? ExitCode = null,
     IReadOnlyDictionary<string, string>? Details = null);
 public sealed record WorkRecord(WorkRequest Request, string State, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt,
@@ -15,7 +16,8 @@ public sealed record WorkRecord(WorkRequest Request, string State, DateTimeOffse
     NativeAttempt[]? NativeAttempts = null, DateTimeOffset? TerminalEscapeSentAt = null,
     DateTimeOffset? ApprovalResumeVerifiedAt = null, NativeRetry? Retry = null, NativeReplyDispatch? ReplyDispatch = null,
     DateTimeOffset? ApprovalClosureReleasedAt = null, RequestAdministration? Administration = null,
-    string? ReadRecoveryError = null);
+    string? ReadRecoveryError = null, CancellationFollowUp? FollowUp = null);
+public sealed record CancellationFollowUp(Guid RequestId, Guid SenderId, string Text, string State = "pending", string? Diagnostic = null);
 
 public sealed record NativeRetry(DateTimeOffset DueAt, string NativeGeneration, string DistributionGeneration, string WorkspaceIdentity);
 public sealed record NativeReplyDispatch(string NativeGeneration, string DistributionGeneration, string WorkspaceIdentity);
@@ -44,7 +46,8 @@ public static class WorkExecution
 
     public static bool NeedsApprovalObservation(WorkRecord record) =>
         record.ApprovalResumeVerifiedAt is null && record.CancellationConfirmedAt is null &&
-        (record.State == "approval_expired" || record.TerminalRefusalSentAt is not null || record.TerminalEscapeSentAt is not null);
+        (record.State == "approval_expired" || record.TerminalRefusalSentAt is not null || record.TerminalEscapeSentAt is not null ||
+            record is { FollowUp.State: "pending", CancellationRequestedAt: not null, SessionClosedAt: null });
 }
 public sealed record WorkProgress(long Bytes, long TotalBytes, string Phase, DateTimeOffset UpdatedAt);
 public sealed record WorkEvent(Guid Id, Guid RequestId, Guid? ProjectId, Guid? TaskId, Guid? AttemptId, Guid? SessionId,
@@ -81,6 +84,8 @@ public interface IWorkStore
     Task<bool> ClaimRetryAsync(Guid id, DateTimeOffset now, CancellationToken token) => Task.FromResult(false);
     Task<WorkRecord> ChangeRequestAsync(Guid id, Guid actor, RequestChange change, CancellationToken token) =>
         throw new RelayException("adapter_unavailable", "This work store cannot administer requests.", false);
+    Task<bool> RequestCancellationWithFollowUpAsync(Guid id, Guid sender, string text, CancellationToken token) =>
+        throw new RelayException("adapter_unavailable", "This work store cannot retain cancellation instructions.", false);
 }
 
 public interface IWorkExecutor
@@ -297,10 +302,12 @@ public sealed class WorkService : IAsyncDisposable
             throw new RelayException("session_awaiting_approval", "A retained approval or unconfirmed stop belongs to this session. Resolve it before reusing the session.", false);
     }
 
-    public async Task<WorkRecord> RequestCancellationAsync(Guid id, CancellationToken token)
+    public async Task<WorkRecord> RequestCancellationAsync(Guid id, CancellationToken token, Guid? sender = null, string? text = null)
     {
-        await store.RequestCancellationAsync(id, token);
+        var first = text is null || await store.RequestCancellationWithFollowUpAsync(id, sender!.Value, text, token);
+        if (text is null) await store.RequestCancellationAsync(id, token);
         var record = await ReadAsync(id, token);
+        if (!first) return record;
         if (record is { ErrorCode: WorkExecution.RetryCancelled, CancellationRequestedAt: not null }) return record;
         if (record.State is "completed" or "failed" or "approval_expired" || record.CancellationConfirmedAt is not null)
             throw new RelayException("operation_already_finished", "The operation is already finished and cannot be cancelled.", false);
