@@ -9,28 +9,62 @@ internal sealed partial class ProjectWindow
 {
     private IEnumerable<WorkRecord> Operations => observations.Values.SelectMany(item => item.Operations);
     private IEnumerable<SessionSnapshot> Sessions => observations.Values.SelectMany(item => item.Sessions);
+    private readonly HashSet<(string Group, Guid Target)> activeActions = [];
+    private readonly Dictionary<Guid, SemaphoreSlim> threadReads = [];
     private static string? Value(JsonElement message, string name) => message.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
     private bool Supports(SessionSnapshot session, string capability) => configuration.Projects.Any(item => item.Id == session.Scope.ProjectId && item.Enabled)
         && descriptors.Any(item => item.EndpointId == session.Scope.RecipientId && item.Capabilities?.Contains(capability) == true)
         && configuration.Memberships.Any(item => item.ProjectId == session.Scope.ProjectId && item.EndpointId == session.Scope.SenderId
             && item.Capabilities.Contains(capability == "session.inspect" ? RelayCapabilities.ReadHistory : capability));
 
-    private async Task ReadThread(SessionSnapshot session,bool older,CancellationToken token)
+    private async Task ReadThread(SessionSnapshot session,bool older,CancellationToken token, bool background = false)
     {
-        if(!configuration.Projects.Any(item=>item.Id==session.Scope.ProjectId))throw new RelayException("not_found","Project unavailable");
-        if(!threads.TryGetValue(session.Id,out var thread))threads[session.Id]=thread=new(session.Scope.ProjectId,session.Id);
-        try{await source.LoadAsync(thread,older,token);}
-        catch(Exception error) when(!released){thread.Error=UserMessages.Error(error);}
-        var project=observations[session.Scope.ProjectId];
-        Monitoring.PipeMonitorSource.Merge(project.Operations,thread.Operations,item=>item.Request.Id,out var operationsChanged);
-        Monitoring.PipeMonitorSource.Merge(project.Messages,thread.Messages,item=>item.Id,out var messagesChanged);
-        if(operationsChanged||messagesChanged)project.Revision++;
+        if (!threadReads.TryGetValue(session.Id, out var gate)) threadReads.Add(session.Id, gate = new(1, 1));
+        if (background && !gate.Wait(0)) return;
+        if (!background) await gate.WaitAsync(token);
+        try
+        {
+            if (!observations.TryGetValue(session.Scope.ProjectId, out var project)) throw new RelayException("not_found", "Project unavailable");
+            if (!threads.TryGetValue(session.Id, out var thread)) threads[session.Id] = thread = new(session.Scope.ProjectId, session.Id);
+            try { await source.LoadAsync(thread, older, token); }
+            catch (Exception error) when (!released) { thread.Error = UserMessages.Error(error); }
+            Monitoring.PipeMonitorSource.Merge(project.Operations, thread.Operations, item => item.Request.Id, out var operationsChanged);
+            Monitoring.PipeMonitorSource.Merge(project.Messages, thread.Messages, item => item.Id, out var messagesChanged);
+            if (operationsChanged || messagesChanged) project.Revision++;
+        }
+        finally { gate.Release(); }
+    }
+
+    private (string Group, Guid Target)? ActionIdentity(string? action, Guid id, JsonElement message)
+    {
+        var project = Guid.TryParse(Value(message, "project"), out var selected) ? selected : Guid.Empty;
+        return action switch
+        {
+            "session-control" or "inspect-session" => ("session", id),
+            "interrupt-operation" => ("session", Operations.FirstOrDefault(item => item.Request.Id == id)?.Request.SessionId ?? id),
+            "project-reactions-read" or "project-reactions-save" => ("reactions", project),
+            "project-state" or "load-more" => (action, project),
+            "cleanup-analyze" or "cleanup-execute" => ("cleanup", Guid.Empty),
+            "mark-reviewed" or "operation" or "operation-events" or "inspect-partial" or "close-mcp" or "load-session" => (action, id),
+            "refresh" or "startup-preference" or "edit-projects" or "legacy-history" => (action, Guid.Empty),
+            _ => null
+        };
     }
 
     private async Task HandleAction(JsonElement message)
     {
         if (released) return;
         var action = Value(message,"action"); var id = Guid.TryParse(Value(message,"id"),out var parsed) ? parsed : Guid.Empty;
+        var call = Value(message, "call");
+        var identity = ActionIdentity(action, id, message);
+        if (identity is { } key && !activeActions.Add(key))
+        {
+            if (call is not null) Presentation.Send(new { type = "action-complete", call, success = false, error = "Cette action est déjà en cours." });
+            return;
+        }
+        var success = true;
+        var unconfirmed = false;
+        string? failureNotice = null;
         try
         {
             switch (action)
@@ -48,6 +82,7 @@ internal sealed partial class ProjectWindow
                     }
                     catch (Exception failure) when (!released)
                     {
+                        success = false;
                         if (!released) Presentation.Send(new { type = action, project = reactionProject,
                             error = failure is RelayException { Code: "state_conflict" } ? "Les réglages ont changé. Actualisez avant d’enregistrer." : failure.Message });
                     }
@@ -70,10 +105,13 @@ internal sealed partial class ProjectWindow
                         if (!released) Presentation.Send(new { type = action, data = result });
                     }
                     catch (Exception error) when (!released)
-                    { Presentation.Send(new { type = action, error = error.Message }); }
+                    { success = false; Presentation.Send(new { type = action, error = error.Message }); }
                     break;
                 case "close-mcp":
-                    if (!McpTransportMonitor.RequestClose(data,id)) McpConnections.RequestClose(data,id); Notice("Fermeture demandée après la requête en cours. Les permissions sont conservées. Sa reconnexion dépend du client."); await Reload(true); break;
+                    if (!McpTransportMonitor.RequestClose(data,id)) McpConnections.RequestClose(data,id);
+                    Presentation.Send(new { type = "mcp-close-requested", id });
+                    Notice("Fermeture demandée après la requête en cours. Les permissions sont conservées. Sa reconnexion dépend du client.");
+                    await Reload(true); break;
                 case "project-state":
                     var projectId = Guid.Parse(Value(message,"project") ?? "");
                     try
@@ -85,6 +123,7 @@ internal sealed partial class ProjectWindow
                     }
                     catch (Exception failure) when (!released)
                     {
+                        success = false;
                         Presentation.Send(new { type="project-state", project=projectId.ToString("D"), error=UserMessages.Error(failure), diagnostic=failure.Message });
                     }
                     break;
@@ -94,7 +133,7 @@ internal sealed partial class ProjectWindow
                     StartupPreferenceState startup;
                     settingStartup = true;
                     try { startup = await Task.Run(() => startupPreference.Set(enabled.GetBoolean()), lifetime.Token); }
-                    catch (Exception failure) { startup = startupPreference.Read() with { Error = "Le réglage n’a pas pu être modifié. " + failure.Message }; }
+                    catch (Exception failure) { success = false; startup = startupPreference.Read() with { Error = "Le réglage n’a pas pu être modifié. " + failure.Message }; }
                     finally { settingStartup = false; }
                     if (released) break;
                     Presentation.Send(new { type = "startup-preference", data = startup });
@@ -105,13 +144,13 @@ internal sealed partial class ProjectWindow
                     activeSession=id;
                     using(var timeout=CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token))
                     {timeout.CancelAfter(TimeSpan.FromSeconds(12));await ReadThread(threadSession,message.TryGetProperty("older",out var previous)&&previous.ValueKind==JsonValueKind.True,timeout.Token);}
-                    PublishSnapshot(true); break;
-                case "refresh": await Reload(true); break;
+                    PublishSnapshot(true); success = threads[id].Error is null; break;
+                case "refresh": await Reload(true, explicitRead: true); break;
                 case "load-more":
                     var projectText = Value(message,"project");
                     Guid? project = projectText is null ? null : Guid.Parse(projectText);
                     if (project is not null && !observations.ContainsKey(project.Value)) throw new RelayException("not_found","Project unavailable");
-                    await Reload(false,true,project); break;
+                    await Reload(false,true,project,explicitRead: true); break;
                 case "operation":
                     var preview = Operations.FirstOrDefault(item => item.Request.Id == id) ?? throw new RelayException("not_found","Operation unavailable");
                     using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token))
@@ -164,7 +203,8 @@ internal sealed partial class ProjectWindow
                             if (index>=0) { records.Sessions[index]=updated; records.Revision++; }
                         }
                     }
-                    await Reload(true); Presentation.Send(new {type="action-result",success=true,text="Session actualisée."}); break;
+                    await Reload(true);
+                    Presentation.Send(new {type="action-result",action,id,success=true,text="Session actualisée."}); break;
                 case "interrupt-operation":
                     var operation = Operations.FirstOrDefault(item=>item.Request.Id==id) ?? throw new RelayException("not_found","Operation unavailable");
                     var owner = Sessions.FirstOrDefault(item=>item.Id==operation.Request.SessionId);
@@ -179,6 +219,20 @@ internal sealed partial class ProjectWindow
             }
         }
         catch (OperationCanceledException) when (released) { }
-        catch (Exception error) when (!released) { Presentation.Send(new {type="action-result",success=false,text=error is IOException && reviews.Warning is not null ? reviews.Warning : UserMessages.Error(error)}); if (error is RelayException { Code: "review_stale" }) await Reload(true); }
+        catch (Exception error) when (!released)
+        {
+            success = false;
+            failureNotice = error is IOException && reviews.Warning is not null ? reviews.Warning : UserMessages.Error(error);
+            unconfirmed = action is "mark-reviewed" or "close-mcp" or "session-control" or "interrupt-operation" or "edit-projects" &&
+                error is OperationCanceledException or TimeoutException or IOException or RelayException { EffectsPossible: true };
+            if (unconfirmed) failureNotice += " Résultat à vérifier. Actualisez l’état avant de réessayer.";
+            if (call is null) Presentation.Send(new { type = "action-result", action, id, success = false, text = failureNotice });
+            if (error is RelayException { Code: "review_stale" }) await Reload(true);
+        }
+        finally
+        {
+            if (identity is { } completed) activeActions.Remove(completed);
+            if (!released && call is not null) Presentation.Send(new { type = "action-complete", call, success, unconfirmed, error = failureNotice });
+        }
     }
 }

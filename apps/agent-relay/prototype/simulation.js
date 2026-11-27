@@ -4,10 +4,10 @@ const listeners=[],emit=message=>listeners.forEach(fn=>fn({data:message}));
 const snapshot=()=>emit({type:'snapshot',data:structuredClone(fixture)});
 const report=text=>document.querySelector('#sim-result').textContent=text;
 const update=()=>{fixture.mcpConnections.reverse();for(const c of fixture.mcpConnections)c.lastSeen=new Date().toISOString();fixture.observedAt=new Date().toISOString();snapshot();report('Données actualisées. Aucun travail réel exécuté.');};
-window.chrome||={};window.chrome.webview={addEventListener:(_,fn)=>listeners.push(fn),postMessage:message=>{
+function simulate(message){
  if(message.action==='ready'){queueMicrotask(()=>{snapshot();window.RelayUI.route(Object.fromEntries(new URLSearchParams(location.search)));});return;}
  if(['stop-session','copy'].includes(message.action)){report(message.action==='copy'?'Copie simulée.':'Suivi fictif arrêté.');return;}
- if(failNext){failNext=false;if(message.action==='project-state')emit({type:'project-state',project:message.project,error:'L’état du projet a changé depuis votre ouverture. Actualisez avant de choisir une nouvelle action.'});else emit({type:'action-result',success:false,text:'La donnée a changé depuis votre ouverture. Votre saisie est conservée ; consultez l’état actuel avant de réessayer.'});report('Conflit simulé.');return;}
+ if(failNext){failNext=false;if(message.action==='project-state')emit({type:'project-state',project:message.project,error:'L’état du projet a changé depuis votre ouverture. Actualisez avant de choisir une nouvelle action.'});else emit({type:'action-result',success:false,text:'La donnée a changé depuis votre ouverture. Votre saisie est conservée ; consultez l’état actuel avant de réessayer.'});report('Conflit simulé.');return false;}
  if(message.action==='project-state'){const p=fixture.projects.find(p=>p.id===message.project);p.archiveRequested=message.state==='archived';if(message.state==='active')p.state='active';emit({type:'project-state',project:p.id,state:p.state,archiveRequested:p.archiveRequested});}
  else if(message.action==='session-control'){const s=fixture.sessions.find(s=>s.id===message.id);if(message.control.startsWith('rename:'))s.name=message.control.slice(7);else s.state=message.control==='close'?'closed':'ready';emit({type:'action-result',success:true,text:'Modification fictive confirmée.'});}
  else if(message.action==='inspect-session'){const s=fixture.sessions.find(s=>s.id===message.id);if(s)s.runtimeObservedAt=new Date().toISOString();emit({type:'action-result',success:!!s,text:s?'État fictif de la session actualisé.':'Session fictive introuvable.'});}
@@ -19,6 +19,16 @@ window.chrome||={};window.chrome.webview={addEventListener:(_,fn)=>listeners.pus
  else if(message.action==='open-console')emit({type:'notice',text:'Console simulée · Connexion : WSL · Distribution : Ubuntu-24.04 · Utilisateur : sowapps · Espace de travail : /workspace'});
  else if(!['refresh','load-more'].includes(message.action))report('Action représentée uniquement dans la maquette.');
  snapshot();
+}
+window.chrome||={};window.chrome.webview={addEventListener:(_,fn)=>listeners.push(fn),postMessage:message=>{
+ if(!message.call){simulate(message);return;}
+ report('Opération fictive en cours. Essayez un second clic ou actualisez les données.');
+ setTimeout(()=>{
+  let success=false;
+  try{success=simulate(message)!==false;}
+  catch{emit({type:'action-result',success:false,text:'L’action fictive n’a pas abouti.'});}
+  finally{emit({type:'action-complete',call:message.call,success});}
+ },850);
 }};
 document.querySelector('#sim-update').onclick=update;
 document.querySelector('#sim-conflict').onclick=()=>{failNext=true;report('La prochaine action échouera avec un conflit explicite.');};

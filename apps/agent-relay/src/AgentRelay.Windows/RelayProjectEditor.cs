@@ -38,7 +38,14 @@ internal sealed class RelayProjectEditor : Form
         panel.Controls.Add(localWork); panel.Controls.Add(transfers); panel.Controls.Add(commands);
         panel.Controls.Add(UiTheme.Label("Aucun dossier n’est copié ou synchronisé. Les autorisations restent propres à ce projet.", 9, muted: true));
         var buttons = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Top, Margin = new Padding(0, 18, 0, 0) };
-        buttons.Controls.Add(UiTheme.Button("Créer le projet", Save, primary: true)); buttons.Controls.Add(UiTheme.Button("Annuler", (_, _) => Close())); panel.Controls.Add(buttons); Controls.Add(panel);
+        var create = UiTheme.Button("Créer le projet", Save, primary: true);
+        void UpdateAvailability() => create.Enabled = !string.IsNullOrWhiteSpace(name.Text) && !string.IsNullOrWhiteSpace(local.Text)
+            && remote.Text.StartsWith('/') && principal.SelectedItem is RelayEndpoint && agent.SelectedItem is WslProfile;
+        foreach (var input in new[] { name, local, remote }) input.TextChanged += (_, _) => UpdateAvailability();
+        principal.SelectedIndexChanged += (_, _) => UpdateAvailability();
+        agent.SelectedIndexChanged += (_, _) => UpdateAvailability();
+        UpdateAvailability(); AcceptButton = create;
+        buttons.Controls.Add(create); buttons.Controls.Add(UiTheme.Button("Annuler", (_, _) => Close())); panel.Controls.Add(buttons); Controls.Add(panel);
     }
 
     private void Save(object? sender, EventArgs args)

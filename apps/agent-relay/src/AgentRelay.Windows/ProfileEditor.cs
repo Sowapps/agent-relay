@@ -13,26 +13,37 @@ internal sealed class ProfileEditor : Form
     private readonly string dataDirectory;
     private readonly int maximumConcurrency;
     private readonly TransferLimits? transfers;
-    internal RelaySettings Settings => new(1, profiles.Items.Cast<WslProfile>().ToArray(), maximumConcurrency, transfers);
+    private readonly WindowsCommandProfile[]? windowsCommands;
+    private readonly UiActionStates pendingActions;
+    private readonly Label preparation = UiTheme.Label("", 9, muted: true);
+    internal RelaySettings Settings => new(1, profiles.Items.Cast<WslProfile>().ToArray(), maximumConcurrency, transfers, windowsCommands);
 
     public ProfileEditor(RelaySettings settings, string dataDirectory)
     {
         this.dataDirectory = dataDirectory;
         maximumConcurrency = settings.MaximumConcurrency;
         transfers = settings.Transfers;
+        windowsCommands = settings.WindowsCommands;
+        pendingActions = new(error => preparation.Text = UserMessages.Error(error));
         UiTheme.Apply(this);
         Text = "Profils · Agent Relay"; Size = new Size(980, 760); MinimumSize = new Size(880, 680); StartPosition = FormStartPosition.CenterParent;
         var layout = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(24), ColumnCount = 1, RowCount = 3 };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 72)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 52));
         var heading = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false };
-        heading.Controls.Add(UiTheme.Label("Profils WSL", 19, bold: true)); heading.Controls.Add(UiTheme.Label("Choisissez une destination et ses autorisations.", muted: true)); layout.Controls.Add(heading);
+        heading.Controls.Add(UiTheme.Label("Profils WSL", 19, bold: true)); heading.Controls.Add(UiTheme.Label("Choisissez une destination et ses autorisations.", muted: true));
+        heading.Controls.Add(preparation); layout.Controls.Add(heading);
         var body = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1, Margin = new Padding(0, 0, 0, 16) };
         body.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 230)); body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         var listPanel = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = new Padding(0, 0, 16, 0) };
         listPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); listPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); listPanel.RowStyles.Add(new RowStyle(SizeType.Absolute, 48));
         UiTheme.ListStyle(profiles); listPanel.Controls.Add(profiles);
-        listPanel.Controls.Add(UiTheme.Button("Nouveau profil", (_, _) => { selectedId = null; profiles.ClearSelected(); name.Clear(); root.Clear(); localWork.Checked = false; distribution.Text = "Ubuntu-24.04"; user.Text = "sowapps"; kind.SelectedIndex = 0; }));
+        listPanel.Controls.Add(pendingActions.Button("Nouveau profil", () => "profile", "Préparation…", () =>
+        {
+            selectedId = null; profiles.ClearSelected(); name.Clear(); root.Clear(); localWork.Checked = false;
+            distribution.Text = "Ubuntu-24.04"; user.Text = "sowapps"; kind.SelectedIndex = 0;
+            return Task.CompletedTask;
+        }));
         var listCard = UiTheme.Card(listPanel); listCard.Margin = new Padding(0, 0, 16, 0); body.Controls.Add(listCard, 0, 0);
         var fieldsPanel = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1, Margin = new Padding(0) };
         fieldsPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -50,15 +61,34 @@ internal sealed class ProfileEditor : Form
         var scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true }; scroll.Controls.Add(fieldsPanel); body.Controls.Add(UiTheme.Card(scroll), 1, 0); layout.Controls.Add(body);
         var buttons = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, Margin = new Padding(0) };
         buttons.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); buttons.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        buttons.Controls.Add(UiTheme.Button("Préparer un espace WSL dédié", Prepare));
+        buttons.Controls.Add(pendingActions.Button("Préparer un espace WSL dédié", () => "profile", "Préparation…", async () =>
+        {
+            fieldsPanel.Enabled = false; profiles.Enabled = false;
+            try { await Prepare(); }
+            finally { if (!IsDisposed) { fieldsPanel.Enabled = true; profiles.Enabled = true; } }
+        }));
         var saveButtons = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Dock = DockStyle.Fill };
-        saveButtons.Controls.Add(UiTheme.Button("Appliquer au profil", Apply));
-        saveButtons.Controls.Add(UiTheme.Button("Enregistrer et fermer", (_, _) => { if (!ApplyCurrent()) return; try { SettingsStore.Validate(Settings); DialogResult = DialogResult.OK; } catch (Exception error) { MessageBox.Show(this, error.Message); } }, primary: true));
+        string? EditableProfile() => kind.SelectedItem is not null && !string.IsNullOrWhiteSpace(name.Text) && !string.IsNullOrWhiteSpace(root.Text) ? "profile" : null;
+        saveButtons.Controls.Add(pendingActions.Button("Appliquer au profil", EditableProfile, "Préparation…", () =>
+        { ApplyCurrent(); return Task.CompletedTask; }));
+        var save = pendingActions.Button("Enregistrer et fermer", EditableProfile, "Préparation…", () =>
+        {
+            if (ApplyCurrent()) { SettingsStore.Validate(Settings); DialogResult = DialogResult.OK; }
+            return Task.CompletedTask;
+        }, primary: true);
+        saveButtons.Controls.Add(save); AcceptButton = save;
+        foreach (var input in new[] { name, root }) input.TextChanged += (_, _) => pendingActions.Refresh();
+        kind.SelectedIndexChanged += (_, _) => pendingActions.Refresh();
         buttons.Controls.Add(saveButtons); layout.Controls.Add(buttons);
         kind.SelectedIndexChanged += (_, _) => { var commandMode = SelectedClient == "command"; program.Enabled = commandMode; arguments.Enabled = commandMode; localWork.Enabled = !commandMode; };
         profiles.Items.AddRange(settings.Profiles); profiles.SelectedIndexChanged += Select;
         Controls.Add(layout);
         if (profiles.Items.Count > 0) profiles.SelectedIndex = 0;
+        FormClosing += (_, args) =>
+        {
+            if (args.CloseReason == CloseReason.UserClosing && !pendingActions.Available("profile") && DialogResult != DialogResult.OK)
+            { args.Cancel = true; preparation.Text = "La préparation WSL est encore en cours."; }
+        };
     }
 
     private void Select(object? sender, EventArgs args)
@@ -69,9 +99,6 @@ internal sealed class ProfileEditor : Form
         localWork.Checked = profile.AllowLocalWork; executable.Text = profile.NativeExecutable ?? "";
         program.Text = profile.Commands.FirstOrDefault()?.Program ?? "/bin/ls"; arguments.Lines = profile.Commands.FirstOrDefault()?.Arguments ?? ["-1"];
     }
-    private void Apply(object? sender, EventArgs args)
-    { ApplyCurrent(); }
-
     private bool ApplyCurrent()
     {
         try
@@ -93,19 +120,15 @@ internal sealed class ProfileEditor : Form
         catch (Exception error) { MessageBox.Show(this, error.Message, "Profil à corriger"); return false; }
     }
 
-    private async void Prepare(object? sender, EventArgs args)
+    private async Task Prepare()
     {
-        if (sender is not Button button) return;
-        button.Enabled = false;
-        try
-        {
-            var prepared = await WslProvisioner.PrepareAsync(dataDirectory, string.IsNullOrWhiteSpace(distribution.Text) ? "Ubuntu-24.04" : distribution.Text,
-                string.IsNullOrWhiteSpace(user.Text) ? "sowapps" : user.Text, CancellationToken.None);
-            profiles.Items.AddRange(prepared.Profiles);
-            profiles.SelectedItem = prepared.Profiles[0];
-        }
-        catch (Exception error) { MessageBox.Show(this, error.Message, "Préparation WSL"); }
-        finally { button.Enabled = true; }
+        preparation.Text = "Préparation de l’espace WSL…";
+        var prepared = await WslProvisioner.PrepareAsync(dataDirectory, string.IsNullOrWhiteSpace(distribution.Text) ? "Ubuntu-24.04" : distribution.Text,
+            string.IsNullOrWhiteSpace(user.Text) ? "sowapps" : user.Text, CancellationToken.None);
+        if (IsDisposed) return;
+        profiles.Items.AddRange(prepared.Profiles);
+        profiles.SelectedItem = prepared.Profiles[0];
+        preparation.Text = "Espace WSL préparé.";
     }
 
     private string SelectedClient => (kind.SelectedItem as ClientOption)?.Id ?? "command";

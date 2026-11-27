@@ -24,7 +24,8 @@ internal sealed partial class ProjectWindow : Form
     private IReadOnlyList<EndpointDescriptor> descriptors = [];
     private readonly System.Windows.Forms.Timer refresh = new() { Interval = 6000 };
     private readonly CancellationTokenSource lifetime = new();
-    private bool loading, released, settingStartup;
+    private bool released, settingStartup;
+    private readonly SemaphoreSlim reloadGate = new(1, 1);
     private Task? initialization;
     private string? previousPresentation;
     private TechnicalConsoleWindow? console;
@@ -90,10 +91,12 @@ internal sealed partial class ProjectWindow : Form
         Controls.Add(panel); panel.BringToFront();
     }
 
-    internal async Task Reload(bool configurationChanged, bool older = false, Guid? projectId = null)
+    internal async Task Reload(bool configurationChanged, bool older = false, Guid? projectId = null, bool explicitRead = false)
     {
-        if (loading || released || !Presentation.IsReady) return; loading = true;
+        if (released || !Presentation.IsReady) return;
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(lifetime.Token); timeout.CancelAfter(TimeSpan.FromSeconds(12));
+        if (explicitRead) await reloadGate.WaitAsync(timeout.Token);
+        else if (!reloadGate.Wait(0)) return;
         var online = false; string? error = null;
         try
         {
@@ -108,15 +111,16 @@ internal sealed partial class ProjectWindow : Form
                 try { await source.LoadAsync(project, older, timeout.Token); }
                 catch (Exception failure) when (!released) { project.Error = UserMessages.Error(failure); failures.Add(project.Error); }
             }
-            if (activeSession is { } selected && Sessions.FirstOrDefault(item=>item.Id==selected) is { } session) await ReadThread(session,false,timeout.Token);
+            if (activeSession is { } selected && Sessions.FirstOrDefault(item=>item.Id==selected) is { } session) await ReadThread(session,false,timeout.Token,background: true);
             online = failures.Count == 0; error = failures.FirstOrDefault();
         }
         catch (Exception failure) when (!released) { error = UserMessages.Error(failure); }
         catch (OperationCanceledException) when (released) { }
-        finally { loading = false; }
+        finally { reloadGate.Release(); }
         if (released) return;
         observingOnline = online; observingError = error;
         PublishSnapshot(configurationChanged || older);
+        if (explicitRead && !online) throw new RelayException("refresh_failed", error ?? "L’actualisation n’a pas été confirmée.", false);
     }
 
     private void PublishSnapshot(bool force)
