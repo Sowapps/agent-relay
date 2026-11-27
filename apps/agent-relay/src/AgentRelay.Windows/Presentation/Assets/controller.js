@@ -4,21 +4,84 @@
  const $=selector=>document.querySelector(selector),C=window.RelayComponents;
  let data=null,toastTimer;
  const fullOperations=new Map();
- const ui={view:'general',project:null,tab:'summary',filter:'all',period:'all',participant:'',kind:'',state:'',advanced:false,generalFeed:'tasks',taskLimit:15,query:'',messageFilter:'all',detail:null,settingScope:'general',projectChange:null,limit:5,sessionId:null,conversationLimit:30};
+ const ui={view:'general',project:null,tab:'summary',filter:'all',period:'all',participant:'',kind:'',state:'',advanced:false,generalFeed:'tasks',taskLimit:15,query:'',messageFilter:'all',detail:null,settingScope:'general',projectChanges:new Set(),limit:5,sessionId:null,conversationLimit:30};
  ui.cleanup={logs:true,diagnostics:true,busy:false,preview:null,result:null,error:null};
  const R=window.createRelayRenderer(()=>data,()=>ui);
- const host=(action,values={})=>{
-  if(window.simulateProjectReactions?.(action,values,receive))return;
-  if(!window.chrome?.webview){if(action!=='ready')toast('Action native indisponible dans cet aperçu.');return;}
-  window.chrome.webview.postMessage({action,...values});
+ const pending=new Map(),closingMcp=new Set();
+ const byAction={
+  'mark-reviewed':['review','Enregistrement…'], 'operation':['result','Chargement…'],
+  'operation-events':['events','Chargement…'], 'inspect-partial':['partial','Inspection…'],
+  'load-session':['conversation','Chargement…'], 'load-more':['list','Chargement…'], refresh:['refresh','Actualisation…'],
+  'session-control':['session','Modification…'], 'inspect-session':['session','Inspection…'],
+  'interrupt-operation':['session','Interruption demandée…'], 'close-mcp':['mcp','Fermeture demandée…'],
+  'startup-preference':['startup','Modification…'], 'cleanup-analyze':['cleanup','Analyse…'], 'cleanup-execute':['cleanup','Nettoyage…'],
+  'project-state':['project-state','Enregistrement…'], 'project-reactions-read':['reactions','Chargement…'],
+  'project-reactions-save':['reactions','Enregistrement…'], 'edit-projects':['project-editor','Enregistrement…'],
+  'legacy-history':['legacy','Ouverture…']
  };
- function toast(text,operation=null){const element=$('#toast'),message=document.createElement('span');message.className='toast-text';message.textContent=text;element.replaceChildren(message);if(operation)element.insertAdjacentHTML('beforeend',C.button('Voir dans l’historique','history-operation',`data-id="${C.escape(operation.id)}"`,'quiet'));element.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>element.hidden=true,operation?12000:3500);}
+ function actionKey(action,values={}){
+  const rule=byAction[action];if(!rule)return null;
+  const target=action==='interrupt-operation'?data?.operations.find(item=>item.id===values.id)?.session||values.id:values.id||values.project;
+  return rule[0]+':'+(target||'global');
+ }
+ function controlKey(element){
+  const {action,id,project}=element.dataset;
+  const aliases={'session-state':'session-control','rename-session':'session-control','confirm-rename':'session-control',
+   interrupt:'interrupt-operation','confirm-close-mcp':'close-mcp','startup-toggle':'startup-preference','startup-retry':'startup-preference',
+   'confirm-project-state':'project-state','project-state-refresh':'refresh','project-reactions-open':'project-reactions-read',
+   'project-reactions-reload':'project-reactions-read','cleanup-confirm':'cleanup-execute','thread-refresh':'load-session',
+   'thread-more':'load-session','session-thread':'load-session',more:'load-more'};
+  const route=aliases[action]||action;
+  return actionKey(route,{id:id|| (route==='load-session'?ui.sessionId:null),
+   project:project|| (route==='load-more'?ui.project:route.startsWith('project-reactions-')?reactionEditor?.project:null)});
+ }
+ function paintPending(root=document){
+  for(const button of root.querySelectorAll('button[data-action]')){
+   const key=controlKey(button);
+   const job=pending.get(key)|| (key?.startsWith('mcp:')&&closingMcp.has(key.slice(4))?{label:'Fermeture demandée…'}:null);
+   if(job){
+    if(!button.hasAttribute('data-progress'))button.dataset.wasDisabled=String(button.disabled);
+    button.disabled=true;button.dataset.progress=job.label;button.setAttribute('aria-busy',job.unconfirmed?'false':'true');
+   }else if(button.hasAttribute('data-progress')){
+    button.disabled=button.dataset.wasDisabled==='true';delete button.dataset.wasDisabled;
+    delete button.dataset.progress;button.removeAttribute('aria-busy');
+   }
+  }
+  for(const label of root.querySelectorAll('[data-progress-for]')){
+   const button=label.closest('[data-progress-scope]')?.querySelector('button[data-action="'+label.dataset.progressFor+'"]');
+   const text=button?.dataset.progress||'';
+   if(label.textContent!==text)label.textContent=text;
+   label.hidden=!text;
+  }
+  const live=$('#action-progress');
+  if(live){const text=[...pending.values()].map(item=>item.label).join(' · ');if(live.textContent!==text)live.textContent=text;}
+ }
+ const host=(action,values={},whenDone=null)=>{
+  if(!window.chrome?.webview){if(action!=='ready')toast('Action native indisponible dans cet aperçu.');return;}
+  const key=actionKey(action,values);
+  if(key&&pending.has(key))return;
+  const call=key?crypto.randomUUID():null;
+  if(key){pending.set(key,{call,action,values,whenDone,label:byAction[action][1]});paintPending();}
+  try{
+   if(window.simulateProjectReactions?.(action,{...values,call},message=>{
+    receive(message);receive({type:'action-complete',call});
+   }))return;
+   window.chrome.webview.postMessage({action,...values,call});
+  }catch(error){if(key)pending.delete(key);paintPending();toast('Impossible de transmettre l’action.');}
+ };
+ function toast(text,operation=null,verify=false){
+  const element=$('#toast'),message=document.createElement('span');message.className='toast-text';message.textContent=text;element.replaceChildren(message);
+  if(operation)element.insertAdjacentHTML('beforeend',C.button('Voir dans l’historique','history-operation',`data-id="${C.escape(operation.id)}"`,'quiet'));
+  if(verify)element.insertAdjacentHTML('beforeend',C.button('Vérifier l’état','refresh','','quiet'));
+  element.hidden=false;paintPending(element);clearTimeout(toastTimer);toastTimer=setTimeout(()=>element.hidden=true,operation||verify?12000:3500);
+ }
  function renderDetail(){
   const scroll=$('.detail-body')?.scrollTop||0;
   const open=[...document.querySelectorAll('#detail-layer details[open]')].map(el=>el.id).filter(Boolean);
   const layer=$('#detail-layer'),key=ui.detail?ui.detail.type+'|'+ui.detail.id:'';C.patch(layer,R.detail()||'',layer.dataset.detail!==key);layer.dataset.detail=key;
   if($('.detail-body'))$('.detail-body').scrollTop=scroll;
   open.forEach(id=>{const el=document.getElementById(id);if(el)el.open=true;});
+  paintPending(layer);
  }
  function render(){
   if(!data)return;
@@ -40,6 +103,7 @@
    const el=document.getElementById(focusId);el.focus({preventScroll:true});
    if(selection&&el instanceof HTMLInputElement&&['text','search'].includes(el.type))el.setSelectionRange(...selection);
   }
+  paintPending();
  }
  function navigate(view,project=null,tab='summary'){
   if(ui.sessionId)host('stop-session');
@@ -51,7 +115,7 @@
   if(type==='message'&&data.unreadAvailable!==false){const message=data.messages.find(m=>m.id===id);if(message)message.unread=false;render();}else renderDetail();
   if(type==='operation'&&data.operations.find(operation=>operation.id===id)?.previewOnly!==false)host('operation',{id});
  }
- function modal(title,body,buttons){$('#app-modal').innerHTML=`<div class="app-modal-backdrop"><section class="app-modal-card" role="dialog" aria-modal="true" aria-label="${C.escape(title)}"><h2>${C.escape(title)}</h2>${body}<div class="actions">${C.button('Annuler','close-modal','','quiet')}${buttons}</div></section></div>`;}
+ function modal(title,body,buttons){$('#app-modal').innerHTML=`<div class="app-modal-backdrop"><section class="app-modal-card" role="dialog" aria-modal="true" aria-label="${C.escape(title)}"><h2>${C.escape(title)}</h2>${body}<div class="actions">${C.button('Annuler','close-modal','','quiet')}${buttons}</div></section></div>`;paintPending();}
  let reactionEditor=null;
  function reactionModal(){
   const state=reactionEditor,e=C.escape;
@@ -88,7 +152,7 @@
   return session?[session.name,session.workspace,session.participantId].join('\n'):'';
  }
  document.addEventListener('click',event=>{
-  const el=event.target.closest('[data-action]');if(!el||!data)return;
+  const el=event.target.closest('[data-action]');if(!el||!data||el.disabled||pending.has(controlKey(el)))return;
   const {action,id,value}=el.dataset;
   if(action==='project-reactions-open')openReactions(el.dataset.project);
   else if(action==='project-reactions-reload')openReactions(reactionEditor.project);
@@ -109,9 +173,17 @@
   else if(action==='message-filter'){ui.messageFilter=value;render();}
   else if(action==='advanced-filters'){ui.advanced=!ui.advanced;render();}
   else if(['clear-filters','clear-history'].includes(action)){Object.assign(ui,{filter:'all',period:'all',participant:'',kind:'',state:'',query:'',limit:5,messageFilter:'all'});render();}
-  else if(action==='more'){ui.limit+=10;if(window.createRelayViews(()=>data,()=>ui).more(el.dataset.kind||'tasks'))host('load-more',{project:ui.project});render();}
+  else if(action==='more'){
+   const view=$('#app-content').dataset.view,filter=JSON.stringify([ui.period,ui.participant,ui.state,ui.kind,ui.filter,ui.query]);
+   const extend=()=>{if($('#app-content').dataset.view===view&&JSON.stringify([ui.period,ui.participant,ui.state,ui.kind,ui.filter,ui.query])===filter){ui.limit+=10;render();}};
+   if(window.createRelayViews(()=>data,()=>ui).more(el.dataset.kind||'tasks'))host('load-more',{project:ui.project},extend);
+   else extend();
+  }
   else if(action==='session-thread'){const session=data.sessions.find(item=>item.id===id);if(session){navigate('project',session.project,'conversation');ui.sessionId=id;ui.conversationLimit=30;render();host('load-session',{id});}}
-  else if(action==='thread-more'){ui.conversationLimit+=30;if(data.sessionHistory?.[ui.sessionId]?.hasMore)host('load-session',{id:ui.sessionId,older:true});render();}
+  else if(action==='thread-more'){
+   const session=ui.sessionId,extend=()=>{if(ui.sessionId===session){ui.conversationLimit+=30;render();}};
+   if(data.sessionHistory?.[session]?.hasMore)host('load-session',{id:session,older:true},extend);else extend();
+  }
   else if(action==='thread-refresh')host('load-session',{id:ui.sessionId});
   else if(action==='history-operation'){const operation=data.operations.find(item=>item.id===id);if(operation){navigate('project',operation.project,'activity');detail('operation',id);$('#toast').hidden=true;}}
   else if(action==='task-more'){ui.taskLimit+=15;renderDetail();}
@@ -144,12 +216,15 @@
   else if(action==='project-settings'){const project=el.dataset.project||ui.project;if(project)navigate('project',project,'settings');}
   else if(action==='manage-projects'){navigate('settings');ui.settingScope='projects';render();}
   else if(action==='project-state'){
-   const project=data.projects.find(p=>p.id===el.dataset.project);if(!project||ui.projectChange)return;
+   const project=data.projects.find(p=>p.id===el.dataset.project);if(!project||ui.projectChanges.has(project.id))return;
    const archived=project.state==='archived',pending=project.archiveRequested,state=archived||pending?'active':'archived';
    modal(pending?'Annuler l’archivage ?':archived?'Réactiver ce projet ?':'Archiver ce projet ?',`<p><strong>${C.escape(project.name)}</strong></p><p>${pending?'Les nouvelles actions seront de nouveau autorisées selon les permissions existantes. Aucun travail ne sera relancé.':archived?'Le projet réapparaîtra dans la navigation. Aucun travail ni aucune session ne sera relancé.':'Les nouvelles actions seront suspendues immédiatement. Le relais attendra la fin du travail engagé, puis archivera le projet automatiquement. Son historique et ses permissions seront conservés.'}</p>${archived||pending?'':'<p>Un résultat incertain ou une vérification impossible maintiendra la demande en attente avec un diagnostic. Aucune interruption ni approbation automatique. Vous pourrez annuler cette demande.</p>'}`,C.button(pending?'Annuler l’archivage':archived?'Réactiver':'Demander l’archivage','confirm-project-state',`data-project="${C.escape(project.id)}" data-value="${state}" data-expected="${archived?'archived':'active'}" data-pending="${Boolean(pending)}"`,'primary'));
   }
   else if(action==='confirm-project-state'){
-   if(ui.projectChange)return;const current=data.projects.find(p=>p.id===el.dataset.project);if(!current||Boolean(current.archiveRequested)!==(el.dataset.pending==='true')||(current.state||'active')!==el.dataset.expected){modal('Le projet a changé','<p>Son état ou sa demande d’archivage a changé depuis votre ouverture. Actualisez avant de choisir une nouvelle action.</p>',C.button('Actualiser','project-state-refresh','','primary'));return;}ui.projectChange={project:el.dataset.project,state:value,expectedState:el.dataset.expected};$('#app-modal').innerHTML='';render();host('project-state',ui.projectChange);
+   const current=data.projects.find(p=>p.id===el.dataset.project);
+   if(!current||Boolean(current.archiveRequested)!==(el.dataset.pending==='true')||(current.state||'active')!==el.dataset.expected){modal('Le projet a changé','<p>Son état ou sa demande d’archivage a changé depuis votre ouverture. Actualisez avant de choisir une nouvelle action.</p>',C.button('Actualiser','project-state-refresh','','primary'));return;}
+   ui.projectChanges.add(current.id);$('#app-modal').innerHTML='';render();
+   host('project-state',{project:current.id,state:value,expectedState:el.dataset.expected});
   }
   else if(action==='project-state-refresh'){$('#app-modal').innerHTML='';host('refresh');}
   else if(action==='mark-reviewed'){const operation=data.operations.find(item=>item.id===id);if(operation)host('mark-reviewed',{id,project:operation.project,reviewToken:operation.reviewToken});}
@@ -162,7 +237,7 @@
    modal('Renommer la session',`<label for="session-name">Nom de la session</label><input id="session-name"${limit} value="${C.escape(session.name)}">`,C.button('Renommer','confirm-rename',`data-id="${C.escape(id)}"`,'primary'));
    $('#session-name').focus();
   }
-  else if(action==='confirm-rename'){const name=$('#session-name').value.trim();if(name&&!ui.renamePending){ui.renamePending=true;host('session-control',{id,control:'rename:'+name});}}
+  else if(action==='confirm-rename'){const name=$('#session-name').value.trim();if(name)host('session-control',{id,control:'rename:'+name});}
   else if(action==='session-state'){const session=data.sessions.find(s=>s.id===id);if(session)host('session-control',{id,control:session.state==='closed'?'reopen':'close'});}
   else if(action==='interrupt')host('interrupt-operation',{id});
   else if(action==='inspect-session')host('inspect-session',{id});
@@ -196,6 +271,28 @@
  });
  function receive(message){
   if(!message||typeof message!=='object')return;
+  if(message.type==='action-complete'){
+   for(const [key,job] of pending)if(job.call===message.call){
+    if(message.unconfirmed)pending.set(key,{...job,call:null,label:'État à vérifier',unconfirmed:true});
+    else pending.delete(key);
+    if(job.action==='project-state'){ui.projectChanges.delete(job.values.project);render();}
+    const rename=job.action==='session-control'&&job.values.control?.startsWith('rename:');
+    const dialog=rename&&$('#app-modal [data-action=confirm-rename]')?.dataset.id===job.values.id;
+    if(message.success!==false){
+     if(job.action==='refresh')for(const [target,retained] of pending)if(retained.unconfirmed)pending.delete(target);
+     if(dialog)$('#app-modal').innerHTML='';
+     job.whenDone?.();
+    }else if(message.error){
+     if(dialog){
+      const alert=document.createElement('p');alert.setAttribute('role','alert');alert.textContent=message.error;
+      const card=$('.app-modal-card');card.querySelector('[role=alert]')?.remove();card.insertBefore(alert,card.querySelector('.actions'));
+     }else toast(message.error,null,message.unconfirmed===true);
+    }
+    paintPending();break;
+   }
+   return;
+  }
+  if(message.type==='mcp-close-requested'){closingMcp.add(message.id);paintPending();return;}
   if(message.type==='project-reactions-read'||message.type==='project-reactions-save'){
    const state=reactionEditor;
    if(!state||state.project!==message.project||!$('#project-reaction-editor'))return;
@@ -215,6 +312,11 @@
   if(message.type==='snapshot'){
    if(message.data?.schemaVersion!==1)return;
    const next=message.data;
+   const connections=[...(next.mcpConnections||[]),...(next.mcpTransports?.connections||[])];
+   for(const id of closingMcp){
+    const connection=connections.find(item=>item.instanceId===id);
+    if(!connection||['closed','offline','closing'].includes(connection.state))closingMcp.delete(id);
+   }
    next.operations=next.operations.map(operation=>{const full=fullOperations.get(operation.id);return full&&full.updatedAt===operation.updatedAt&&full.state===operation.state?{...full,reviewed:operation.reviewed,reviewToken:operation.reviewToken}:operation;});
    for(const id of fullOperations.keys())if(!next.operations.some(operation=>operation.id===id))fullOperations.delete(id);
    if(ui.project&&!next.projects.some(p=>p.id===ui.project))Object.assign(ui,{view:'general',project:null,detail:null});
@@ -223,17 +325,19 @@
   }else if(message.type==='startup-preference'){
    ui.startupPending=false;ui.startupError=message.data?.error||null;data.startup=message.data;data.startupEnabled=message.data?.enabled===true;render();if(ui.view==='settings'&&ui.settingScope==='general')$('#startup-switch')?.focus({preventScroll:true});
   }else if(message.type==='project-state'){
-   ui.projectChange=null;const project=data?.projects.find(p=>p.id===message.project);if(project&&message.state){project.state=message.state;project.archiveRequested=Boolean(message.archiveRequested);}render();
+   ui.projectChanges.delete(message.project);const project=data?.projects.find(p=>p.id===message.project);if(project&&message.state){project.state=message.state;project.archiveRequested=Boolean(message.archiveRequested);}render();
    if(message.error)modal('Changement d’état non confirmé',`<p>${C.escape(message.error)}</p><p>Consultez l’état actuel avant de réessayer.</p>${message.diagnostic?`<details class="advanced"><summary>Détails techniques</summary><pre>${C.escape(message.diagnostic)}</pre></details>`:''}`,C.button('Actualiser','project-state-refresh','','primary'));
    else toast(message.archiveCancelled?'Archivage annulé. Les nouvelles actions sont de nouveau autorisées selon les permissions existantes.':message.archiveRequested?'Archivage demandé. Les nouveaux travaux sont suspendus pendant la fin du travail engagé.':message.state==='archived'?'Projet archivé. Son historique reste accessible dans Réglages → Projets.':'Projet réactivé. Aucun travail n’a été relancé.');
   }else if(message.type==='action-result'){
-   ui.renamePending=false;if(message.success){$('#app-modal').innerHTML='';toast(message.text||'Action confirmée.');}else{const card=$('.app-modal-card');if(card){let alert=card.querySelector('[role=alert]');if(!alert){alert=document.createElement('p');alert.setAttribute('role','alert');card.insertBefore(alert,card.querySelector('.actions'));}alert.textContent=message.text;}else modal('Action non confirmée',`<p>${C.escape(message.text)}</p><p>Aucun nouvel essai automatique. Consultez l’état actuel avant de poursuivre.</p>` ,C.button('Actualiser','project-state-refresh','','primary'));}
+   if(message.success)toast(message.text||'Action confirmée.');else toast(message.text||'Action non confirmée. Actualisez l’état avant de réessayer.');
   }else if(message.type==='operation'){
    const index=data?.operations.findIndex(o=>o.id===message.data?.id)??-1;
    if(index>=0){fullOperations.set(message.data.id,message.data);data.operations[index]=message.data;if(ui.detail?.type==='operation'&&ui.detail.id===message.data.id)renderDetail();}
   }else if(message.type==='operation-review'){const operation=data?.operations.find(item=>item.id===message.id&&item.reviewToken===message.reviewToken);if(operation){operation.reviewed=true;toast('Marqué comme examiné.',operation);const full=fullOperations.get(operation.id);if(full)full.reviewed=true;render();}}else if(message.type==='operation-diagnostic'){const operation=data?.operations.find(item=>item.id===message.id);if(operation){operation.diagnostic=message.text;if(ui.detail?.type==='operation'&&ui.detail.id===message.id)renderDetail();}}else if(message.type==='notice'&&!message.text?.startsWith('Marqué comme examiné.'))toast(message.text||'Action terminée.');
  }
  try{document.body.classList.toggle('compact-rows',localStorage.getItem('compact-rows')==='true');}catch{}
+ const progress=document.createElement('div');
+ progress.id='action-progress';progress.setAttribute('role','status');document.body.append(progress);
  if(window.chrome?.webview)window.chrome.webview.addEventListener('message',event=>receive(event.data));
  window.RelayUI={receive,route:parameters=>{
   Object.assign(ui,{generalFeed:parameters.feed||'tasks',advanced:false,messageFilter:'all'});

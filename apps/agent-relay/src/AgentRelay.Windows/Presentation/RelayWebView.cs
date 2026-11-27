@@ -65,6 +65,13 @@ internal sealed class RelayWebView : UserControl
 
     // Explicit verification surface; no desktop/window discovery or input is involved.
     internal Task<string> EvaluateForVerificationAsync(string script) => browser.CoreWebView2.ExecuteScriptAsync(script);
+    internal Task<string> VerificationKeyAsync(string type, string key, string code, int virtualKey)
+    {
+        browser.Focus();
+        var text = type == "keyDown" ? key == "Enter" ? "\r" : key : "";
+        return browser.CoreWebView2.CallDevToolsProtocolMethodAsync("Input.dispatchKeyEvent", JsonSerializer.Serialize(
+            new { type, key, code, text, unmodifiedText = text, windowsVirtualKeyCode = virtualKey, nativeVirtualKeyCode = virtualKey }));
+    }
     internal async Task CaptureAsync(string path)
     { await using var stream = File.Create(path); await browser.CoreWebView2.CapturePreviewAsync(CoreWebView2CapturePreviewImageFormat.Png, stream); }
 

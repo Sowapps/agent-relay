@@ -63,3 +63,11 @@ select:not(:disabled):hover{background-color:#f8faff}
 
 .tabs{padding:6px 5px 0;scroll-padding:6px}
 .project-directory + .actions{margin-top:14px;margin-bottom:12px}
+.btn[data-progress],.icon-button[data-progress]{cursor:wait;opacity:.75}
+button[data-progress]:not(.icon-button)::after{content:attr(data-progress);display:inline-block;margin-inline-start:6px;font-weight:600}
+.icon-button[data-progress]>.icon{display:none}
+.icon-button[data-progress]::after{content:'';display:inline-block;inline-size:12px;block-size:12px;border:2px solid currentColor;border-radius:50%;border-inline-end-color:transparent}
+.icon-button[aria-busy='false'][data-progress]>.icon{display:inline-block}
+.icon-button[aria-busy='false'][data-progress]::after{content:none}
+.attention-box .action-progress-label,.action-progress-label{color:var(--ink);font-weight:600;overflow-wrap:anywhere}
+#action-progress{position:fixed;inline-size:1px;block-size:1px;overflow:hidden;clip-path:inset(50%)}

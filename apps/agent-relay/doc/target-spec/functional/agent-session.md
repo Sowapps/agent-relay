@@ -66,4 +66,8 @@ A human can navigate from a relayed project to its tasks, activity, messages and
 
 History state filters are distinct from period/participant/text filters. Default all-history navigation and clear visible/matching/loaded counts make retained work discoverable. Empty filtered views explain the active restrictions and offer reset. Clickable controls provide perceptible hover and keyboard focus feedback.
 
+### Availability and feedback for actions
+
+Agent Relay enables actions only when their prerequisites are met. When an action is in progress, every equivalent control for the same target indicates progress and prevents repeated activation, including by keyboard. Independent actions remain available. Background refresh and navigation preserve the pending state. The final response identifies the affected action and any failure or uncertainty so the user can recover. This applies to the main interface and its native windows, including the technical console (evidence `2026-11-27-ui-action-availability-and-progress`).
+
 Marking an alert as examined changes monitoring attention only: its actual outcome remains retrievable in project activity. The action explains where to find it and offers a direct history path. A later operation revision becomes attention-worthy again. Review never grants native approval or implies resolution, rollback or replay.
